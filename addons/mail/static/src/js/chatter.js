@@ -91,12 +91,24 @@ var Chatter = Widget.extend({
      */
     start: function () {
         this._$topbar = this.$('.o_chatter_topbar');
+        if(!this._disableAttachmentBox) {
+            this.$('.o_topbar_right_area').append(QWeb.render('mail.chatter.Attachment.Button', {
+                displayCounter: !!this.fields.thread,
+                count: this.record.data.message_attachment_count || 0,
+            }));
+        }
         // render and append the buttons
         this._$topbar.prepend(this._renderButtons());
         // start and append the widgets
         var fieldDefs = _.invoke(this.fields, 'appendTo', $('<div>'));
         var def = this._dp.add(Promise.all(fieldDefs));
-        this._render(def).then(this._updateMentionSuggestions.bind(this));
+        this._render(def)
+            .then(this._updateMentionSuggestions.bind(this))
+            .then(() => {
+                if (this.openAttachments) {
+                    this._fetchAttachments().then(() => this._openAttachmentBox());
+                }
+            });
 
         return this._super.apply(this, arguments);
     },
@@ -382,9 +394,6 @@ var Chatter = Widget.extend({
             // disable widgets in create mode, otherwise enable
             self._isCreateMode ? self._disableChatter() : self._enableChatter();
             $spinner.remove();
-            if (self.openAttachments) {
-                self._onClickAttachmentButton();
-            }
         };
 
         return def.then(function () {
@@ -415,9 +424,6 @@ var Chatter = Widget.extend({
             logNoteButton: this.hasLogButton,
             scheduleActivityButton: !!this.fields.activity,
             isMobile: config.device.isMobile,
-            disableAttachmentBox: this._disableAttachmentBox,
-            displayCounter: !!this.fields.thread,
-            count: this.record.data.message_attachment_count || 0,
         });
     },
     /**

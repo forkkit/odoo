@@ -12,9 +12,11 @@ class TestPoSBasicConfig(TestPoSCommon):
     def setUp(self):
         super(TestPoSBasicConfig, self).setUp()
         self.config = self.basic_config
+        self.product0 = self.create_product('Product 0', self.categ_basic, 0.0, 0.0)
         self.product1 = self.create_product('Product 1', self.categ_basic, 10.0, 5)
         self.product2 = self.create_product('Product 2', self.categ_basic, 20.0, 10)
         self.product3 = self.create_product('Product 3', self.categ_basic, 30.0, 15)
+        self.product4 = self.create_product('Product_4', self.categ_basic, 9.96, 4.98)
         self.adjust_inventory([self.product1, self.product2, self.product3], [100, 50, 50])
 
     def test_orders_no_invoiced(self):
@@ -228,8 +230,22 @@ class TestPoSBasicConfig(TestPoSCommon):
         self.assertAlmostEqual(invoice.amount_total, 130, msg='Amount total should be 130. Product is untaxed.')
         invoice_receivable_line = invoice.line_ids.filtered(lambda line: line.account_id == self.receivable_account)
 
+        # check state of orders before validating the session.
+        self.assertEqual('invoiced', invoiced_order.state, msg="state should be 'invoiced' for invoiced orders.")
+        uninvoiced_orders = self.pos_session.order_ids - invoiced_order
+        self.assertTrue(
+            all([order.state == 'paid' for order in uninvoiced_orders]),
+            msg="state should be 'paid' for uninvoiced orders before validating the session."
+        )
+
         # close the session
         self.pos_session.action_pos_session_validate()
+
+        # check state of orders after validating the session.
+        self.assertTrue(
+            all([order.state == 'done' for order in uninvoiced_orders]),
+            msg="State should be 'done' for uninvoiced orders after validating the session."
+        )
 
         # check values after the session is closed
         session_move = self.pos_session.move_id
@@ -256,6 +272,21 @@ class TestPoSBasicConfig(TestPoSCommon):
 
         # matching number of the receivable lines should be the same
         self.assertEqual(receivable_line.full_reconcile_id, invoice_receivable_line.full_reconcile_id)
+
+    def test_orders_with_zero_valued_invoiced(self):
+        """One invoiced order but with zero receivable line balance."""
+
+        self.open_new_session()
+        orders = [self.create_ui_order_data([(self.product0, 1)], payments=[(self.bank_pm, 0)], customer=self.customer, is_invoiced=True)]
+        self.env['pos.order'].create_from_ui(orders)
+        self.pos_session.action_pos_session_validate()
+
+        invoice = self.pos_session.order_ids.account_move
+        invoice_receivable_line = invoice.line_ids.filtered(lambda line: line.account_id == self.receivable_account)
+        receivable_line = self.pos_session.move_id.line_ids.filtered(lambda line: line.account_id == self.receivable_account)
+
+        self.assertTrue(invoice_receivable_line.reconciled)
+        self.assertTrue(receivable_line.reconciled)
 
     def test_return_order(self):
         """ Test return order
@@ -374,7 +405,7 @@ class TestPoSBasicConfig(TestPoSCommon):
         session_move = self.pos_session.move_id
 
         sale_lines = session_move.line_ids.filtered(lambda line: line.account_id == self.sale_account)
-        self.assertAlmostEqual(len(sale_lines), 2, 'There should be lines for both sales and refund.')
+        self.assertEqual(len(sale_lines), 2, msg='There should be lines for both sales and refund.')
         self.assertAlmostEqual(sum(sale_lines.mapped('balance')), -110.0)
 
         receivable_line_bank = session_move.line_ids.filtered(lambda line: self.bank_pm.name in line.name)

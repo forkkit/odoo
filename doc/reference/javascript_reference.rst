@@ -1213,6 +1213,10 @@ The notification system in Odoo is designed with the following components:
   destroy notifications whenever a request is done (with a custom_event). Note
   that the web client is a service provider.
 
+- a client action *display_notification*: this allows to trigger the display
+  of a notification from python (e.g. in the method called when the user
+  clicked on a button of type object).
+
 - two helper functions in *ServiceMixin*: *do_notify* and *do_warn*
 
 
@@ -1260,6 +1264,21 @@ Here are two examples on how to use these methods:
 
     this.do_warn(_t("Error"), _t("Filter name is required."));
 
+Here an example in python:
+
+.. code-block:: python
+
+    # note that we call _(string) on the text to make sure it is properly translated.
+    def show_notification(self):
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Success'),
+                'message': _('Your signature request has been sent.'),
+                'sticky': False,
+            }
+        }
 
 Systray
 =======
@@ -2112,6 +2131,12 @@ Relational fields
 
         <field name="category_id" widget="many2many_tags" options="{'color_field': 'color'}"/>
 
+    - no_edit_color: set to True to remove the possibility to change the color of the tags (default: False).
+
+    .. code-block:: xml
+
+        <field name="category_id" widget="many2many_tags" options="{'color_field': 'color', 'no_edit_color': True}"/>
+
 - form.many2many_tags (FormFieldMany2ManyTags)
     Specialization of many2many_tags widget for form views. It has some extra
     code to allow editing the color of a tag.
@@ -2193,16 +2218,12 @@ in the action registry.
 
     .. code-block:: javascript
 
-        var ControlPanelMixin = require('web.ControlPanelMixin');
         var AbstractAction = require('web.AbstractAction');
 
-        var ClientAction = AbstractAction.extend(ControlPanelMixin, {
+        var ClientAction = AbstractAction.extend({
+            hasControlPanel: true,
             ...
         });
-
-    Do not add the controlpanel mixin if you do not need it.  Note that some
-    code is needed to interact with the control panel (via the
-    ``update_control_panel`` method given by the mixin).
 
 - Registering the client action:
     As usual, we need to make the web client aware of the mapping between
@@ -2227,51 +2248,66 @@ in the action registry.
         </record>
 
 
-Using the control panel mixin
------------------------------
+Using the control panel
+-----------------------
 
-By default, the AbstractAction class does not include the control panel mixin.
-This means that a client action does not display a control panel.  In order to
+By default, the client action does not display a control panel.  In order to
 do that, several steps should be done.
 
-- add ControlPanelMixin in the widget:
+- Set the *hasControlPanel* to *true*.
+    In the widget code:
 
     .. code-block:: javascript
 
-        var ControlPanelMixin = require('web.ControlPanelMixin');
-
-        var MyClientAction = AbstractAction.extend(ControlPanelMixin, {
+        var MyClientAction = AbstractAction.extend({
+            hasControlPanel: true,
+            loadControlPanel: true, // default: false
             ...
         });
 
-- call the method *update_control_panel* whenever we need to update the control
-  panel. For example:
+    .. warning:: 
+        when the ``loadControlPanel`` is set to true, the client action will automatically get the content of a search view or a control panel view. 
+        In this case, a model name should be specified like this:
+        
+        .. code-block:: javascript
+
+            init: function (parent, action, options) {
+                ...
+                this.controlPanelParams.modelName = 'model.name';
+                ...
+            }
+
+- Call the method *updateControlPanel* whenever we need to update the control panel.
+    For example:
 
     .. code-block:: javascript
 
-        var SomeClientAction = Widget.extend(ControlPanelMixin, {
+        var SomeClientAction = Widget.extend({
+            hasControlPanel: true,
             ...
             start: function () {
                 this._renderButtons();
-                this._updateControlPanel();
+                this._update_control_panel();
                 ...
             },
             do_show: function () {
                  ...
-                 this._updateControlPanel();
+                 this._update_control_panel();
             },
             _renderButtons: function () {
                 this.$buttons = $(QWeb.render('SomeTemplate.Buttons'));
                 this.$buttons.on('click', ...);
             },
-            _updateControlPanel: function () {
-                this.update_control_panel({
+            _update_control_panel: function () {
+                this.updateControlPanel({
                     cp_content: {
                        $buttons: this.$buttons,
                     },
-             });
+                });
+            }
 
-For more information, look into the *control_panel.js* file.
+The ``updateControlPanel`` is the main method to customize the content in controlpanel. 
+For more information, look into the `control_panel_renderer.js <https://github.com/odoo/odoo/blob/13.0/addons/web/static/src/js/views/control_panel/control_panel_renderer.js#L130>`_ file.
 
 .. _.appendTo():
     https://api.jquery.com/appendTo/

@@ -93,6 +93,7 @@ class ScaleReadOldRoute(http.Controller):
 
 class ScaleDriver(SerialDriver):
     """Abstract base class for scale drivers."""
+    last_sent_value = None
 
     def __init__(self, device):
         self._device_type = 'scale'
@@ -145,6 +146,7 @@ class ScaleDriver(SerialDriver):
         """Reads the scale current weight value and pushes it to the frontend."""
 
         self._read_weight()
+        self.last_sent_value = self.data['value']
         event_manager.device_changed(self)
 
     def _set_zero_action(self, data):
@@ -183,10 +185,11 @@ class ScaleDriver(SerialDriver):
         self._connection.write(protocol.measureCommand + protocol.commandTerminator)
         answer = self._get_raw_response(self._connection)
         match = re.search(self._protocol.measureRegexp, answer)
-        self.data = {
-            'value': float(match.group(1)) if match else None,
-            'status': self._status
-        }
+        if match:
+            self.data = {
+                'value': float(match.group(1)),
+                'status': self._status
+            }
 
     # Ensures compatibility with older versions of Odoo
     def _scale_read_old_route(self):
@@ -200,13 +203,18 @@ class ScaleDriver(SerialDriver):
 
         with self._device_lock:
             self._read_weight()
-            if self.data['value'] is not None or self._status['status'] == self.STATUS_ERROR:
+            if self.data['value'] != self.last_sent_value or self._status['status'] == self.STATUS_ERROR:
+                self.last_sent_value = self.data['value']
                 event_manager.device_changed(self)
 
 
 class Toledo8217Driver(ScaleDriver):
     """Driver for the Toldedo 8217 serial scale."""
     _protocol = Toledo8217Protocol
+
+    def __init__(self, device):
+        super().__init__(device)
+        self._device_manufacturer = 'Toledo'
 
     @classmethod
     def supported(cls, device):
@@ -245,6 +253,7 @@ class AdamEquipmentDriver(ScaleDriver):
         super().__init__(device)
         self._is_reading = False
         self._last_weight_time = 0
+        self._device_manufacturer = 'Adam'
 
     def _check_last_weight_time(self):
         """The ADAM doesn't make the difference between a value of 0 and "the same value as last time":
@@ -269,7 +278,8 @@ class AdamEquipmentDriver(ScaleDriver):
             with self._device_lock:
                 self._read_weight()
                 self._check_last_weight_time()
-                if self.data['value'] is not None or self._status['status'] == self.STATUS_ERROR:
+                if self.data['value'] != self.last_sent_value or self._status['status'] == self.STATUS_ERROR:
+                    self.last_sent_value = self.data['value']
                     event_manager.device_changed(self)
         else:
             time.sleep(0.5)

@@ -3,6 +3,7 @@
 
 from datetime import datetime
 from uuid import uuid4
+import pytz
 
 from odoo import api, fields, models, _
 from odoo.exceptions import ValidationError, UserError
@@ -88,7 +89,7 @@ class PosConfig(models.Model):
         return self.env['pos.payment.method'].search([('split_transactions', '=', False), ('company_id', '=', self.env.company.id)])
 
     def _default_pricelist(self):
-        return self.env['product.pricelist'].search([('currency_id', '=', self.env.company.currency_id.id)], limit=1)
+        return self.env['product.pricelist'].search([('company_id', 'in', (False, self.env.company.id)), ('currency_id', '=', self.env.company.currency_id.id)], limit=1)
 
     def _get_group_pos_manager(self):
         return self.env.ref('point_of_sale.group_pos_manager')
@@ -171,6 +172,12 @@ class PosConfig(models.Model):
         help="The pricelist used if no customer is selected or if the customer has no Sale Pricelist configured.")
     available_pricelist_ids = fields.Many2many('product.pricelist', string='Available Pricelists', default=_default_pricelist,
         help="Make several pricelists available in the Point of Sale. You can also apply a pricelist to specific customers from their contact form (in Sales tab). To be valid, this pricelist must be listed here as an available pricelist. Otherwise the default pricelist will apply.")
+    allowed_pricelist_ids = fields.Many2many(
+        'product.pricelist',
+        string='Allowed Pricelists',
+        compute='_compute_allowed_pricelist_ids',
+        help='This is a technical field used for the domain of pricelist_id.',
+    )
     company_id = fields.Many2one('res.company', string='Company', required=True, default=lambda self: self.env.company)
     barcode_nomenclature_id = fields.Many2one('barcode.nomenclature', string='Barcode Nomenclature',
         help='Defines what kind of barcodes are available and how they are assigned to products, customers and cashiers.',
@@ -208,6 +215,14 @@ class PosConfig(models.Model):
     company_has_template = fields.Boolean(string="Company has chart of accounts", compute="_compute_company_has_template")
     current_user_id = fields.Many2one('res.users', string='Current Session Responsible', compute='_compute_current_session_user')
     other_devices = fields.Boolean(string="Other Devices", help="Connect devices to your PoS without an IoT Box.")
+
+    @api.depends('use_pricelist', 'available_pricelist_ids')
+    def _compute_allowed_pricelist_ids(self):
+        for config in self:
+            if config.use_pricelist:
+                config.allowed_pricelist_ids = config.available_pricelist_ids.ids
+            else:
+                config.allowed_pricelist_ids = self.env['product.pricelist'].search([]).ids
 
     @api.depends('company_id')
     def _compute_company_has_template(self):
@@ -250,7 +265,8 @@ class PosConfig(models.Model):
                 ['cash_register_balance_end_real', 'stop_at', 'cash_register_id'],
                 order="stop_at desc", limit=1)
             if session:
-                pos_config.last_session_closing_date = session[0]['stop_at'].date()
+                timezone = pytz.timezone(self._context.get('tz') or self.env.user.tz or 'UTC')
+                pos_config.last_session_closing_date = session[0]['stop_at'].astimezone(timezone).date()
                 if session[0]['cash_register_id']:
                     pos_config.last_session_closing_cash = session[0]['cash_register_balance_end_real']
                     pos_config.last_session_closing_cashbox = self.env['account.bank.statement'].browse(session[0]['cash_register_id'][0]).cashbox_end_id
@@ -308,10 +324,11 @@ class PosConfig(models.Model):
         if self.env['pos.payment.method'].search_count([('id', 'in', self.payment_method_ids.ids), ('company_id', '!=', self.company_id.id)]):
             raise ValidationError(_("The method payments and the point of sale must belong to the same company."))
 
-    @api.constrains('pricelist_id', 'available_pricelist_ids', 'journal_id', 'invoice_journal_id', 'payment_method_ids')
+    @api.constrains('pricelist_id', 'use_pricelist', 'available_pricelist_ids', 'journal_id', 'invoice_journal_id', 'payment_method_ids')
     def _check_currencies(self):
-        if self.pricelist_id not in self.available_pricelist_ids:
-            raise ValidationError(_("The default pricelist must be included in the available pricelists."))
+        for config in self:
+            if config.use_pricelist and config.pricelist_id not in config.available_pricelist_ids:
+                raise ValidationError(_("The default pricelist must be included in the available pricelists."))
         if any(self.available_pricelist_ids.mapped(lambda pricelist: pricelist.currency_id != self.currency_id)):
             raise ValidationError(_("All available pricelists must be in the same currency as the company or"
                                     " as the Sales Journal set on this point of sale if you use"
@@ -324,6 +341,20 @@ class PosConfig(models.Model):
                 .mapped(lambda pm: self.currency_id not in (self.company_id.currency_id | pm.cash_journal_id.currency_id))
         ):
             raise ValidationError(_("All payment methods must be in the same currency as the Sales Journal or the company currency if that is not set."))
+
+    @api.constrains('payment_method_ids')
+    def _check_payment_method_receivable_accounts(self):
+        # This is normally not supposed to happen to have a payment method without a receivable account set,
+        # as this is a required field. However, it happens the receivable account cannot be found during upgrades
+        # and this is a bommer to block the upgrade for that point, given the user can correct this by himself,
+        # without requiring a manual intervention from our upgrade support.
+        # However, this must be ensured this receivable is well set before opening a POS session.
+        invalid_payment_methods = self.payment_method_ids.filtered(lambda method: not method.receivable_account_id)
+        if invalid_payment_methods:
+            method_names = ", ".join(method.name for method in invalid_payment_methods)
+            raise ValidationError(
+                _("You must configure an intermediary account for the payment methods: %s.") % method_names
+            )
 
     @api.constrains('company_id', 'available_pricelist_ids')
     def _check_companies(self):
@@ -443,10 +474,11 @@ class PosConfig(models.Model):
         return result
 
     def unlink(self):
-        for pos_config in self.filtered(lambda pos_config: pos_config.sequence_id or pos_config.sequence_line_id):
-            pos_config.sequence_id.unlink()
-            pos_config.sequence_line_id.unlink()
-        return super(PosConfig, self).unlink()
+        # Delete the pos.config records first then delete the sequences linked to them
+        sequences_to_delete = self.sequence_id | self.sequence_line_id
+        res = super(PosConfig, self).unlink()
+        sequences_to_delete.unlink()
+        return res
 
     def _set_fiscal_position(self):
         for config in self:
@@ -516,13 +548,11 @@ class PosConfig(models.Model):
         """
         self.ensure_one()
         if not self.current_session_id:
-            if not self.company_has_template:
-                raise UserError(_("A Chart of Accounts is not yet installed in your current company. Please install a "
-                                  "Chart of Accounts through the Invoicing/Accounting settings before launching a PoS session." ))
             self._check_company_journal()
             self._check_company_invoice_journal()
             self._check_company_payment()
             self._check_currencies()
+            self._check_payment_method_receivable_accounts()
             self.env['pos.session'].create({
                 'user_id': self.env.uid,
                 'config_id': self.id

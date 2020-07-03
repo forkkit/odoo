@@ -5,6 +5,7 @@ from odoo import api, fields, models, _
 from odoo.exceptions import UserError, ValidationError
 from odoo.osv import expression
 from odoo.tools import float_compare, float_is_zero
+from odoo.addons.base.models.ir_model import MODULE_UNINSTALL_FLAG
 
 
 class Inventory(models.Model):
@@ -74,7 +75,8 @@ class Inventory(models.Model):
 
     def unlink(self):
         for inventory in self:
-            if inventory.state not in ('draft', 'cancel'):
+            if (inventory.state not in ('draft', 'cancel')
+               and not self.env.context.get(MODULE_UNINSTALL_FLAG, False)):
                 raise UserError(_('You can only delete a draft inventory adjustment. If the inventory adjustment is not done, you can cancel it.'))
         return super(Inventory, self).unlink()
 
@@ -121,13 +123,14 @@ class Inventory(models.Model):
         # as they will be moved to inventory loss, and other quants will be created to the encoded quant location. This is a normal behavior
         # as quants cannot be reuse from inventory location (users can still manually move the products before/after the inventory if they want).
         self.mapped('move_ids').filtered(lambda move: move.state != 'done')._action_done()
+        return True
 
     def action_check(self):
         """ Checks the inventory and computes the stock move to do """
         # tde todo: clean after _generate_moves
         for inventory in self.filtered(lambda x: x.state not in ('done','cancel')):
             # first remove the existing stock moves linked to this inventory
-            inventory.mapped('move_ids').unlink()
+            inventory.with_context(prefetch_fields=False).mapped('move_ids').unlink()
             inventory.line_ids._generate_moves()
 
     def action_cancel_draft(self):
@@ -210,7 +213,7 @@ class Inventory(models.Model):
             locations = self.env['stock.location'].search([('id', 'child_of', self.location_ids.ids)])
         else:
             locations = self.env['stock.location'].search([('company_id', '=', self.company_id.id), ('usage', 'in', ['internal', 'transit'])])
-        domain = ' location_id in %s AND quantity != 0 AND active = TRUE'
+        domain = ' sq.location_id in %s AND sq.quantity != 0 AND pp.active'
         args = (tuple(locations.ids),)
 
         vals = []
@@ -220,20 +223,20 @@ class Inventory(models.Model):
 
         # If inventory by company
         if self.company_id:
-            domain += ' AND company_id = %s'
+            domain += ' AND sq.company_id = %s'
             args += (self.company_id.id,)
         if self.product_ids:
-            domain += ' AND product_id in %s'
+            domain += ' AND sq.product_id in %s'
             args += (tuple(self.product_ids.ids),)
 
         self.env['stock.quant'].flush(['company_id', 'product_id', 'quantity', 'location_id', 'lot_id', 'package_id', 'owner_id'])
         self.env['product.product'].flush(['active'])
-        self.env.cr.execute("""SELECT product_id, sum(quantity) as product_qty, location_id, lot_id as prod_lot_id, package_id, owner_id as partner_id
-            FROM stock_quant
-            LEFT JOIN product_product
-            ON product_product.id = stock_quant.product_id
+        self.env.cr.execute("""SELECT sq.product_id, sum(sq.quantity) as product_qty, sq.location_id, sq.lot_id as prod_lot_id, sq.package_id, sq.owner_id as partner_id
+            FROM stock_quant sq
+            LEFT JOIN product_product pp
+            ON pp.id = sq.product_id
             WHERE %s
-            GROUP BY product_id, location_id, lot_id, package_id, partner_id """ % domain, args)
+            GROUP BY sq.product_id, sq.location_id, sq.lot_id, sq.package_id, sq.owner_id """ % domain, args)
 
         for product_data in self.env.cr.dictfetchall():
             product_data['company_id'] = self.company_id.id

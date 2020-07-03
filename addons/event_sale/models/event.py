@@ -133,6 +133,7 @@ class EventTicket(models.Model):
                         WHERE event_ticket_id IN %s AND state IN ('draft', 'open', 'done')
                         GROUP BY event_ticket_id, state
                     """
+            self.env['event.registration'].flush(['event_id', 'event_ticket_id', 'state'])
             self.env.cr.execute(query, (tuple(self.ids),))
             for event_ticket_id, state, num in self.env.cr.fetchall():
                 ticket = self.browse(event_ticket_id)
@@ -249,7 +250,7 @@ class EventRegistration(models.Model):
         order_line = self.sale_order_line_id.sudo()
         if not order or float_is_zero(order_line.price_total, precision_digits=order.currency_id.rounding):
             payment_status = _('Free')
-        elif not order.invoice_ids or any(invoice.state != 'paid' for invoice in order.invoice_ids):
+        elif not order.invoice_ids or any(invoice.invoice_payment_state != 'paid' for invoice in order.invoice_ids):
             payment_status = _('To pay')
             res['alert'] = _('The registration must be paid')
         else:

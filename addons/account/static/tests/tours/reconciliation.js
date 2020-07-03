@@ -4,6 +4,7 @@ odoo.define('account.tour_bank_statement_reconciliation', function(require) {
 var core = require('web.core');
 var rpc = require('web.rpc');
 var Tour = require('web_tour.tour');
+var currentYear = new Date().getFullYear();
 
 Tour.register('bank_statement_reconciliation', {
         test: true,
@@ -24,6 +25,10 @@ Tour.register('bank_statement_reconciliation', {
             content: "open the 4th line in match_rp mode to test the partial reconciliation",
             extra_trigger: '.o_reconciliation_line:first[data-mode="match_rp"]',
             trigger: '.o_reconciliation_line:nth-child(4) .cell_label:contains("First")'
+        },
+        {
+            content: "select the right line to match",
+            trigger: '.o_reconciliation_line:nth-child(4) .o_notebook .cell_label:contains("' + currentYear + '/0001")'
         },
         {
             content: "click on partial reconcile",
@@ -52,7 +57,13 @@ Tour.register('bank_statement_reconciliation', {
         // Test changing the partner
 
         {
+            content: 'open second line',
+            extra_trigger: '.o_reconciliation_line:nth-child(4)[data-mode="match_rp"]',
+            trigger: '.o_reconciliation_line:nth-child(2) .cell_label',
+        },
+        {
             content: "change the partner of the second line",
+            extra_trigger: '.o_reconciliation_line:nth-child(2)[data-mode="match_rp"]',
             trigger: '.o_reconciliation_line:nth-child(2) .o_field_many2one[name="partner_id"] input',
             run: 'text Deco'
         },
@@ -63,24 +74,23 @@ Tour.register('bank_statement_reconciliation', {
         },
         {
             content: "use filter",
-            trigger: '.o_reconciliation_line:nth-child(1) .match .match_controls .filter',
+            trigger: '.o_reconciliation_line:nth-child(2) .match .match_controls .filter',
             run: 'text 4610'
         },
         {
             content: "select a line linked to Deco Addict ",
-            extra_trigger: ".o_reconciliation_line:nth-child(1) .match .line_info_button:last[data-content*='4,610']",
-            trigger: ".o_reconciliation_line:nth-child(1) .match .line_info_button[data-content*='Deco Addict']"
+            trigger: ".o_reconciliation_line:nth-child(2) .match .line_info_button:last[data-content*='4,610'][data-content*='Deco Addict']"
         },
         {
             content: "deselect the line",
-            trigger: '.o_reconciliation_line:nth-child(1) .accounting_view tbody .cell_label:first',
-            run: function() {
-                    $('.o_reconciliation_line:nth-child(1) .accounting_view tbody .cell_label:first').trigger('click');
-            }
+            trigger: '.o_reconciliation_line:nth-child(2) .accounting_view tbody .cell_label:first',
+        },
+        {
+            content: "open second line",
+            trigger: '.o_reconciliation_line:nth-child(2) .accounting_view tfoot .cell_left:visible:contains(32.58)',
         },
         {
             content: "create a write-off",
-            extra_trigger: '.o_reconciliation_line:nth-child(2) .accounting_view tfoot .cell_left:visible:contains(32.58)',
             trigger: '.o_reconciliation_line:nth-child(2) .o_notebook .nav-link[href*="notebook_page_create"]'
         },
         {

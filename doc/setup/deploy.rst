@@ -210,7 +210,7 @@ memory size calculation
 -----------------------
 
 * We consider 20% of the requests are heavy requests, while 80% are simpler ones
-* A heavy worker, when all computed field are well designed, SQL requests are well designed, ... is estimated to consume around 1Go of RAM
+* A heavy worker, when all computed field are well designed, SQL requests are well designed, ... is estimated to consume around 1GB of RAM
 * A lighter worker, in the same scenario, is estimated to consume around 150MB of RAM
 
 Needed RAM = #worker * ( (light_worker_ratio * light_worker_ram_estimation) + (heavy_worker_ratio * heavy_worker_ram_estimation) )
@@ -272,12 +272,6 @@ just about any SSL termination proxy, but requires the following setup:
 * Set up the proxying itself (`Nginx proxying example`_)
 * Your SSL termination proxy should also automatically redirect non-secure
   connections to the secure port
-
-.. warning::
-
-  In case you are using the Point of Sale module in combination with a `POSBox`_,
-  you must disable the HTTPS configuration for the route ``/pos/web`` to avoid
-  mixed-content errors.
 
 Configuration sample
 --------------------
@@ -496,6 +490,28 @@ security-related topics:
   machines than the production ones. And apply the same security precautions as for
   production.
 
+- If your public-facing Odoo server has access to sensitive internal network resources
+  or services (e.g. via a private VLAN), implement appropriate firewall rules to
+  protect those internal resources. This will ensure that the Odoo server cannot
+  be used accidentally (or as a result of malicious user actions) to access or disrupt
+  those internal resources.
+  Typically this can be done by applying an outbound default DENY rule on the firewall,
+  then only explicitly authorizing access to internal resources that the Odoo server
+  needs to access.
+  `Systemd IP traffic access control <http://0pointer.net/blog/ip-accounting-and-access-lists-with-systemd.html>`_
+  may also be useful to implement per-process network access control.
+
+- If your public-facing Odoo server is behind a Web Application Firewall, a load-balancer,
+  a transparent DDoS protection service (like CloudFlare) or a similar network-level
+  device, you may wish to avoid direct access to the Odoo system. It is generally
+  difficult to keep the endpoint IP addresses of your Odoo servers secret. For example
+  they can appear in web server logs when querying public systems, or in the headers
+  of emails posted from Odoo.
+  In such a situation you may want to configure your firewall so that the endpoints
+  are not accessible publicly except from the specific IP addresses of your WAF,
+  load-balancer or proxy service. Service providers like CloudFlare usually maintain
+  a public list of their IP address ranges for this purpose.
+
 - If you are hosting multiple customers, isolate customer data and files from each other
   using containers or appropriate "jail" techniques.
 
@@ -598,14 +614,17 @@ Supported Browsers
 
 Odoo is supported by multiple browsers for each of its versions. No
 distinction is made according to the browser version in order to be
-up-to-date. Odoo is supported on the current browser version. The list
-of the supported browsers is the following:
+up-to-date. Odoo is supported on the current browser version. We support
+the following browsers:
 
-- IE11,
-- Mozilla Firefox,
-- Google Chrome,
-- Safari,
+- Mozilla Firefox
+- Google Chrome
+- Safari
 - Microsoft Edge
+
+.. note::
+
+    Since Odoo 13.0, ES6 is supported.  Therefore, IE support is dropped.
 
 
 .. [#different-machines]

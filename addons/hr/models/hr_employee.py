@@ -48,7 +48,7 @@ class HrEmployeePrivate(models.Model):
         'The employee address has a company linked',
         compute='_compute_is_address_home_a_company',
     )
-    private_email = fields.Char(related='address_home_id.email', string="Private Email", readonly=False, groups="hr.group_hr_user")
+    private_email = fields.Char(related='address_home_id.email', string="Private Email", groups="hr.group_hr_user")
     country_id = fields.Many2one(
         'res.country', 'Nationality (Country)', groups="hr.group_hr_user", tracking=True)
     gender = fields.Selection([
@@ -230,6 +230,7 @@ class HrEmployeePrivate(models.Model):
         vals = dict(
             image_1920=user.image_1920,
             work_email=user.email,
+            user_id=user.id,
         )
         if user.tz:
             vals['tz'] = user.tz
@@ -242,7 +243,12 @@ class HrEmployeePrivate(models.Model):
             vals.update(self._sync_user(user))
             vals['name'] = vals.get('name', user.name)
         employee = super(HrEmployeePrivate, self).create(vals)
-        url = '/web#%s' % url_encode({'action': 'hr.plan_wizard_action', 'active_id': employee.id, 'active_model': 'hr.employee'})
+        url = '/web#%s' % url_encode({
+            'action': 'hr.plan_wizard_action',
+            'active_id': employee.id,
+            'active_model': 'hr.employee',
+            'menu_id': self.env.ref('hr.menu_hr_root').id,
+        })
         employee._message_log(body=_('<b>Congratulations!</b> May I recommend you to setup an <a href="%s">onboarding plan?</a>') % (url))
         if employee.department_id:
             self.env['mail.channel'].sudo().search([
@@ -291,7 +297,7 @@ class HrEmployeePrivate(models.Model):
 
     def generate_random_barcode(self):
         for employee in self:
-            employee.barcode = "".join(choice(digits) for i in range(8))
+            employee.barcode = '041'+"".join(choice(digits) for i in range(9))
 
     @api.depends('address_home_id.parent_id')
     def _compute_is_address_home_a_company(self):

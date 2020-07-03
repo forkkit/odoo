@@ -43,13 +43,13 @@ class WebsiteSaleDigital(CustomerPortal):
             # since there is nothing to pay, so we shouldn't wait for an invoice
             products = order.order_line.mapped('product_id')
 
+        Attachment = request.env['ir.attachment'].sudo()
         purchased_products_attachments = {}
-        for product in products:
+        for product in products.filtered(lambda p: p.attachment_count):
             # Search for product attachments
-            Attachment = request.env['ir.attachment']
             product_id = product.id
             template = product.product_tmpl_id
-            att = Attachment.search_read(
+            att = Attachment.sudo().search_read(
                 domain=['|', '&', ('res_model', '=', product._name), ('res_id', '=', product_id), '&', ('res_model', '=', template._name), ('res_id', '=', template.id), ('product_downloadable', '=', True)],
                 fields=['name', 'write_date'],
                 order='write_date desc',

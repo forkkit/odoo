@@ -11,7 +11,7 @@
                 <header>
                     <button string="Configure Variants" type="action"
                         name="%(product_attribute_value_action)d"
-                        attrs="{'invisible': [('attribute_line_ids', '&lt;=', 0)]}"
+                        attrs="{'invisible': ['|', ('attribute_line_ids', '&lt;=', 0), ('is_product_variant', '=', True)]}"
                         groups="product.group_product_variant"/>
                 </header>
                 <sheet>
@@ -19,7 +19,7 @@
                     <field name='is_product_variant' invisible='1'/>
                     <field name='attribute_line_ids' invisible='1'/>
                     <div class="oe_button_box" name="button_box"/>
-                    <widget name="web_ribbon" text="Archived" bg_color="bg-danger" attrs="{'invisible': [('active', '=', True)]}"/>
+                    <widget name="web_ribbon" title="Archived" bg_color="bg-danger" attrs="{'invisible': [('active', '=', True)]}"/>
                     <field name="id" invisible="True"/>
                     <field name="image_1920" widget="image" class="oe_avatar" options="{'preview_image': 'image_128'}"/>
                     <div class="oe_title">
@@ -96,13 +96,13 @@
                         <page string="Inventory" name="inventory" groups="product.group_stock_packaging" attrs="{'invisible':[('type', '=', 'service')]}">
                             <group name="inventory">
                                 <group name="group_lots_and_weight" string="Logistics" attrs="{'invisible': [('type', 'not in', ['product', 'consu'])]}">
-                                    <label for="weight" attrs="{'invisible':[('product_variant_count', '>', 1)]}"/>
-                                    <div class="o_row" name="weight" attrs="{'invisible':[('product_variant_count', '>', 1)]}">
+                                    <label for="weight" attrs="{'invisible':[('product_variant_count', '>', 1), ('is_product_variant', '=', False)]}"/>
+                                    <div class="o_row" name="weight" attrs="{'invisible':[('product_variant_count', '>', 1), ('is_product_variant', '=', False)]}">
                                         <field name="weight"/>
                                         <span><field name="weight_uom_name"/></span>
                                     </div>
-                                    <label for="volume" attrs="{'invisible':[('product_variant_count', '>', 1)]}"/>
-                                    <div class="o_row" name="volume" attrs="{'invisible':[('product_variant_count', '>', 1)]}">
+                                    <label for="volume" attrs="{'invisible':[('product_variant_count', '>', 1), ('is_product_variant', '=', False)]}"/>
+                                    <div class="o_row" name="volume" attrs="{'invisible':[('product_variant_count', '>', 1), ('is_product_variant', '=', False)]}">
                                         <field name="volume" string="Volume"/>
                                         <span><field name="volume_uom_name"/></span>
                                     </div>
@@ -110,7 +110,7 @@
                             </group>
                             <group name="packaging" string="Packaging"
                                 colspan="4"
-                                attrs="{'invisible':['|', ('type', 'not in', ['product', 'consu']), ('product_variant_count', '>', 1)]}"
+                                attrs="{'invisible':['|', ('type', 'not in', ['product', 'consu']), ('product_variant_count', '>', 1), ('is_product_variant', '=', False)]}"
                                 groups="product.group_stock_packaging">
                                 <field name="packaging_ids" nolabel="1" context="{'tree_view_ref':'product.product_packaging_tree_view2', 'form_view_ref':'product.product_packaging_form_view2'}"/>
                             </group>
@@ -131,7 +131,7 @@
         <field name="model">product.template</field>
         <field name="arch" type="xml">
             <search string="Product">
-                <field name="name" string="Product" filter_domain="['|', '|', ('product_variant_ids.default_code', 'ilike', self),('name', 'ilike', self), ('barcode', 'ilike', self)]"/>
+                <field name="name" string="Product" filter_domain="['|', '|', '|', ('default_code', 'ilike', self), ('product_variant_ids.default_code', 'ilike', self),('name', 'ilike', self), ('barcode', 'ilike', self)]"/>
                 <field name="categ_id" filter_domain="[('categ_id', 'child_of', raw_value)]"/>
                 <separator/>
                 <filter string="Services" name="services" domain="[('type','=','service')]"/>
@@ -214,10 +214,10 @@
             <field name="model">product.product</field>
             <field name="mode">primary</field>
             <field name="arch" type="xml">
-                <form string="Variant Information">
+                <form string="Variant Information" duplicate="false">
                     <sheet>
                         <div class="oe_button_box" name="button_box"/>
-                        <widget name="web_ribbon" text="Archived" bg_color="bg-danger" attrs="{'invisible': [('active', '=', True)]}"/>
+                        <widget name="web_ribbon" title="Archived" bg_color="bg-danger" attrs="{'invisible': [('active', '=', True)]}"/>
                         <field name="active" invisible="1"/>
                         <field name="id" invisible="1"/>
                         <field name="image_1920" widget="image" class="oe_avatar" options="{'preview_image': 'image_128'}"/>
@@ -252,7 +252,7 @@
                                 <label for="volume"/>
                                 <div class="o_row">
                                     <field name="volume"/>
-                                    <span>m³</span>
+                                    <span><field name="volume_uom_name"/></span>
                                 </div>
                                 <label for="weight"/>
                                 <div class="o_row">
@@ -298,7 +298,7 @@
             <field name="model">product.product</field>
             <field eval="7" name="priority"/>
             <field name="arch" type="xml">
-                <tree string="Product Variants" multi_edit="1">
+                <tree string="Product Variants" multi_edit="1" duplicate="false">
                     <field name="default_code" optional="show" readonly="1"/>
                     <field name="barcode" optional="hide" readonly="1"/>
                     <field name="name" readonly="1"/>
@@ -325,6 +325,7 @@
             <field name="arch" type="xml">
                 <form position="attributes">
                     <attribute name="string">Product Variant</attribute>
+                    <attribute name="duplicate">false</attribute>
                 </form>
                 <field name="type" position="after">
                     <field name="default_code"/>
@@ -448,7 +449,7 @@
                                 name="%(product_template_action_all)d"
                                 icon="fa-th-list"
                                 type="action"
-                                context="{'search_default_categ_id': active_id, 'default_categ_id': active_id}">
+                                context="{'search_default_categ_id': active_id, 'default_categ_id': active_id, 'group_expand': True}">
                                 <div class="o_field_widget o_stat_info">
                                     <span class="o_stat_value"><field name="product_count"/></span>
                                     <span class="o_stat_text"> Products</span>
@@ -656,7 +657,7 @@
             <field name="model">product.supplierinfo</field>
             <field name="arch" type="xml">
                 <tree string="Vendor Information" multi_edit="1">
-                    <field name="sequence" widget="handle" readonly="1"/>
+                    <field name="sequence" widget="handle"/>
                     <field name="name" readonly="1"/>
                     <field name="product_id" readonly="1" optional="hide"
                         invisible="context.get('product_template_invisible_variant', False)"

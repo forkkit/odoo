@@ -2,8 +2,15 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 
+from unittest.mock import patch
+
 from odoo.tests.common import BaseCase
-from odoo.tools import html_sanitize, append_content_to_html, plaintext2html, email_split, misc
+from odoo.tests.common import SavepointCase
+from odoo.tools import (
+    html_sanitize, append_content_to_html, plaintext2html, email_split,
+    misc, formataddr,
+)
+
 from . import test_mail_examples
 
 
@@ -303,6 +310,8 @@ class TestHtmlTools(BaseCase):
              '<!DOCTYPE...><html encoding="blah">some <b>content</b>\n<pre>--\nYours truly</pre>\n</html>'),
             ('<!DOCTYPE...><HTML encoding="blah">some <b>content</b></HtMl>', '--\nYours truly', True, False, False,
              '<!DOCTYPE...><html encoding="blah">some <b>content</b>\n<p>--<br/>Yours truly</p>\n</html>'),
+            ('<html><body>some <b>content</b></body></html>', '--\nYours & <truly>', True, True, False,
+             '<html><body>some <b>content</b>\n<pre>--\nYours &amp; &lt;truly&gt;</pre>\n</body></html>'),
             ('<html><body>some <b>content</b></body></html>', '<!DOCTYPE...>\n<html><body>\n<p>--</p>\n<p>Yours truly</p>\n</body>\n</html>', False, False, False,
              '<html><body>some <b>content</b>\n\n\n<p>--</p>\n<p>Yours truly</p>\n\n\n</body></html>'),
         ]
@@ -323,3 +332,47 @@ class TestEmailTools(BaseCase):
         ]
         for text, expected in cases:
             self.assertEqual(email_split(text), expected, 'email_split is broken')
+
+    def test_email_formataddr(self):
+        email = 'joe@example.com'
+        cases = [
+            # (name, address),          charsets            expected
+            (('', email),               ['ascii', 'utf-8'], 'joe@example.com'),
+            (('joe', email),            ['ascii', 'utf-8'], '"joe" <joe@example.com>'),
+            (('joe doe', email),        ['ascii', 'utf-8'], '"joe doe" <joe@example.com>'),
+            (('joe"doe', email),        ['ascii', 'utf-8'], '"joe\\"doe" <joe@example.com>'),
+            (('joé', email),            ['ascii'],          '=?utf-8?b?am/DqQ==?= <joe@example.com>'),
+            (('joé', email),            ['utf-8'],          '"joé" <joe@example.com>'),
+            (('', 'joé@example.com'),   ['ascii', 'utf-8'], UnicodeEncodeError),  # need SMTPUTF8 support
+            (('', 'joe@examplé.com'),   ['ascii', 'utf-8'], UnicodeEncodeError),  # need IDNA support
+        ]
+
+        for pair, charsets, expected in cases:
+            for charset in charsets:
+                with self.subTest(pair=pair, charset=charset):
+                    if isinstance(expected, str):
+                        self.assertEqual(formataddr(pair, charset), expected)
+                    else:
+                        self.assertRaises(expected, formataddr, pair, charset)
+
+
+class EmailConfigCase(SavepointCase):
+    @patch.dict("odoo.tools.config.options", {"email_from": "settings@example.com"})
+    def test_default_email_from(self, *args):
+        """Email from setting is respected."""
+        # ICP setting is more important
+        ICP = self.env["ir.config_parameter"].sudo()
+        ICP.set_param("mail.catchall.domain", "example.org")
+        ICP.set_param("mail.default.from", "icp")
+        message = self.env["ir.mail_server"].build_email(
+            False, "recipient@example.com", "Subject",
+            "The body of an email",
+        )
+        self.assertEqual(message["From"], "icp@example.org")
+        # Without ICP, the config file/CLI setting is used
+        ICP.set_param("mail.default.from", False)
+        message = self.env["ir.mail_server"].build_email(
+            False, "recipient@example.com", "Subject",
+            "The body of an email",
+        )
+        self.assertEqual(message["From"], "settings@example.com")

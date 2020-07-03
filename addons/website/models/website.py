@@ -52,7 +52,8 @@ class Website(models.Model):
         return def_lang_id or self._active_languages()[0]
 
     name = fields.Char('Website Name', required=True)
-    domain = fields.Char('Website Domain')
+    domain = fields.Char('Website Domain',
+        help='Will be prefixed by http in canonical URLs if no scheme is specified')
     country_group_ids = fields.Many2many('res.country.group', 'website_country_group_rel', 'website_id', 'country_group_id',
                                          string='Country Groups', help='Used when multiple websites have the same domain.')
     company_id = fields.Many2one('res.company', string="Company", default=lambda self: self.env.company, required=True)
@@ -127,9 +128,23 @@ class Website(models.Model):
             self.default_lang_id = language_ids[0]
 
     def _compute_menu(self):
-        Menu = self.env['website.menu']
         for website in self:
-            website.menu_id = Menu.search([('parent_id', '=', False), ('website_id', '=', website.id)], order='id', limit=1).id
+            menus = self.env['website.menu'].browse(website._get_menu_ids())
+
+            # use field parent_id (1 query) to determine field child_id (2 queries by level)"
+            for menu in menus:
+                menu._cache['child_id'] = ()
+            for menu in menus:
+                # don't add child menu if parent is forbidden
+                if menu.parent_id and menu.parent_id in menus:
+                    menu.parent_id._cache['child_id'] += (menu.id,)
+
+            website.menu_id = menus and menus.filtered(lambda m: not m.parent_id)[0].id or False
+
+    # self.env.uid for ir.rule groups on menu
+    @tools.ormcache('self.env.uid', 'self.id')
+    def _get_menu_ids(self):
+        return self.env['website.menu'].search([('website_id', '=', self.id)]).ids
 
     @api.model
     def create(self, vals):
@@ -159,7 +174,7 @@ class Website(models.Model):
             public_user_to_change_websites = self.filtered(lambda w: w.sudo().user_id.company_id.id != values['company_id'])
             if public_user_to_change_websites:
                 company = self.env['res.company'].browse(values['company_id'])
-                super(Website, public_user_to_change_websites).write(dict(values, user_id=company._get_public_user().id))
+                super(Website, public_user_to_change_websites).write(dict(values, user_id=company and company._get_public_user().id))
 
         result = super(Website, self - public_user_to_change_websites).write(values)
         if 'cdn_activated' in values or 'cdn_url' in values or 'cdn_filters' in values:
@@ -188,6 +203,7 @@ class Website(models.Model):
     # Page Management
     # ----------------------------------------------------------
     def _bootstrap_homepage(self):
+        Page = self.env['website.page']
         standard_homepage = self.env.ref('website.homepage', raise_if_not_found=False)
         if not standard_homepage:
             return
@@ -200,10 +216,19 @@ class Website(models.Model):
         </t>''' % (self.id)
         standard_homepage.with_context(website_id=self.id).arch_db = new_homepage_view
 
-        self.homepage_id = self.env['website.page'].search([('website_id', '=', self.id),
-                                                            ('key', '=', standard_homepage.key)])
+        homepage_page = Page.search([
+            ('website_id', '=', self.id),
+            ('key', '=', standard_homepage.key),
+        ], limit=1)
+        if not homepage_page:
+            homepage_page = Page.create({
+                'website_published': True,
+                'url': '/',
+                'view_id': self.with_context(website_id=self.id).viewref('website.homepage').id,
+            })
         # prevent /-1 as homepage URL
-        self.homepage_id.url = '/'
+        homepage_page.url = '/'
+        self.homepage_id = homepage_page
 
         # Bootstrap default menu hierarchy, create a new minimalist one if no default
         default_menu = self.env.ref('website.main_menu')
@@ -480,7 +505,12 @@ class Website(models.Model):
     @api.model
     def get_current_website(self, fallback=True):
         if request and request.session.get('force_website_id'):
-            return self.browse(request.session['force_website_id'])
+            website_id = self.browse(request.session['force_website_id']).exists()
+            if not website_id:
+                # Don't crash is session website got deleted
+                request.session.pop('force_website_id')
+            else:
+                return website_id
 
         website_id = self.env.context.get('website_id')
         if website_id:
@@ -708,7 +738,7 @@ class Website(models.Model):
                 continue
 
             converters = rule._converters or {}
-            if query_string and not converters and (query_string not in rule.build([{}], append_unknown=False)[1]):
+            if query_string and not converters and (query_string not in rule.build({}, append_unknown=False)[1]):
                 continue
 
             values = [{}]
@@ -737,8 +767,6 @@ class Website(models.Model):
                 domain_part, url = rule.build(value, append_unknown=False)
                 if not query_string or query_string.lower() in url.lower():
                     page = {'loc': url}
-                    if url in ('/sitemap.xml',):
-                        continue
                     if url in url_set:
                         continue
                     url_set.add(url)
@@ -771,6 +799,7 @@ class Website(models.Model):
         return pages
 
     def search_pages(self, needle=None, limit=None):
+
         name = slugify(needle, max_length=50, path=True)
         res = []
         for page in self.enumerate_pages(query_string=name, force=True):

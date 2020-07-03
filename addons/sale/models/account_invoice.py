@@ -29,14 +29,14 @@ class AccountMove(models.Model):
         Trigger the change of fiscal position when the shipping address is modified.
         """
         delivery_partner_id = self._get_invoice_delivery_partner_id()
-        fiscal_position = self.env['account.fiscal.position'].get_fiscal_position(
+        fiscal_position = self.env['account.fiscal.position'].with_context(force_company=self.company_id.id).get_fiscal_position(
             self.partner_id.id, delivery_id=delivery_partner_id)
 
         if fiscal_position:
             self.fiscal_position_id = fiscal_position
 
     def unlink(self):
-        downpayment_lines = self.mapped('line_ids.sale_line_ids').filtered(lambda line: line.is_downpayment)
+        downpayment_lines = self.mapped('line_ids.sale_line_ids').filtered(lambda line: line.is_downpayment and line.invoice_lines <= self.mapped('line_ids'))
         res = super(AccountMove, self).unlink()
         if downpayment_lines:
             downpayment_lines.unlink()

@@ -118,8 +118,10 @@ class HolidaysType(models.Model):
                 holiday_type.valid = True
 
     def _search_valid(self, operator, value):
-        dt = self._context.get('default_date_from') or fields.Date.context_today(self)
+        dt = self._context.get('default_date_from', False)
 
+        if not dt:
+            return []
         signs = ['>=', '<='] if operator == '=' else ['<=', '>=']
 
         return ['|', ('validity_stop', operator, False), '&',
@@ -244,7 +246,7 @@ class HolidaysType(models.Model):
         elif 'default_employee_id' in self._context:
             employee_id = self._context['default_employee_id']
         else:
-            employee_id = self.env['hr.employee'].search([('user_id', '=', self.env.user.id), ('company_id', '=', self.env.company.id)], limit=1).id
+            employee_id = self.env.user.employee_id.id
         return employee_id
 
     def _compute_leaves(self):
@@ -324,11 +326,11 @@ class HolidaysType(models.Model):
         to the method.
         """
         employee_id = self._get_contextual_employee_id()
-        leave_ids = super(HolidaysType, self)._search(args, offset=offset, limit=limit, order=order, count=count, access_rights_uid=access_rights_uid)
-        if not count and not order and employee_id:
-            leaves = self.browse(leave_ids)
-
-            return leaves.sorted(key=self._model_sorting_key, reverse=True).ids
+        post_sort = (not count and not order and employee_id)
+        leave_ids = super(HolidaysType, self)._search(args, offset=offset, limit=(None if post_sort else limit), order=order, count=count, access_rights_uid=access_rights_uid)
+        leaves = self.browse(leave_ids)
+        if post_sort:
+            return leaves.sorted(key=self._model_sorting_key, reverse=True).ids[:limit or None]
         return leave_ids
 
     def action_see_days_allocated(self):

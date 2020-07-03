@@ -27,11 +27,8 @@ class SaleOrder(models.Model):
 
     @api.depends('order_line')
     def _compute_delivery_state(self):
-        delivery_line = self.order_line.filtered('is_delivery')
-        if delivery_line:
-            self.delivery_set = True
-        else:
-            self.delivery_set = False
+        for order in self:
+            order.delivery_set = any(line.is_delivery for line in order.order_line)
 
     @api.onchange('order_line', 'partner_id')
     def onchange_order_line(self):
@@ -48,6 +45,7 @@ class SaleOrder(models.Model):
         self._remove_delivery_line()
 
         for order in self:
+            order.carrier_id = carrier.id
             order._create_delivery_line(carrier, amount)
         return True
 
@@ -121,14 +119,16 @@ class SaleOrder(models.Model):
             post = u'\N{NO-BREAK SPACE}{symbol}'.format(symbol=self.currency_id.symbol or '')
         return u' {pre}{0}{post}'.format(amount, pre=pre, post=post)
 
-    @api.depends('state', 'order_line.invoice_status', 'order_line.invoice_lines',
-                 'order_line.is_delivery', 'order_line.is_downpayment', 'order_line.product_id.invoice_policy')
-    def _get_invoiced(self):
-        super(SaleOrder, self)._get_invoiced()
+    @api.depends('order_line.is_delivery', 'order_line.is_downpayment',
+                 'order_line.product_id.invoice_policy')
+    def _get_invoice_status(self):
+        super()._get_invoice_status()
         for order in self:
-            order_line = order.order_line.filtered(lambda x: not x.is_delivery and not x.is_downpayment and not x.display_type)
-            if all(line.product_id.invoice_policy == 'delivery' and line.invoice_status == 'no' for line in order_line):
-                order.update({'invoice_status': 'no'})
+            if order.invoice_status in ['no', 'invoiced']:
+                continue
+            order_lines = order.order_line.filtered(lambda x: not x.is_delivery and not x.is_downpayment and not x.display_type)
+            if all(line.product_id.invoice_policy == 'delivery' and line.invoice_status == 'no' for line in order_lines):
+                order.invoice_status = 'no'
 
 
 class SaleOrderLine(models.Model):
@@ -142,6 +142,7 @@ class SaleOrderLine(models.Model):
     def _compute_product_qty(self):
         for line in self:
             if not line.product_id or not line.product_uom or not line.product_uom_qty:
+                line.product_qty = 0.0
                 continue
             line.product_qty = line.product_uom._compute_quantity(line.product_uom_qty, line.product_id.uom_id)
 

@@ -147,7 +147,7 @@ class AccountReconcileModel(models.Model):
         return action
 
     def _compute_number_entries(self):
-        data = self.env['account.move.line'].read_group([('reconcile_model_id', 'in', self.ids)], ['reconcile_model_ids'], 'reconcile_model_id')
+        data = self.env['account.move.line'].read_group([('reconcile_model_id', 'in', self.ids)], ['reconcile_model_id'], 'reconcile_model_id')
         mapped_data = dict([(d['reconcile_model_id'][0], d['reconcile_model_id_count']) for d in data])
         for model in self:
             model.number_entries = mapped_data.get(model.id, 0)
@@ -447,6 +447,41 @@ class AccountReconcileModel(models.Model):
         with_tables += ', partners_table AS (' + partners_table + ')'
         return with_tables
 
+    def _get_select_communication_flag(self):
+        return r'''
+            -- Determine a matching or not with the statement line communication using the aml.name, move.name or move.ref.
+            (
+                aml.name IS NOT NULL
+                AND
+                substring(REGEXP_REPLACE(aml.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*') != ''
+                AND
+                    regexp_split_to_array(substring(REGEXP_REPLACE(aml.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'),'\s+')
+                    && regexp_split_to_array(substring(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'), '\s+')
+            )
+            OR
+                regexp_split_to_array(substring(REGEXP_REPLACE(move.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'),'\s+')
+                && regexp_split_to_array(substring(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'), '\s+')
+            OR
+            (
+                move.ref IS NOT NULL
+                AND
+                substring(REGEXP_REPLACE(move.ref, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*') != ''
+                AND
+                    regexp_split_to_array(substring(REGEXP_REPLACE(move.ref, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'),'\s+')
+                    && regexp_split_to_array(substring(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'), '\s+')
+            )                                   AS communication_flag
+        '''
+
+    def _get_select_payment_reference_flag(self):
+        return r'''
+            -- Determine a matching or not with the statement line communication using the move.invoice_payment_ref.
+            (
+                move.invoice_payment_ref IS NOT NULL
+                AND
+                regexp_replace(move.invoice_payment_ref, '\s+', '', 'g') = regexp_replace(st_line.name, '\s+', '', 'g')
+            )                                   AS payment_reference_flag
+        '''
+
     def _get_invoice_matching_query(self, st_lines, excluded_ids=None, partner_map=None):
         ''' Get the query applying all rules trying to match existing entries with the given statement lines.
         :param st_lines:        Account.bank.statement.lines recordset.
@@ -462,7 +497,7 @@ class AccountReconcileModel(models.Model):
         for rule in self:
             # N.B: 'communication_flag' is there to distinguish invoice matching through the number/reference
             # (higher priority) from invoice matching using the partner (lower priority).
-            query = '''
+            query = r'''
             SELECT
                 %s                                  AS sequence,
                 %s                                  AS model_id,
@@ -475,28 +510,7 @@ class AccountReconcileModel(models.Model):
                 aml.balance                         AS aml_balance,
                 aml.amount_currency                 AS aml_amount_currency,
                 account.internal_type               AS account_internal_type,
-
-                -- Determine a matching or not with the statement line communication using the aml.name, move.name or move.ref.
-                (
-                    aml.name IS NOT NULL
-                    AND
-                    TRIM(REGEXP_REPLACE(aml.name, '[^0-9|^\s]', '', 'g')) != ''
-                    AND
-                        regexp_split_to_array(TRIM(REGEXP_REPLACE(aml.name, '[^0-9|^\s]', '', 'g')),'\s+')
-                        && regexp_split_to_array(TRIM(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g')), '\s+')
-                )
-                OR
-                    regexp_split_to_array(TRIM(REGEXP_REPLACE(move.name, '[^0-9|^\s]', '', 'g')),'\s+')
-                    && regexp_split_to_array(TRIM(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g')), '\s+')
-                OR
-                (
-                    move.ref IS NOT NULL
-                    AND
-                    TRIM(REGEXP_REPLACE(move.ref, '[^0-9|^\s]', '', 'g')) != ''
-                    AND
-                        regexp_split_to_array(TRIM(REGEXP_REPLACE(move.ref, '[^0-9|^\s]', '', 'g')),'\s+')
-                        && regexp_split_to_array(TRIM(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g')), '\s+')
-                )                                   AS communication_flag
+                ''' + rule._get_select_communication_flag() + r''', ''' + rule._get_select_payment_reference_flag() + r'''
             FROM account_bank_statement_line st_line
             LEFT JOIN account_journal journal       ON journal.id = st_line.journal_id
             LEFT JOIN jnl_precision                 ON jnl_precision.journal_id = journal.id
@@ -533,28 +547,34 @@ class AccountReconcileModel(models.Model):
                     (
                         line_partner.partner_id = 0
                         AND
-                        TRIM(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g')) != ''
+                        substring(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*') != ''
                         AND
                         (
                             (
                                 aml.name IS NOT NULL
                                 AND
-                                TRIM(REGEXP_REPLACE(aml.name, '[^0-9|^\s]', '', 'g')) != ''
+                                substring(REGEXP_REPLACE(aml.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*') != ''
                                 AND
-                                    regexp_split_to_array(TRIM(REGEXP_REPLACE(aml.name, '[^0-9|^\s]', '', 'g')),'\s+')
-                                    && regexp_split_to_array(TRIM(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g')), '\s+')
+                                    regexp_split_to_array(substring(REGEXP_REPLACE(aml.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'),'\s+')
+                                    && regexp_split_to_array(substring(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'), '\s+')
                             )
                             OR
-                                regexp_split_to_array(TRIM(REGEXP_REPLACE(move.name, '[^0-9|^\s]', '', 'g')),'\s+')
-                                && regexp_split_to_array(TRIM(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g')), '\s+')
+                                regexp_split_to_array(substring(REGEXP_REPLACE(move.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'),'\s+')
+                                && regexp_split_to_array(substring(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'), '\s+')
                             OR
                             (
                                 move.ref IS NOT NULL
                                 AND
-                                TRIM(REGEXP_REPLACE(move.ref, '[^0-9|^\s]', '', 'g')) != ''
+                                substring(REGEXP_REPLACE(move.ref, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*') != ''
                                 AND
-                                    regexp_split_to_array(TRIM(REGEXP_REPLACE(move.ref, '[^0-9|^\s]', '', 'g')),'\s+')
-                                    && regexp_split_to_array(TRIM(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g')), '\s+')
+                                    regexp_split_to_array(substring(REGEXP_REPLACE(move.ref, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'),'\s+')
+                                    && regexp_split_to_array(substring(REGEXP_REPLACE(st_line.name, '[^0-9|^\s]', '', 'g'), '\S(?:.*\S)*'), '\s+')
+                            )
+                            OR
+                            (
+                                move.invoice_payment_ref IS NOT NULL
+                                AND
+                                regexp_replace(move.invoice_payment_ref, '\s+', '', 'g') = regexp_replace(st_line.name, '\s+', '', 'g')
                             )
                         )
                     )
@@ -575,7 +595,7 @@ class AccountReconcileModel(models.Model):
                     (
                     -- black lines appearance conditions
                     account.reconcile IS TRUE
-                    AND aml.reconciled IS FALSE
+                    AND aml.reconciled IS NOT TRUE
                     )
                 )
             '''
@@ -647,23 +667,30 @@ class AccountReconcileModel(models.Model):
             return False
 
         # Match total residual amount.
+        line_residual = statement_line.currency_id and statement_line.amount_currency or statement_line.amount
+        line_currency = statement_line.currency_id or statement_line.journal_id.currency_id or statement_line.company_id.currency_id
         total_residual = 0.0
         for aml in candidates:
             if aml['account_internal_type'] == 'liquidity':
-                total_residual += aml['aml_currency_id'] and aml['aml_amount_currency'] or aml['aml_balance']
+                partial_residual = aml['aml_currency_id'] and aml['aml_amount_currency'] or aml['aml_balance']
             else:
-                total_residual += aml['aml_currency_id'] and aml['aml_amount_residual_currency'] or aml['aml_amount_residual']
-        line_residual = statement_line.currency_id and statement_line.amount_currency or statement_line.amount
-        line_currency = statement_line.currency_id or statement_line.journal_id.currency_id or statement_line.company_id.currency_id
+                partial_residual = aml['aml_currency_id'] and aml['aml_amount_residual_currency'] or aml['aml_amount_residual']
+            partial_currency = aml['aml_currency_id'] and self.env['res.currency'].browse(aml['aml_currency_id']) or self.company_id.currency_id
+            if partial_currency != line_currency:
+                partial_residual = partial_currency._convert(partial_residual, line_currency, self.company_id, statement_line.date)
+            total_residual += partial_residual
 
         # Statement line amount is equal to the total residual.
         if float_is_zero(total_residual - line_residual, precision_rounding=line_currency.rounding):
             return True
 
-        if line_residual > total_residual:
-            amount_percentage = (total_residual / line_residual) * 100
+        line_residual_to_compare = line_residual if line_residual > 0.0 else -line_residual
+        total_residual_to_compare = total_residual if line_residual > 0.0 else -total_residual
+
+        if line_residual_to_compare > total_residual_to_compare:
+            amount_percentage = (total_residual_to_compare / line_residual_to_compare) * 100
         elif total_residual:
-            amount_percentage = (line_residual / total_residual) * 100 if total_residual else 0
+            amount_percentage = (line_residual_to_compare / total_residual_to_compare) * 100 if total_residual_to_compare else 0.0
         else:
             return False
         return amount_percentage >= self.match_total_amount_param
@@ -746,23 +773,32 @@ class AccountReconcileModel(models.Model):
                     first_batch_candidates_proposed = []
                     second_batch_candidates = []
                     second_batch_candidates_proposed = []
+                    third_batch_candidates = []
+                    third_batch_candidates_proposed = []
                     for c in candidates:
                         # Don't take into account already reconciled lines.
                         if c['aml_id'] in reconciled_amls_ids:
                             continue
 
                         # Dispatch candidates between lines matching invoices with the communication or only the partner.
-                        elif c['communication_flag']:
+                        elif c['payment_reference_flag']:
                             if c['aml_id'] in amls_ids_to_exclude:
                                 first_batch_candidates_proposed.append(c)
                             else:
                                 first_batch_candidates.append(c)
-                        elif not first_batch_candidates:
+                        elif c['communication_flag']:
                             if c['aml_id'] in amls_ids_to_exclude:
                                 second_batch_candidates_proposed.append(c)
                             else:
                                 second_batch_candidates.append(c)
-                    available_candidates = first_batch_candidates + first_batch_candidates_proposed or second_batch_candidates + second_batch_candidates_proposed
+                        elif not first_batch_candidates:
+                            if c['aml_id'] in amls_ids_to_exclude:
+                                third_batch_candidates_proposed.append(c)
+                            else:
+                                third_batch_candidates.append(c)
+                    available_candidates = (first_batch_candidates + first_batch_candidates_proposed
+                                            or second_batch_candidates + second_batch_candidates_proposed
+                                            or third_batch_candidates + third_batch_candidates_proposed)
 
                     # Special case: the amount are the same, submit the line directly.
                     for c in available_candidates:
@@ -773,7 +809,7 @@ class AccountReconcileModel(models.Model):
                             break
 
                     # Needed to handle check on total residual amounts.
-                    if first_batch_candidates or model._check_rule_propositions(line, available_candidates):
+                    if first_batch_candidates or first_batch_candidates_proposed or model._check_rule_propositions(line, available_candidates):
                         results[line.id]['model'] = model
 
                         # Add candidates to the result.
@@ -791,7 +827,7 @@ class AccountReconcileModel(models.Model):
                             results[line.id]['status'] = 'write_off'
 
                         # Process auto-reconciliation.
-                        if model.auto_reconcile:
+                        if (first_batch_candidates or second_batch_candidates) and model.auto_reconcile:
                             # An open balance is needed but no partner has been found.
                             if reconciliation_results['open_balance_dict'] is False:
                                 break

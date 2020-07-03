@@ -176,14 +176,14 @@ class SaleOrderLine(models.Model):
         """
         self.ensure_one()
         partner_supplier = supplierinfo.name
-        fiscal_position_id = self.env['account.fiscal.position'].sudo().with_context(company_id=self.company_id.id).get_fiscal_position(partner_supplier.id)
+        fiscal_position_id = self.env['account.fiscal.position'].sudo().get_fiscal_position(partner_supplier.id)
         date_order = self._purchase_get_date_order(supplierinfo)
         return {
             'partner_id': partner_supplier.id,
             'partner_ref': partner_supplier.ref,
             'company_id': self.company_id.id,
             'currency_id': partner_supplier.property_purchase_currency_id.id or self.env.company.currency_id.id,
-            'dest_address_id': self.order_id.partner_shipping_id.id,
+            'dest_address_id': False, # False since only supported in stock
             'origin': self.order_id.name,
             'payment_term_id': partner_supplier.property_supplier_payment_term_id.id,
             'date_order': date_order,
@@ -255,8 +255,10 @@ class SaleOrderLine(models.Model):
         supplier_po_map = {}
         sale_line_purchase_map = {}
         for line in self:
+            line = line.with_context(force_company=line.company_id.id)
             # determine vendor of the order (take the first matching company and product)
-            suppliers = line.product_id.seller_ids.filtered(lambda vendor: (not vendor.company_id or vendor.company_id == line.company_id) and (not vendor.product_id or vendor.product_id == line.product_id))
+            suppliers = line.product_id.with_context(force_company=line.company_id.id)._select_seller(
+                quantity=line.product_uom_qty, uom_id=line.product_uom)
             if not suppliers:
                 raise UserError(_("There is no vendor associated to the product %s. Please define a vendor for this product.") % (line.product_id.display_name,))
             supplierinfo = suppliers[0]
@@ -287,10 +289,10 @@ class SaleOrderLine(models.Model):
 
             # add a PO line to the PO
             values = line._purchase_service_prepare_line_values(purchase_order, quantity=quantity)
-            purchase_line = self.env['purchase.order.line'].create(values)
+            purchase_line = line.env['purchase.order.line'].create(values)
 
             # link the generated purchase to the SO line
-            sale_line_purchase_map.setdefault(line, self.env['purchase.order.line'])
+            sale_line_purchase_map.setdefault(line, line.env['purchase.order.line'])
             sale_line_purchase_map[line] |= purchase_line
         return sale_line_purchase_map
 

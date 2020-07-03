@@ -818,6 +818,16 @@ var BasicModel = AbstractModel.extend({
                         defs.push(self._fetchNameGet(dataPoint));
                     }
                 }
+            } else if (field.type === 'reference' && field.value) {
+                const ref = field.value.split(',');
+                dataPoint = self._makeDataPoint({
+                    context: record.context,
+                    data: { id: parseInt(ref[1], 10) },
+                    modelName: ref[0],
+                    parentID: record.id,
+                });
+                defs.push(self._fetchNameGet(dataPoint));
+                record.data[field.name] = dataPoint.id;
             } else if (field.type === 'one2many' || field.type === 'many2many') {
                 var relatedFieldsInfo = {};
                 relatedFieldsInfo.default = {};
@@ -1410,6 +1420,8 @@ var BasicModel = AbstractModel.extend({
      * @param {boolean} [options.doNotSetDirty=false] if this flag is set to
      *   true, then we will not tag the record as dirty.  This should be avoided
      *   for most situations.
+     * @param {boolean} [options.forceFail=false] if this flag is set to true, then
+     *   promise will fail when onchange fails (added as local patch only in stable)
      * @param {boolean} [options.notifyChange=true] if this flag is set to
      *   false, then we will not notify and not trigger the onchange, even though
      *   it was changed.
@@ -1472,7 +1484,12 @@ var BasicModel = AbstractModel.extend({
                         self._visitChildren(record, function (elem) {
                             _.extend(elem, initialData[elem.id]);
                         });
-                        resolve({});
+                        // safe fix for stable version, for opw-2267444
+                        if (!options.force_fail) {
+                            resolve({});
+                        } else {
+                            reject({});
+                        }
                     });
                 } else {
                     resolve(_.keys(changes));
@@ -2324,7 +2341,7 @@ var BasicModel = AbstractModel.extend({
                 model: record.model,
                 method: 'read',
                 args: [[record.res_id], fieldNames],
-                context: _.extend({}, record.getContext(), {bin_size: true}),
+                context: _.extend({bin_size: true}, record.getContext()),
             })
             .then(function (result) {
                 if (result.length === 0) {
@@ -2410,7 +2427,7 @@ var BasicModel = AbstractModel.extend({
                             display_name: el[1],
                         },
                         modelName: model,
-                        parentID: parent,
+                        parentID: parent.id,
                     });
                     parent.data[fieldName] = referenceDp.id;
                 });
@@ -3911,7 +3928,8 @@ var BasicModel = AbstractModel.extend({
 
         // Fields that are present in the originating view, that need to be initialized
         // Hence preventing their value to crash when getting back to the originating view
-        var parentRecord = self.localData[params.parentID];
+        var parentRecord = params.parentID && this.localData[params.parentID].type === 'list' ? this.localData[params.parentID] : null;
+
         if (parentRecord) {
             var originView = parentRecord.viewType;
             fieldNames = _.union(fieldNames, Object.keys(parentRecord.fieldsInfo[originView]));
@@ -4227,14 +4245,18 @@ var BasicModel = AbstractModel.extend({
         options = options || {};
         var defs = [];
         var field = record.fields[fieldName];
-        var fieldInfo = record.fieldsInfo[options.viewType || record.viewType][fieldName];
+        var fieldInfo = record.fieldsInfo[options.viewType || record.viewType][fieldName] || {};
         var view = fieldInfo.views && fieldInfo.views[fieldInfo.mode];
         var fieldsInfo = view ? view.fieldsInfo : fieldInfo.fieldsInfo;
         var fields = view ? view.fields : fieldInfo.relatedFields;
         var viewType = view ? view.type : fieldInfo.viewType;
 
+        // remove default_* keys from parent context to avoid issue of same field name in x2m
+        var parentContext = _.omit(record.context, function (val, key) {
+            return _.str.startsWith(key, 'default_');
+        });
         var x2manyList = self._makeDataPoint({
-            context: record.context,
+            context: parentContext,
             fieldsInfo: fieldsInfo,
             fields: fields,
             limit: fieldInfo.limit,

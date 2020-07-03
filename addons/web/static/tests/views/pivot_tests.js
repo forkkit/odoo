@@ -382,6 +382,106 @@ QUnit.module('Views', {
         pivot.destroy();
     });
 
+    QUnit.test('clicking on the "Total" Cell with time range activated gives the right action domain', async function (assert) {
+        assert.expect(2);
+
+        var unpatchDate = patchDate(2016, 11, 20, 1, 0, 0);
+        var context = {
+            timeRangeMenuData: {
+                timeRange: ["&",["date",">=","2016-12-01"],["date","<","2017-01-01"]],
+                timeRangeDescription: 'This Month',
+                comparisonTimeRange: [],
+            }
+        };
+        var pivot = await createView({
+            View: PivotView,
+            model: "partner",
+            data: this.data,
+            arch: '<pivot/>',
+            intercepts: {
+                do_action: function (ev) {
+                    assert.deepEqual(
+                        ev.data.action.domain,
+                        ["&",["date",">=","2016-12-01"],["date","<","2017-01-01"]],
+                        "should trigger do_action with the correct action domain"
+                    );
+                },
+            },
+            viewOptions: {
+                context: context,
+                title: 'Partners',
+            }
+        });
+
+        assert.hasClass(pivot.$('table'), 'o_enable_linking',
+            "root node should have classname 'o_enable_linking'");
+        await testUtilsDom.click(pivot.$('.o_pivot_cell_value'));
+
+        unpatchDate();
+        pivot.destroy();
+    });
+
+    QUnit.test('clicking on a fake cell value ("empty group") in comparison mode gives an action domain equivalent to [[0,"=",1]]', async function (assert) {
+        assert.expect(3);
+
+        var unpatchDate = patchDate(2016, 11, 20, 1, 0, 0);
+
+        this.data.partner.records[0].date = '2016-11-15';
+        this.data.partner.records[1].date = '2016-11-17';
+        this.data.partner.records[2].date = '2016-11-22';
+        this.data.partner.records[3].date = '2016-11-03';
+
+        var context = {
+            timeRangeMenuData: {
+                timeRange: ["&",["date",">=","2016-12-01"],["date","<","2017-01-01"]],
+                timeRangeDescription: 'This Month',
+                comparisonTimeRange: ["&",["date",">=","2016-11-01"],["date","<","2017-12-01"]],
+                comparisonTimeRangeDescription: 'Previous Period'
+            }
+        };
+
+        var first_do_action = true;
+        var pivot = await createView({
+            View: PivotView,
+            model: "partner",
+            data: this.data,
+            arch: '<pivot>' +
+                        '<field name="product_id" type="row"/>' +
+                    '</pivot>',
+            intercepts: {
+                do_action: function (ev) {
+                    if (first_do_action) {
+                        assert.deepEqual(
+                            ev.data.action.domain,
+                            ["&",["date",">=","2016-12-01"],["date","<","2017-01-01"]],
+                            "should trigger do_action with the correct action domain"
+                        );
+                    } else {
+                        assert.deepEqual(
+                            ev.data.action.domain,
+                            [[0, "=", 1]],
+                            "should trigger do_action with the correct action domain"
+                        );
+                    }
+                    first_do_action = false;
+                },
+            },
+            viewOptions: {
+                context: context,
+                title: 'Partners',
+            }
+        });
+        assert.hasClass(pivot.$('table'), 'o_enable_linking',
+            "root node should have classname 'o_enable_linking'");
+        // here we click on the group corresponding to Total/Total/This Month
+        pivot.$('.o_pivot_cell_value').eq(0).click(); // should trigger a do_action with appropriate domain
+        // here we click on the group corresponding to xphone/Total/This Month
+        pivot.$('.o_pivot_cell_value').eq(3).click(); // should trigger a do_action with appropriate domain
+
+        unpatchDate();
+        pivot.destroy();
+    });
+
     QUnit.test('pivot view grouped by date field', async function (assert) {
         assert.expect(2);
 
@@ -1269,9 +1369,9 @@ QUnit.module('Views', {
         await testUtils.dom.click(pivot.$('.o_pivot_field_menu .dropdown-item[data-field="customer"]'));
 
         values = [
-            "29", "2", "1", "32",
+            "29", "1", "2", "32",
             "12",           "12",
-            "17", "2", "1", "20",
+            "17", "1", "2", "20",
         ];
         assert.strictEqual(getCurrentValues(pivot), values.join(','));
 
@@ -1280,10 +1380,10 @@ QUnit.module('Views', {
         await testUtils.dom.click(pivot.$('.o_pivot_field_menu .dropdown-item[data-field="other_product_id"]'));
 
         values = [
-            "29", "2", "1", "32",
+            "29", "1", "2", "32",
             "12",           "12",
-            "17", "2", "1", "20",
-            "17", "2", "1", "20",
+            "17", "1", "2", "20",
+            "17", "1", "2", "20",
         ];
         assert.strictEqual(getCurrentValues(pivot), values.join(','));
 
@@ -1297,11 +1397,11 @@ QUnit.module('Views', {
         // sanity check of what the table should look like if all groups are
         // expanded, to ensure that the former asserts are pertinent
         values = [
-            "12", "17", "2", "1", "32",
+            "12", "17", "1", "2", "32",
             "12",                 "12",
             "12",                 "12",
-                  "17", "2", "1", "20",
-                  "17", "2", "1", "20",
+                  "17", "1", "2", "20",
+                  "17", "1", "2", "20",
         ];
         assert.strictEqual(getCurrentValues(pivot), values.join(','));
 
@@ -2520,7 +2620,7 @@ QUnit.module('Views', {
             ].join(''),
             "The row headers should be as expected"
         );
-        
+
         // Set a Row groupby
         await testUtils.dom.click(pivot.$('tbody .o_pivot_header_cell_closed').eq(0));
         await testUtils.dom.click(pivot.$('.o_pivot_field_menu .dropdown-item[data-field=product_id]:first'));
@@ -2568,6 +2668,52 @@ QUnit.module('Views', {
             ].join(''),
             "The row headers should be as expected"
         );
+
+        pivot.destroy();
+    });
+
+    QUnit.test('Server order is kept by default', async function (assert) {
+        assert.expect(1);
+
+        let isSecondReadGroup = false;
+
+        var pivot = await createView({
+            View: PivotView,
+            model: "partner",
+            data: this.data,
+            arch: '<pivot>' +
+                        '<field name="customer" type="row"/>' +
+                        '<field name="foo" type="measure"/>' +
+                '</pivot>',
+            mockRPC: function (route, args) {
+                if (args.method === 'read_group' && isSecondReadGroup) {
+                    return Promise.resolve([
+                        {
+                            customer: [2, 'Second'],
+                            foo: 18,
+                            __count: 2,
+                            __domain :[["customer", "=", 2]],
+                        },
+                        {
+                            customer: [1, 'First'],
+                            foo: 14,
+                            __count: 2,
+                            __domain :[["customer", "=", 1]],
+                        }
+                    ]);
+                }
+                var result = this._super.apply(this, arguments);
+                isSecondReadGroup = true;
+                return result;
+            },
+        });
+
+        const values = [
+            "32", // Total Value
+            "18", // Second
+            "14", // First
+        ];
+        assert.strictEqual(getCurrentValues(pivot), values.join());
 
         pivot.destroy();
     });

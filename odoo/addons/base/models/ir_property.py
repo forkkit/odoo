@@ -202,12 +202,11 @@ class Property(models.Model):
         return self.browse(())
 
     def _get_domain(self, prop_name, model):
-        self._cr.execute("SELECT id FROM ir_model_fields WHERE name=%s AND model=%s", (prop_name, model))
-        res = self._cr.fetchone()
-        if not res:
+        field_id = self.env['ir.model.fields']._get_id(model, prop_name)
+        if not field_id:
             return None
         company_id = self._context.get('force_company') or self.env.company.id
-        return [('fields_id', '=', res[0]), ('company_id', 'in', [company_id, False])]
+        return [('fields_id', '=', field_id), ('company_id', 'in', [company_id, False])]
 
     @api.model
     def get_multi(self, name, model, ids):
@@ -219,7 +218,7 @@ class Property(models.Model):
             return {}
 
         field = self.env[model]._fields[name]
-        field_id = self.env['ir.model.fields']._get(model, name).id
+        field_id = self.env['ir.model.fields']._get_id(model, name)
         company_id = (
             self._context.get('force_company')
             or self.env.company.id
@@ -269,11 +268,12 @@ class Property(models.Model):
             cr.execute(query, params + [sub_refs])
             result.update(cr.fetchall())
 
-        # remove default value, add missing values, and format them
-        default = result.pop(None, None)
-        for id in ids:
-            result[id] = clean(result.get(id, default))
-        return result
+        # determine all values and format them
+        default = result.get(None, None)
+        return {
+            id: clean(result.get(id, default))
+            for id in ids
+        }
 
     @api.model
     def set_multi(self, name, model, values, default_value=None):
@@ -300,8 +300,7 @@ class Property(models.Model):
             default_value = clean(self.get(name, model))
 
         # retrieve the properties corresponding to the given record ids
-        self._cr.execute("SELECT id FROM ir_model_fields WHERE name=%s AND model=%s", (name, model))
-        field_id = self._cr.fetchone()[0]
+        field_id = self.env['ir.model.fields']._get_id(model, name)
         company_id = self.env.context.get('force_company') or self.env.company.id
         refs = {('%s,%s' % (model, id)): id for id in values}
         props = self.search([

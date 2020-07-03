@@ -251,7 +251,7 @@ class Challenge(models.Model):
                          AND gg.user_id = ru.id
                          AND ru.id = log.create_uid
                          AND gg.write_date < log.create_date
-                         AND gg.closed IS false
+                         AND gg.closed IS NOT TRUE
                          AND gc.id IN %s
                          AND (gg.state = 'inprogress'
                               OR (gg.state = 'reached'
@@ -377,11 +377,11 @@ class Challenge(models.Model):
                 if end_date:
                     values['end_date'] = end_date
 
-                    # the goal is initialised over the limit to make sure we will compute it at least once
-                    if line.condition == 'higher':
-                        values['current'] = min(line.target_goal - 1, 0)
-                    else:
-                        values['current'] = max(line.target_goal + 1, 0)
+                # the goal is initialised over the limit to make sure we will compute it at least once
+                if line.condition == 'higher':
+                    values['current'] = min(line.target_goal - 1, 0)
+                else:
+                    values['current'] = max(line.target_goal + 1, 0)
 
                 if challenge.remind_update_delay:
                     values['remind_update_delay'] = challenge.remind_update_delay

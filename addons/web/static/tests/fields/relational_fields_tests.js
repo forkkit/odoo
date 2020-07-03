@@ -1545,6 +1545,28 @@ QUnit.module('relational_fields', {
         form.destroy();
     });
 
+    QUnit.test('fieldmany2many tags with no_edit_color option', async function (assert) {
+        assert.expect(1);
+
+        this.data.partner.records[0].timmy = [12];
+
+        var form = await createView({
+            View: FormView,
+            model: 'partner',
+            data: this.data,
+            arch:'<form string="Partners">' +
+                    '<field name="timmy" widget="many2many_tags" options="{\'color_field\': \'color\', \'no_edit_color\': 1}"/>' +
+                '</form>',
+            res_id: 1,
+        });
+
+        // Click to try to open colorpicker
+        await testUtils.dom.click(form.$('.badge:first() .dropdown-toggle'));
+        assert.containsNone(document.body, '.o_colorpicker');
+
+        form.destroy();
+    });
+
     QUnit.test('fieldmany2many tags in editable list', async function (assert) {
         assert.expect(7);
 
@@ -1675,6 +1697,32 @@ QUnit.module('relational_fields', {
         });
         assert.containsN(form, '.o_field_widget[name="partner_ids"] .badge', 100,
             'should have rendered 100 tags');
+        form.destroy();
+    });
+
+    QUnit.test('many2many_tags loads records according to limit defined on widget prototype', async function (assert) {
+        assert.expect(1);
+
+        const M2M_LIMIT = relationalFields.FieldMany2ManyTags.prototype.limit;
+        relationalFields.FieldMany2ManyTags.prototype.limit = 30;
+        this.data.partner.fields.partner_ids = {string: "Partner", type: "many2many", relation: 'partner'};
+        this.data.partner.records[0].partner_ids = [];
+        for (var i = 15; i < 50; i++) {
+            this.data.partner.records.push({id: i, display_name: 'walter' + i});
+            this.data.partner.records[0].partner_ids.push(i);
+        }
+        const form = await createView({
+            View: FormView,
+            model: 'partner',
+            data: this.data,
+            arch: '<form><field name="partner_ids" widget="many2many_tags"/></form>',
+            res_id: 1,
+        });
+
+        assert.strictEqual(form.$('.o_field_widget[name="partner_ids"] .badge').length, 30,
+            'should have rendered 30 tags even though 35 records linked');
+
+        relationalFields.FieldMany2ManyTags.prototype.limit = M2M_LIMIT;
         form.destroy();
     });
 
@@ -2288,6 +2336,35 @@ QUnit.module('relational_fields', {
             "first checkbox should not be checked");
         assert.notOk(form.$('div.o_field_widget div.custom-checkbox input').eq(1).prop('checked'),
             "second checkbox should not be checked");
+
+        form.destroy();
+    });
+
+    QUnit.test('widget many2many_checkboxes: values are updated when domain changes', async function (assert) {
+        assert.expect(5);
+
+        const form = await createView({
+            View: FormView,
+            model: 'partner',
+            data: this.data,
+            arch: `<form>
+                    <field name="int_field"/>
+                    <field name="timmy" widget="many2many_checkboxes" domain="[['id', '>', int_field]]"/>
+                </form>`,
+            res_id: 1,
+            viewOptions: {
+                mode: 'edit',
+            },
+        });
+
+        assert.strictEqual(form.$('.o_field_widget[name=int_field]').val(), '10');
+        assert.containsN(form, '.o_field_widget[name=timmy] .custom-checkbox', 2);
+        assert.strictEqual(form.$('.o_field_widget[name=timmy] .o_form_label').text(), 'goldsilver');
+
+        await testUtils.fields.editInput(form.$('.o_field_widget[name=int_field]'), 13);
+
+        assert.containsOnce(form, '.o_field_widget[name=timmy] .custom-checkbox');
+        assert.strictEqual(form.$('.o_field_widget[name=timmy] .o_form_label').text(), 'silver');
 
         form.destroy();
     });

@@ -7,7 +7,6 @@ import re
 from binascii import Error as binascii_error
 from collections import defaultdict
 from operator import itemgetter
-from email.utils import formataddr
 from odoo.http import request
 
 from odoo import _, api, fields, models, modules, tools
@@ -32,7 +31,7 @@ class Message(models.Model):
     @api.model
     def _get_default_from(self):
         if self.env.user.email:
-            return formataddr((self.env.user.name, self.env.user.email))
+            return tools.formataddr((self.env.user.name, self.env.user.email))
         raise UserError(_("Unable to post message, please configure the sender's email address."))
 
     @api.model
@@ -220,7 +219,7 @@ class Message(models.Model):
 
         ids = [n['mail_message_id'] for n in notifications.read(['mail_message_id'])]
 
-        notification = {'type': 'mark_as_read', 'message_ids': notifications}
+        notification = {'type': 'mark_as_read', 'message_ids': [id[0] for id in ids]}
         self.env['bus.bus'].sendone((self._cr.dbname, 'res.partner', partner_id), notification)
 
         return ids
@@ -305,7 +304,9 @@ class Message(models.Model):
         attachments = self.env['ir.attachment']
         message_ids = list(message_tree.keys())
         email_notification_tree = {}
-        for message in message_tree.values():
+        # By rebrowsing all the messages at once, we ensure all the messages
+        # to be on the same prefetch group, enhancing that way the performances
+        for message in self.sudo().browse(message_ids):
             if message.author_id:
                 partners |= message.author_id
             # find all notified partners
@@ -363,14 +364,21 @@ class Message(models.Model):
             for notification in email_notification_tree[message.id]:
                 customer_email_data.append((partner_tree[notification.res_partner_id.id][0], partner_tree[notification.res_partner_id.id][1], notification.notification_status))
 
-            has_access_to_model = message.model and self.env[message.model].check_access_rights('read', raise_exception=False)
-            if message.attachment_ids and message.res_id and issubclass(self.pool[message.model], self.pool['mail.thread']) and has_access_to_model:
-                main_attachment =  self.env[message.model].browse(message.res_id).message_main_attachment_id
             attachment_ids = []
-            for attachment in message.attachment_ids:
-                if attachment.id in attachments_tree:
-                    attachments_tree[attachment.id]['is_main'] = main_attachment == attachment
-                    attachment_ids.append(attachments_tree[attachment.id])
+            if message.attachment_ids:
+                has_access_to_model = message.model and self.env[message.model].check_access_rights('read', raise_exception=False)
+                main_attachment = None
+                if message.res_id and issubclass(self.pool[message.model], self.pool['mail.thread']) and has_access_to_model:
+                    try:
+                        main_attachment = self.env[message.model].browse(message.res_id).message_main_attachment_id
+                    except AccessError:
+                        # ignore main attachment if user do not have read access to record
+                        pass
+                for attachment in message.attachment_ids:
+                    if attachment.id in attachments_tree:
+                        attachments_tree[attachment.id]['is_main'] = main_attachment == attachment
+                        attachment_ids.append(attachments_tree[attachment.id])
+
             tracking_value_ids = []
             for tracking_value_id in message_to_tracking.get(message_id, list()):
                 if tracking_value_id in tracking_tree:
@@ -651,32 +659,33 @@ class Message(models.Model):
         self.env['mail.notification'].flush(['mail_message_id', 'res_partner_id'])
         self.env['mail.channel'].flush(['channel_message_ids'])
         self.env['mail.channel.partner'].flush(['channel_id', 'partner_id'])
-        self._cr.execute("""
-            SELECT DISTINCT m.id, m.model, m.res_id, m.author_id, m.message_type,
-                            COALESCE(partner_rel.res_partner_id, needaction_rel.res_partner_id),
-                            channel_partner.channel_id as channel_id
-            FROM "%s" m
-            LEFT JOIN "mail_message_res_partner_rel" partner_rel
-            ON partner_rel.mail_message_id = m.id AND partner_rel.res_partner_id = %%(pid)s
-            LEFT JOIN "mail_message_res_partner_needaction_rel" needaction_rel
-            ON needaction_rel.mail_message_id = m.id AND needaction_rel.res_partner_id = %%(pid)s
-            LEFT JOIN "mail_message_mail_channel_rel" channel_rel
-            ON channel_rel.mail_message_id = m.id
-            LEFT JOIN "mail_channel" channel
-            ON channel.id = channel_rel.mail_channel_id
-            LEFT JOIN "mail_channel_partner" channel_partner
-            ON channel_partner.channel_id = channel.id AND channel_partner.partner_id = %%(pid)s
+        for sub_ids in self._cr.split_for_in_conditions(ids):
+            self._cr.execute("""
+                SELECT DISTINCT m.id, m.model, m.res_id, m.author_id, m.message_type,
+                                COALESCE(partner_rel.res_partner_id, needaction_rel.res_partner_id),
+                                channel_partner.channel_id as channel_id
+                FROM "%s" m
+                LEFT JOIN "mail_message_res_partner_rel" partner_rel
+                ON partner_rel.mail_message_id = m.id AND partner_rel.res_partner_id = %%(pid)s
+                LEFT JOIN "mail_message_res_partner_needaction_rel" needaction_rel
+                ON needaction_rel.mail_message_id = m.id AND needaction_rel.res_partner_id = %%(pid)s
+                LEFT JOIN "mail_message_mail_channel_rel" channel_rel
+                ON channel_rel.mail_message_id = m.id
+                LEFT JOIN "mail_channel" channel
+                ON channel.id = channel_rel.mail_channel_id
+                LEFT JOIN "mail_channel_partner" channel_partner
+                ON channel_partner.channel_id = channel.id AND channel_partner.partner_id = %%(pid)s
 
-            WHERE m.id = ANY (%%(ids)s)""" % self._table, dict(pid=pid, ids=ids))
-        for id, rmod, rid, author_id, message_type, partner_id, channel_id in self._cr.fetchall():
-            if author_id == pid:
-                author_ids.add(id)
-            elif partner_id == pid:
-                partner_ids.add(id)
-            elif channel_id:
-                channel_ids.add(id)
-            elif rmod and rid and message_type != 'user_notification':
-                model_ids.setdefault(rmod, {}).setdefault(rid, set()).add(id)
+                WHERE m.id = ANY (%%(ids)s)""" % self._table, dict(pid=pid, ids=list(sub_ids)))
+            for id, rmod, rid, author_id, message_type, partner_id, channel_id in self._cr.fetchall():
+                if author_id == pid:
+                    author_ids.add(id)
+                elif partner_id == pid:
+                    partner_ids.add(id)
+                elif channel_id:
+                    channel_ids.add(id)
+                elif rmod and rid and message_type != 'user_notification':
+                    model_ids.setdefault(rmod, {}).setdefault(rid, set()).add(id)
 
         allowed_ids = self._find_allowed_doc_ids(model_ids)
 
@@ -1179,11 +1188,11 @@ class Message(models.Model):
             if not msg.email_from:
                 continue
             if self.env.user.partner_id.email:
-                email_from = formataddr((self.env.user.partner_id.name, self.env.user.partner_id.email))
+                email_from = tools.formataddr((self.env.user.partner_id.name, self.env.user.partner_id.email))
             else:
                 email_from = self.env.company.catchall
 
-            body_html = tools.append_content_to_html('<div>%s</div>' % tools.ustr(comment), msg.body)
+            body_html = tools.append_content_to_html('<div>%s</div>' % tools.ustr(comment), msg.body, plaintext=False)
             vals = {
                 'subject': subject,
                 'body_html': body_html,

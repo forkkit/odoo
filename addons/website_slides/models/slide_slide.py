@@ -107,12 +107,12 @@ class Slide(models.Model):
     _description = 'Slides'
     _mail_post_access = 'read'
     _order_by_strategy = {
-        'sequence': 'sequence asc',
+        'sequence': 'sequence asc, id asc',
         'most_viewed': 'total_views desc',
         'most_voted': 'likes desc',
         'latest': 'date_published desc',
     }
-    _order = 'sequence asc, is_category asc'
+    _order = 'sequence asc, is_category asc, id asc'
 
     # description
     name = fields.Char('Title', required=True, translate=True)
@@ -169,7 +169,7 @@ class Slide(models.Model):
     # views
     embedcount_ids = fields.One2many('slide.embed', 'slide_id', string="Embed Count")
     slide_views = fields.Integer('# of Website Views', store=True, compute="_compute_slide_views")
-    public_views = fields.Integer('# of Public Views')
+    public_views = fields.Integer('# of Public Views', copy=False)
     total_views = fields.Integer("Views", default="0", compute='_compute_total', store=True)
     # comments
     comments_count = fields.Integer('Number of comments', compute="_compute_comments_count")
@@ -260,12 +260,12 @@ class Slide(models.Model):
         for slide in self:
             slide.slide_views = mapped_data.get(slide.id, 0)
 
-    @api.depends('slide_ids.slide_type', 'slide_ids.is_published', 'slide_ids.is_category')
+    @api.depends('slide_ids.sequence', 'slide_ids.slide_type', 'slide_ids.is_published', 'slide_ids.is_category')
     def _compute_slides_statistics(self):
         # Do not use dict.fromkeys(self.ids, dict()) otherwise it will use the same dictionnary for all keys.
         # Therefore, when updating the dict of one key, it updates the dict of all keys.
         keys = ['nbr_%s' % slide_type for slide_type in self.env['slide.slide']._fields['slide_type'].get_values(self.env)]
-        default_vals = dict((key, 0) for key in keys)
+        default_vals = dict((key, 0) for key in keys + ['total_slides'])
 
         res = self.env['slide.slide'].read_group(
             [('is_published', '=', True), ('category_id', 'in', self.ids), ('is_category', '=', False)],
@@ -281,13 +281,14 @@ class Slide(models.Model):
         """ Compute statistics based on all existing slide types """
         slide_types = self.env['slide.slide']._fields['slide_type'].get_values(self.env)
         keys = ['nbr_%s' % slide_type for slide_type in slide_types]
-        result = dict((cid, dict((key, 0) for key in keys)) for cid in self.ids)
+        result = dict((cid, dict((key, 0) for key in keys + ['total_slides'])) for cid in self.ids)
         for res_group in read_group_res:
             cid = res_group['category_id'][0]
-            result[cid]['total_slides'] = 0
-            for slide_type in slide_types:
-                result[cid]['nbr_%s' % slide_type] += res_group.get('slide_type', '') == slide_type and res_group['__count'] or 0
-                result[cid]['total_slides'] += result[cid]['nbr_%s' % slide_type]
+            slide_type = res_group.get('slide_type')
+            if slide_type:
+                slide_type_count = res_group.get('__count', 0)
+                result[cid]['nbr_%s' % slide_type] = slide_type_count
+                result[cid]['total_slides'] += slide_type_count
         return result
 
     @api.depends('slide_partner_ids.partner_id')
@@ -316,7 +317,9 @@ class Slide(models.Model):
             elif record.slide_type == 'video' and record.document_id:
                 if not record.mime_type:
                     # embed youtube video
-                    record.embed_code = '<iframe src="//www.youtube.com/embed/%s?theme=light" allowFullScreen="true" frameborder="0"></iframe>' % (record.document_id)
+                    query = urls.url_parse(record.url).query
+                    query = query + '&theme=light' if query else 'theme=light'
+                    record.embed_code = '<iframe src="//www.youtube.com/embed/%s?%s" allowFullScreen="true" frameborder="0"></iframe>' % (record.document_id, query)
                 else:
                     # embed google doc video
                     record.embed_code = '<iframe src="//drive.google.com/file/d/%s/preview" allowFullScreen="true" frameborder="0"></iframe>' % (record.document_id)
@@ -431,6 +434,11 @@ class Slide(models.Model):
         rec = super(Slide, self).copy(default)
         rec.sequence = 0
         return rec
+
+    def unlink(self):
+        if self.question_ids and self.channel_id.channel_partner_ids:
+            raise UserError(_("People already took this quiz. To keep course progression it should not be deleted."))
+        super(Slide, self).unlink()
 
     # ---------------------------------------------------------
     # Mail/Rating

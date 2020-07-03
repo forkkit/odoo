@@ -45,12 +45,12 @@
         }
     }
 
-    function clickEverywhere(){
-        setTimeout(_clickEverywhere, 1000);
+    function clickEverywhere(menu_id){
+        setTimeout(_clickEverywhere, 1000, menu_id);
     }
 
     // Main function that starts orchestration of tests
-    function _clickEverywhere(){
+    function _clickEverywhere(menu_id){
         console.log("Starting ClickEverywhere test");
         var startTime = performance.now();
         createWebClientHooks();
@@ -61,24 +61,31 @@
         var $listOfAppMenuItems;
         if (isEnterprise) {
             console.log("Odoo flavor: Enterprise");
-            $listOfAppMenuItems = $(".o_app, .o_menuitem");
+            if (menu_id !== undefined) {
+                $listOfAppMenuItems = $('a.o_app.o_menuitem[data-menu=' + menu_id + ']');
+            } else {
+                $listOfAppMenuItems = $('a.o_app.o_menuitem');
+            }
         } else {
             console.log("Odoo flavor: Community");
-            $listOfAppMenuItems = $('a.o_app');
+            if (menu_id !== undefined) {
+                $listOfAppMenuItems = $('a.o_app[data-menu-id=' + menu_id + ']');
+            } else {
+                $listOfAppMenuItems = $('a.o_app');
+            }
         }
         console.log('Found ', $listOfAppMenuItems.length, 'apps to test');
 
         var testPromise = Promise.resolve();
         testPromise = chainDeferred($listOfAppMenuItems, testPromise, testApp);
         return testPromise.then(function () {
+            console.log("Test took ", (performance.now() - startTime) / 1000, " seconds");
             console.log("Successfully tested ", testedApps.length, " apps");
             console.log("Successfully tested ", testedMenus.length - testedApps.length, " menus");
             console.log("test successful");
+        }).catch(function (error) {
             console.log("Test took ", (performance.now() - startTime) / 1000, " seconds");
-        }).catch(function () {
-            console.log("Test took ", (performance.now() - startTime) / 1000, " seconds");
-            console.error('test failed')
-            console.error("Error !");
+            console.error(error || 'test failed');
         });
     }
 
@@ -125,7 +132,8 @@
      */
     function testMenuItem(element){
         if (testedMenus.indexOf(element.dataset.menuXmlid) >= 0) return Promise.resolve(); // Avoid infinite loop
-        console.log("Testing menu", element.innerText.trim(), " ", element.dataset.menuXmlid);
+        var menuDescription = element.innerText.trim() + " " + element.dataset.menuXmlid;
+        console.log("Testing menu", menuDescription);
         testedMenus.push(element.dataset.menuXmlid);
         if (blackListedMenus.includes(element.dataset.menuXmlid)) return Promise.resolve(); // Skip black listed menus
         var startActionCount = clientActionCount;
@@ -153,7 +161,7 @@
                 return testViews();
             }
         }).catch(function () {
-            console.error("Error while testing", element);
+            console.error("Error while testing", menuDescription);
             return Promise.reject();
         });
     };
@@ -258,7 +266,7 @@
                         // recursive call until the resolve or the timeout
                         setTimeout(checkCondition, interval);
                     } else {
-                        console.error("Timeout exceeded", stopCondition);
+                        console.error('Timeout, the clicked element took more than 5 seconds to load');
                         reject();
                     }
                 }

@@ -2,7 +2,6 @@ odoo.define('web.field_many_to_one_tests', function (require) {
 "use strict";
 
 var BasicModel = require('web.BasicModel');
-var concurrency = require('web.concurrency');
 var FormView = require('web.FormView');
 var ListView = require('web.ListView');
 var relationalFields = require('web.relational_fields');
@@ -786,6 +785,41 @@ QUnit.module('fields', {}, function () {
 
             assert.hasAttrValue(form.$('a.o_form_uri'), 'href', "#",
                 "href should have #");
+
+            form.destroy();
+        });
+
+        QUnit.test('many2one with co-model whose name field is a many2one', async function (assert) {
+            assert.expect(4);
+
+            this.data.product.fields.name = {
+                string: 'User Name',
+                type: 'many2one',
+                relation: 'user',
+            };
+
+            const form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: '<form><field name="product_id"/></form>',
+                archs: {
+                    'product,false,form': '<form><field name="name"/></form>',
+                },
+            });
+
+            // click on 'Create and Edit' in m2o dropdown
+            await testUtils.fields.many2one.clickOpenDropdown('product_id');
+            await testUtils.fields.many2one.clickItem('product_id', 'Create and Edit');
+            assert.containsOnce(document.body, '.modal .o_form_view');
+
+            // quick create 'new value'
+            await testUtils.fields.many2one.searchAndClickItem('name', {search: 'new value'});
+            assert.strictEqual($('.modal .o_field_many2one input').val(), 'new value');
+
+            await testUtils.dom.click($('.modal .modal-footer .btn-primary')); // save in modal
+            assert.containsNone(document.body, '.modal .o_form_view');
+            assert.strictEqual(form.$('.o_field_many2one input').val(), 'new value');
 
             form.destroy();
         });
@@ -2753,6 +2787,66 @@ QUnit.module('fields', {}, function () {
                 "the modal should be closed");
             assert.equal(form.$('.o_data_cell:contains(test)').text(), 'test',
                 "the partner name should have been updated to 'test'");
+
+            form.destroy();
+        });
+
+        QUnit.test('search more in many2one: resequence inside dialog', async function (assert) {
+            // when the user clicks on 'Search More...' in a many2one dropdown, resequencing inside
+            // the dialog works
+            assert.expect(10);
+
+            this.data.partner.fields.sequence = { string: 'Sequence', type: 'integer' };
+            for (var i = 0; i < 8; i++) {
+                this.data.partner.records.push({id: 100 + i, display_name: 'test_' + i});
+            }
+
+            var form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: '<form><field name="trululu"/></form>',
+                archs: {
+                    'partner,false,list': '<list>' +
+                        '<field name="sequence" widget="handle"/>' +
+                        '<field name="display_name"/>' +
+                    '</list>',
+                    'partner,false,search': '<search></search>',
+                },
+                mockRPC: function (route, args) {
+                    assert.step(args.method || route);
+                    if (route === '/web/dataset/search_read') {
+                        assert.deepEqual(args.domain, [],
+                            "should not preselect ids as there as nothing in the m2o input");
+                    }
+                    return this._super.apply(this, arguments);
+                },
+            });
+
+            await testUtils.fields.many2one.searchAndClickItem('trululu', {
+                item: 'Search More',
+                search: '',
+            });
+
+            var $modal = $('.modal');
+            assert.equal($modal.length, 1,
+                'There should be 1 modal opened');
+
+            var $handles = $modal.find('.ui-sortable-handle');
+            assert.equal($handles.length, 11,
+                'There should be 11 sequence handlers');
+
+            await testUtils.dom.dragAndDrop($handles.eq(1),
+                $modal.find('tbody tr').first(), { position: 'top' });
+
+            assert.verifySteps([
+                'default_get',
+                'name_search', // to display results in the dropdown
+                'load_views', // list view in dialog
+                '/web/dataset/search_read', // to display results in the dialog
+                '/web/dataset/resequence', // resequencing lines
+                'read',
+            ]);
 
             form.destroy();
         });

@@ -239,6 +239,7 @@ var KanbanController = BasicController.extend({
             }).then(function () {
                 self._updateButtons();
                 self.renderer.quickCreateToggleFold();
+                self.renderer.trigger_up("quick_create_column_created");
             });
         });
     },
@@ -523,16 +524,20 @@ var KanbanController = BasicController.extend({
      */
     _onToggleActiveRecords: function (ev) {
         var self = this;
+        var archive = ev.data.archive;
         var column = ev.target;
         var recordIds = _.pluck(column.records, 'db_id');
         if (recordIds.length) {
-            this.model
-                .toggleActive(recordIds, column.db_id)
-                .then(function (dbID) {
+            var prom = archive ?
+              this.model.actionArchive(recordIds, column.db_id) :
+              this.model.actionUnarchive(recordIds, column.db_id);
+            prom.then(function (dbID) {
+                if (_.isString(dbID)) {
                     var data = self.model.get(dbID);
                     self.renderer.updateColumn(dbID, data);
                     self._updateEnv();
-                });
+                }
+            });
         }
     },
 });

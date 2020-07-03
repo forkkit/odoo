@@ -261,6 +261,17 @@ class TestM2M(TransactionCase):
         f.save()
         self.assertEqual(r.m2m, a)
 
+    def test_attr(self):
+        f = Form(self.env['test_testing_utilities.e'], view='test_testing_utilities.attrs_using_m2m')
+        with self.assertRaises(AssertionError):
+            f.count = 5
+        f.m2m.add(self.env['test_testing_utilities.sub2'].create({'name': 'ok'}))
+        f.count = 5
+        r = f.save()
+        self.assertEqual(
+            r.m2m.mapped('name'),
+            ['ok', '1', '2', '3', '4']
+        )
 
 get = itemgetter('name', 'value', 'v')
 class TestO2M(TransactionCase):
@@ -507,6 +518,154 @@ class TestO2M(TransactionCase):
         )
         f = Form(Model, view='test_testing_utilities.o2m_modifier')
         f.save()
+
+    def test_o2m_widget(self):
+        create = self.env['test_testing_utilities.sub'].create
+        a, b, c = create({'v': 1}), create({'v': 2}), create({'v': 3})
+
+        f = Form(self.env['test_testing_utilities.parent'], view='test_testing_utilities.o2m_widget_m2m')
+        f.subs.add(a)
+        f.subs.add(b)
+        f.subs.add(c)
+        r = f.save()
+
+        self.assertEqual(
+            r.subs,
+            a | b | c
+        )
+
+    def test_o2m_onchange_change_saved(self):
+        """ If an onchange updates o2m values (in existing sub-records of an
+        existing record), those updated values should be saved, both if the
+        sub-records were touched by the user and not (check that one maybe)
+        """
+        # create record: line created before v is updated should reflect it,
+        # line created after should not
+        f = Form(self.env['o2m_changes_children'])
+        with f.line_ids.new() as line:
+            line.v = 1
+            line.vv = 5
+        f.v = 5
+        with f.line_ids.new() as line:
+            ...
+        r = f.save()
+        self.assertEqual(r.v, 5)
+        self.assertEqual(r.mapped('line_ids.vv'), [5, 0])
+        self.assertEqual(r.line_ids[0].v, 5, "onchange should have updated the existing lines")
+        self.assertEqual(r.line_ids[1].v, 0, "onchange should not impact new line")
+
+        # update record: onchange then touch the lines
+        with Form(r) as f:
+            f.v = 6
+            with f.line_ids.edit(0) as line:
+                line.vv = 1
+            with f.line_ids.edit(1) as line:
+                line.vv = 2
+        self.assertEqual(r.v, 6)
+        self.assertEqual(r.mapped('line_ids.vv'), [1, 2])
+        self.assertEqual(r.mapped('line_ids.v'), [6, 6], "onchange should have updated vs")
+
+        # update record: onchange then don't even touch the lines
+        with Form(r) as f:
+            f.v = 7
+        self.assertEqual(r.v, 7)
+        self.assertEqual(r.mapped('line_ids.vv'), [1, 2])
+        self.assertEqual(r.mapped('line_ids.v'), [7, 7])
+
+class TestNestedO2M(TransactionCase):
+    def test_id_cannot_be_assigned(self):
+        # MO with:
+        # produces product0
+        # produces 1 (product_qty)
+        # flexible BOM produces 1
+        # bom consumes 4x product 1
+        # bom consumes 1x product 2
+        product0 = self.env['ttu.product'].create({}).id
+        product1 = self.env['ttu.product'].create({}).id
+        product2 = self.env['ttu.product'].create({}).id
+        # create pseudo-MO in post-asigned state
+        obj = self.env['ttu.root'].create({
+            'product_id': product0,
+            'product_qty': 1.0,
+            # qty_producing=0 (onchange)
+            # qty_produced=0 (computed)
+            'move_raw_ids': [
+                (0, 0, {
+                    'product_id': product2,
+                    # quantity_done=0 (computed)
+                    'move_line_ids': [(0, 0, {
+                        'product_id': product2,
+                        'product_uom_qty': 1.0,
+                        'qty_done': 0.0 # -> 1.0
+                    })] # -> new line with qty=0, qty_done=2
+                }),
+                (0, 0, {
+                    'product_id': product1,
+                    'unit_factor': 4,
+                    'move_line_ids': [(0, 0, {
+                        'product_id': product1,
+                        'product_uom_qty': 4.0,
+                        'qty_done': 0.0 # -> 4.0
+                    })] # -> new line with qty=0, qty_done=8
+                })
+            ],
+            'move_finished_ids': [(0, 0, {'product_id': product0})]
+            # -> new line with qty=0, qty_done=3
+        })
+        form = Form(obj)
+        form.qty_producing = 1
+        form._perform_onchange(['move_raw_ids'])
+        form.save()
+
+    def test_empty_update(self):
+        # MO with:
+        # produces product0
+        # produces 1 (product_qty)
+        # flexible BOM produces 1
+        # bom consumes 4x product 1
+        # bom consumes 1x product 2
+        product0 = self.env['ttu.product'].create({}).id
+        product1 = self.env['ttu.product'].create({}).id
+        product2 = self.env['ttu.product'].create({}).id
+        product4 = self.env['ttu.product'].create({})
+        # create pseudo-MO in post-asigned state
+        obj = self.env['ttu.root'].create({
+            'product_id': product0,
+            'product_qty': 1.0,
+            # qty_producing=0 (onchange)
+            # qty_produced=0 (computed)
+            'move_raw_ids': [
+                (0, 0, {
+                    'product_id': product2,
+                    # quantity_done=0 (computed)
+                    'move_line_ids': [(0, 0, {
+                        'product_id': product2,
+                        'product_uom_qty': 1.0,
+                        'qty_done': 0.0 # -> 1.0
+                    })] # -> new line with qty=0, qty_done=2
+                }),
+                (0, 0, {
+                    'product_id': product1,
+                    'unit_factor': 4,
+                    'move_line_ids': [(0, 0, {
+                        'product_id': product1,
+                        'product_uom_qty': 4.0,
+                        'qty_done': 0.0 # -> 4.0
+                    })] # -> new line with qty=0, qty_done=8
+                })
+            ],
+            'move_finished_ids': [(0, 0, {'product_id': product0})]
+            # -> new line with qty=0, qty_done=3
+        })
+        form = Form(obj)
+        form.qty_producing = 1
+        form.save()
+        with form.move_raw_ids.new() as move:
+            move.product_id = product4
+            move.quantity_done = 10
+        # Check that this new product is not updated by qty_producing
+        form.qty_producing = 2
+        form.save()
 
 class TestEdition(TransactionCase):
     """ These use the context manager form as we don't need the record

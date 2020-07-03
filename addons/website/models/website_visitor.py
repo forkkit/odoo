@@ -70,16 +70,16 @@ class WebsiteVisitor(models.Model):
             (record.name or _('Website Visitor #%s') % record.id)
         ) for record in self]
 
-    @api.depends('partner_id.email_normalized', 'partner_id.mobile')
+    @api.depends('partner_id.email_normalized', 'partner_id.mobile', 'partner_id.phone')
     def _compute_email_phone(self):
         results = self.env['res.partner'].search_read(
             [('id', 'in', self.partner_id.ids)],
-            ['id', 'email_normalized', 'mobile'],
+            ['id', 'email_normalized', 'mobile', 'phone'],
         )
         mapped_data = {
             result['id']: {
                 'email_normalized': result['email_normalized'],
-                'mobile': result['mobile']
+                'mobile': result['mobile'] if result['mobile'] else result['phone']
             } for result in results
         }
 
@@ -117,13 +117,9 @@ class WebsiteVisitor(models.Model):
 
     @api.depends('last_connection_datetime')
     def _compute_time_statistics(self):
-        results = self.env['website.visitor'].search_read([('id', 'in', self.ids)], ['id', 'last_connection_datetime'])
-        mapped_data = {result['id']: result['last_connection_datetime'] for result in results}
-
         for visitor in self:
-            last_connection_date = mapped_data[visitor.id]
-            visitor.time_since_last_action = _format_time_ago(self.env, (datetime.now() - last_connection_date))
-            visitor.is_connected = (datetime.now() - last_connection_date) < timedelta(minutes=5)
+            visitor.time_since_last_action = _format_time_ago(self.env, (datetime.now() - visitor.last_connection_datetime))
+            visitor.is_connected = (datetime.now() - visitor.last_connection_datetime) < timedelta(minutes=5)
 
     def _prepare_visitor_send_mail_values(self):
         if self.partner_id.email:
@@ -159,7 +155,7 @@ class WebsiteVisitor(models.Model):
             'context': ctx,
         }
 
-    def _get_visitor_from_request(self):
+    def _get_visitor_from_request(self, force_create=False):
         """ Return the visitor as sudo from the request if there is a visitor_uuid cookie.
             It is possible that the partner has changed or has disconnected.
             In that case the cookie is still referencing the old visitor and need to be replaced
@@ -167,35 +163,35 @@ class WebsiteVisitor(models.Model):
 
         # This function can be called in json with mobile app.
         # In case of mobile app, no uid is set on the jsonRequest env.
-        if not request or not request.env.uid:
+        # In case of multi db, _env is None on request, and request.env unbound.
+        if not request:
             return None
         Visitor = self.env['website.visitor'].sudo()
         visitor = Visitor
         access_token = request.httprequest.cookies.get('visitor_uuid')
         if access_token:
             visitor = Visitor.with_context(active_test=False).search([('access_token', '=', access_token)])
+            # Prefetch access_token and other fields. Since access_token has a restricted group and we access
+            # a non restricted field (partner_id) first it is not fetched and will require an additional query to be retrieved.
+            visitor.access_token
 
-        if not request.env.user._is_public():
-            partner_id = request.env.user.partner_id
-            if not visitor or visitor.partner_id != partner_id:
+        if not self.env.user._is_public():
+            partner_id = self.env.user.partner_id
+            if not visitor or visitor.partner_id and visitor.partner_id != partner_id:
                 # Partner and no cookie or wrong cookie
                 visitor = Visitor.with_context(active_test=False).search([('partner_id', '=', partner_id.id)])
         elif visitor and visitor.partner_id:
             # Cookie associated to a Partner
             visitor = Visitor
-        return visitor
 
-    def _get_visitor_from_request_or_create(self):
-        """ Return a tuple (visitor, response), see _get_visitor_from_request
-            If there is no visitor creates it and ensure the consistancy of the cookie. """
-        visitor_sudo = self._get_visitor_from_request()
-        if not visitor_sudo:
-            visitor_sudo = self._create_visitor()
-        return visitor_sudo
+        if force_create and not visitor:
+            visitor = self._create_visitor()
+
+        return visitor
 
     def _handle_webpage_dispatch(self, response, website_page):
         # get visitor. Done here to avoid having to do it multiple times in case of override.
-        visitor_sudo = self._get_visitor_from_request_or_create()
+        visitor_sudo = self._get_visitor_from_request(force_create=True)
         if request.httprequest.cookies.get('visitor_uuid', '') != visitor_sudo.access_token:
             expiration_date = datetime.now() + timedelta(days=365)
             response.set_cookie('visitor_uuid', visitor_sudo.access_token, expires=expiration_date)
@@ -254,7 +250,7 @@ class WebsiteVisitor(models.Model):
         """ We need to do this part here to avoid concurrent updates error. """
         try:
             with self.env.cr.savepoint():
-                query_lock = "SELECT * FROM website_visitor where id = %s FOR UPDATE NOWAIT"
+                query_lock = "SELECT * FROM website_visitor where id = %s FOR NO KEY UPDATE NOWAIT"
                 self.env.cr.execute(query_lock, (self.id,), log_exceptions=False)
 
                 date_now = datetime.now()

@@ -108,18 +108,21 @@ class AccountMove(models.Model):
                         invoice_form.partner_id = self.env['res.partner']
 
             # Regenerate PDF
+            attachments = self.env['ir.attachment']
             elements = tree.xpath('//cac:AdditionalDocumentReference', namespaces=namespaces)
-            if elements:
-                attachment_name = elements[0].xpath('cbc:ID', namespaces=namespaces)[0].text
-                attachment_data = elements[0].xpath('cac:Attachment//cbc:EmbeddedDocumentBinaryObject', namespaces=namespaces)[0].text
-                attachment_id = self.env['ir.attachment'].create({
-                    'name': attachment_name,
-                    'res_id': self.id,
-                    'res_model': 'account.move',
-                    'datas': attachment_data,
-                    'type': 'binary',
-                })
-                self.with_context(no_new_invoice=True).message_post(attachment_ids=[attachment_id.id])
+            for element in elements:
+                attachment_name = element.xpath('cbc:ID', namespaces=namespaces)
+                attachment_data = element.xpath('cac:Attachment//cbc:EmbeddedDocumentBinaryObject', namespaces=namespaces)
+                if attachment_name and attachment_data:
+                    attachments |= self.env['ir.attachment'].create({
+                        'name': attachment_name[0].text,
+                        'res_id': self.id,
+                        'res_model': 'account.move',
+                        'datas': attachment_data[0].text,
+                        'type': 'binary',
+                    })
+            if attachments:
+                self.with_context(no_new_invoice=True).message_post(attachment_ids=attachments.ids)
 
             # Lines
             lines_elements = tree.xpath('//cac:InvoiceLine', namespaces=namespaces)
@@ -132,7 +135,10 @@ class AccountMove(models.Model):
 
                     # Price Unit
                     elements = eline.xpath('cac:Price/cbc:PriceAmount', namespaces=namespaces)
-                    invoice_line_form.price_unit = elements and float(elements[0].text) or 0.0
+                    price_unit = elements and float(elements[0].text) or 0.0
+                    elements = eline.xpath('cbc:LineExtensionAmount', namespaces=namespaces)
+                    line_extension_amount = elements and float(elements[0].text) or 0.0
+                    invoice_line_form.price_unit = price_unit or line_extension_amount / invoice_line_form.quantity or 0.0
 
                     # Name
                     elements = eline.xpath('cac:Item/cbc:Description', namespaces=namespaces)

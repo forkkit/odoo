@@ -697,7 +697,7 @@
                                     <td class='col-change' ></td>
                                 </t>
 
-                                <td class='col-name' > <t t-esc='line.name' /> </td>
+                                <td class='col-name' > <t t-esc='line.payment_method.name' /> </td>
                                 <t t-if="line &amp;&amp; line.payment_status &amp;&amp; ['done', 'reversed', 'reversing'].includes(line.payment_status)">
                                     <td/>
                                 </t>
@@ -857,9 +857,7 @@
                     </span>
                 </div>
                 <div class="centered-content touch-scrollable">
-                    <div class="button print_invoice">
-                        <i class='fa fa-print'></i> Print Invoice
-                    </div>
+                    <h2 class="print_invoice">The order has been synchronized earlier. To print the invoice please refer to the order in the backend</h2>
                     <div class="button print">
                         <i class='fa fa-print'></i> Print Receipt
                     </div>
@@ -870,11 +868,7 @@
         </div>
     </t>
 
-    <t t-name="OrderReceiptWrappedProductNameLines">
-        <t t-foreach="line.product_name_wrapped.slice(1)" t-as="wrapped_line">
-            <t t-esc="wrapped_line"/>
-        </t>
-    </t>
+    <t t-name="OrderReceiptWrappedProductNameLines"><t t-foreach="line.product_name_wrapped.slice(1)" t-as="wrapped_line"><t t-esc="wrapped_line"/></t></t>
 
     <t t-name="OrderReceipt">
         <div class="pos-receipt">
@@ -925,21 +919,9 @@
                 <t t-foreach='receipt.orderlines' t-as='line'>
                     <t t-set='simple' t-value='(line.discount === 0 and line.unit_name === "Units" and line.quantity === 1 and !discount_to_show and !(line.display_discount_policy == "without_discount" &amp;&amp; line.price != line.price_lst))' />
                     <t t-if='simple'>
-                        <div>
-                            <t t-esc='line.product_name_wrapped[0]' />
-                            <span t-esc='widget.format_currency_no_symbol(line.price_display)' class="price_display pos-receipt-right-align"/>
-                        </div>
-                        <t t-call="OrderReceiptWrappedProductNameLines"/>
-                    </t>
+                        <div><t t-esc='line.product_name_wrapped[0]' /><span t-esc='widget.format_currency_no_symbol(line.price_display)' class="price_display pos-receipt-right-align"/></div><t t-call="OrderReceiptWrappedProductNameLines"/></t>
                     <t t-if='!simple'>
-                        <div t-esc='line.product_name_wrapped[0]'/>
-                        <t t-call="OrderReceiptWrappedProductNameLines"/>
-                        <t t-if="line.display_discount_policy == 'without_discount' &amp;&amp; line.price != line.price_lst">
-                            <div class="pos-receipt-left-padding">
-                                <t t-esc="widget.format_currency_no_symbol(line.price_lst)" />
-                                ->
-                                <t t-esc="widget.format_currency_no_symbol(line.price)" />
-                            </div>
+                        <div t-esc='line.product_name_wrapped[0]'/><t t-call="OrderReceiptWrappedProductNameLines"/><t t-if="line.display_discount_policy == 'without_discount' &amp;&amp; line.price != line.price_lst"><div class="pos-receipt-left-padding"><t t-esc="widget.format_currency_no_symbol(line.price_lst)" />-><t t-esc="widget.format_currency_no_symbol(line.price)" /></div>
                         </t>
                         <t t-elif='line.discount !== 0'>
                             <div class="pos-receipt-left-padding">
@@ -975,7 +957,7 @@
             <t t-if='!taxincluded'>
                 <div class="pos-receipt-right-align">--------</div>
                 <br/>
-                <div>Subtotal<span t-esc='widget.format_currency_no_symbol(receipt.subtotal)' class="pos-receipt-right-align"/></div>
+                <div>Subtotal<span t-esc='widget.format_currency(receipt.subtotal)' class="pos-receipt-right-align"/></div>
                 <t t-foreach='receipt.tax_details' t-as='tax'>
                     <div>
                         <t t-esc='tax.name' />
@@ -989,7 +971,7 @@
             <br/>
             <div class="pos-receipt-amount">
                 TOTAL
-                <span t-esc='widget.format_currency_no_symbol(receipt.total_with_tax)' class="pos-receipt-right-align"/>
+                <span t-esc='widget.format_currency(receipt.total_with_tax)' class="pos-receipt-right-align"/>
             </div>
             <br/><br/>
 
@@ -1005,7 +987,7 @@
 
             <div class="pos-receipt-amount receipt-change">
                 CHANGE
-                <span t-esc='widget.format_currency_no_symbol(receipt.change)' class="pos-receipt-right-align"/>
+                <span t-esc='widget.format_currency(receipt.change)' class="pos-receipt-right-align"/>
             </div>
             <br/>
 
@@ -1014,7 +996,7 @@
             <t t-if='receipt.total_discount'>
                 <div>
                     Discounts
-                    <span t-esc='widget.format_currency_no_symbol(receipt.total_discount)' class="pos-receipt-right-align"/>
+                    <span t-esc='widget.format_currency(receipt.total_discount)' class="pos-receipt-right-align"/>
                 </div>
             </t>
             <t t-if='taxincluded'>
@@ -1026,7 +1008,7 @@
                 </t>
                 <div>
                     Total Taxes
-                    <span t-esc='widget.format_currency_no_symbol(receipt.total_tax)' class="pos-receipt-right-align"/>
+                    <span t-esc='widget.format_currency(receipt.total_tax)' class="pos-receipt-right-align"/>
                 </div>
             </t>
 
@@ -1464,7 +1446,7 @@
                         <t t-if="line.display_discount_policy() == 'without_discount' &amp;&amp;
                             line.get_unit_display_price() != line.get_lst_price()">
                             <s>
-                                <t t-esc="widget.format_currency(line.get_lst_price(),'Product Price')" />
+                                <t t-esc="widget.format_currency(line.get_fixed_lst_price(),'Product Price')" />
                             </s>
                             <t t-esc="widget.format_currency(line.get_unit_display_price(),'Product Price')" />
                         </t>

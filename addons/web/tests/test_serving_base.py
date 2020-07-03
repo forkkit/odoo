@@ -3,16 +3,17 @@
 
 import random
 import re
-import unittest
 from unittest.mock import patch
 import textwrap
 from datetime import datetime, timedelta
 from lxml import etree
+import logging
 
 from odoo.tests.common import BaseCase, tagged
 from odoo.tools import topological_sort
 from odoo.addons.web.controllers.main import HomeStaticTemplateHelpers
 
+_logger = logging.getLogger(__name__)
 
 def sample(population):
     return random.sample(
@@ -45,11 +46,10 @@ class TestModulesLoading(BaseCase):
             seen.add(module)
 
 
-@tagged('standard', 'at_install', 'static_templates')
-class TestStaticInheritance(unittest.TestCase):
+class TestStaticInheritanceCommon(BaseCase):
 
     def setUp(self):
-        super(TestStaticInheritance, self).setUp()
+        super(TestStaticInheritanceCommon, self).setUp()
         # output is "manifest_glob" return
         self.modules = [
             ('module_1_file_1', None, 'module_1'),
@@ -95,7 +95,7 @@ class TestStaticInheritance(unittest.TestCase):
         self._reg_replace_ws = r"\s|\t"
 
     def tearDown(self):
-        super(TestStaticInheritance, self).tearDown()
+        super(TestStaticInheritanceCommon, self).tearDown()
         self._toggle_patchers('stop')
 
     # Custom Assert
@@ -131,6 +131,9 @@ class TestStaticInheritance(unittest.TestCase):
         for p in self.patchers:
             getattr(p, mode)()
 
+
+@tagged('static_templates')
+class TestStaticInheritance(TestStaticInheritanceCommon):
     # Actual test cases
     def test_static_inheritance_01(self):
         contents = HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=True)
@@ -367,6 +370,276 @@ class TestStaticInheritance(unittest.TestCase):
             'No template found to inherit from. Module module_2 and template name template_2_2'
         )
 
+    def test_replace_in_debug_mode(self):
+        """
+        Replacing a template's meta definition in place doesn't keep the original attrs of the template
+        """
+        self.modules = [
+            ('module_1_file_1', None, 'module_1'),
+        ]
+        self.template_files = {
+            'module_1_file_1': b"""
+                <templates id="template" xml:space="preserve">
+                    <form t-name="template_1_1" random-attr="gloria">
+                        <div>At first I was afraid</div>
+                    </form>
+                    <t t-name="template_1_2" t-inherit="template_1_1" t-inherit-mode="extension">
+                        <xpath expr="." position="replace">
+                            <div overriden-attr="overriden">And I grew strong</div>
+                        </xpath>
+                    </t>
+                </templates>
+                """,
+        }
+
+        contents = HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=True)
+        expected = b"""
+            <templates>
+                <form overriden-attr="overriden">
+                    <!-- Modified by template_1_2 from module_1 -->And I grew strong
+                </form>
+            </templates>
+        """
+
+        self.assertXMLEqual(contents, expected)
+
+    def test_replace_in_debug_mode2(self):
+        self.modules = [
+            ('module_1_file_1', None, 'module_1'),
+        ]
+        self.template_files = {
+            'module_1_file_1': b"""
+                <templates id="template" xml:space="preserve">
+                    <form t-name="template_1_1" random-attr="gloria">
+                        <div>At first I was afraid</div>
+                    </form>
+                    <t t-name="template_1_2" t-inherit="template_1_1" t-inherit-mode="extension">
+                        <xpath expr="." position="replace">
+                            <div>
+                                And I grew strong
+                                <p>And I learned how to get along</p>
+                                And so you're back
+                            </div>
+                        </xpath>
+                    </t>
+                </templates>
+                """,
+        }
+
+        contents = HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=True)
+        expected = b"""
+            <templates>
+                <form>
+                    <!-- Modified by template_1_2 from module_1 -->And I grew strong
+                    <p>And I learned how to get along</p>
+                    And so you're back
+                </form>
+            </templates>
+        """
+
+        self.assertXMLEqual(contents, expected)
+
+    def test_replace_in_debug_mode3(self):
+        """Text outside of a div which will replace a whole template
+        becomes outside of the template
+        This doesn't mean anything in terms of the business of template inheritance
+        But it is in the XPATH specs"""
+        self.modules = [
+            ('module_1_file_1', None, 'module_1'),
+        ]
+        self.template_files = {
+            'module_1_file_1': b"""
+                <templates id="template" xml:space="preserve">
+                    <form t-name="template_1_1" random-attr="gloria">
+                        <div>At first I was afraid</div>
+                    </form>
+                    <t t-name="template_1_2" t-inherit="template_1_1" t-inherit-mode="extension">
+                        <xpath expr="." position="replace">
+                            <div>
+                                And I grew strong
+                                <p>And I learned how to get along</p>
+                            </div>
+                            And so you're back
+                        </xpath>
+                    </t>
+                </templates>
+                """,
+        }
+
+        contents = HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=True)
+        expected = b"""
+            <templates>
+                <form>
+                    <!-- Modified by template_1_2 from module_1 -->
+                    And I grew strong
+                    <p>And I learned how to get along</p>
+                </form>
+                And so you're back
+            </templates>
+        """
+
+        self.assertXMLEqual(contents, expected)
+
+    def test_replace_root_node_tag(self):
+        """
+        Root node is not targeted by //NODE_TAG in xpath
+        """
+        self.modules = [
+            ('module_1_file_1', None, 'module_1'),
+        ]
+        self.template_files = {
+            'module_1_file_1': b"""
+                <templates id="template" xml:space="preserve">
+                    <form t-name="template_1_1" random-attr="gloria">
+                        <div>At first I was afraid</div>
+                        <form>Inner Form</form>
+                    </form>
+                    <t t-name="template_1_2" t-inherit="template_1_1" t-inherit-mode="extension">
+                        <xpath expr="//form" position="replace">
+                            <div>
+                                Form replacer
+                            </div>
+                        </xpath>
+                    </t>
+                </templates>
+                """,
+        }
+
+        contents = HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=True)
+        expected = b"""
+            <templates>
+                <form t-name="template_1_1" random-attr="gloria">
+                    <div>At first I was afraid</div>
+                    <!-- Modified by template_1_2 from module_1 -->
+                    <div>Form replacer</div>
+                </form>
+            </templates>
+        """
+
+        self.assertXMLEqual(contents, expected)
+
+    def test_replace_root_node_tag_in_primary(self):
+        """
+        Root node is not targeted by //NODE_TAG in xpath
+        """
+        self.maxDiff = None
+        self.modules = [
+            ('module_1_file_1', None, 'module_1'),
+        ]
+        self.template_files = {
+            'module_1_file_1': b"""
+                <templates id="template" xml:space="preserve">
+                    <form t-name="template_1_1" random-attr="gloria">
+                        <div>At first I was afraid</div>
+                        <form>Inner Form</form>
+                    </form>
+                    <t t-name="template_1_2" t-inherit="template_1_1" t-inherit-mode="primary">
+                        <xpath expr="//form" position="replace">
+                            <div>Form replacer</div>
+                        </xpath>
+                    </t>
+                </templates>
+                """,
+        }
+
+        contents = HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=True)
+        expected = b"""
+            <templates>
+                <form t-name="template_1_1" random-attr="gloria">
+                    <div>At first I was afraid</div>
+                    <form>Inner Form</form>
+                </form>
+                <form t-name="template_1_2" random-attr="gloria" t-inherit="template_1_1">
+                    <div>At first I was afraid</div>
+                    <div>Form replacer</div>
+                </form>
+            </templates>
+        """
+
+        self.assertXMLEqual(contents, expected)
+
+    def test_inherit_primary_replace_debug(self):
+        """
+        The inheriting template has got both its own defining attrs
+        and new ones if one is to replace its defining root node
+        """
+        self.modules = [
+            ('module_1_file_1', None, 'module_1'),
+        ]
+        self.template_files = {
+            'module_1_file_1': b"""
+                <templates id="template" xml:space="preserve">
+                    <form t-name="template_1_1" random-attr="gloria">
+                        <div>At first I was afraid</div>
+                    </form>
+                    <t t-name="template_1_2" t-inherit="template_1_1" t-inherit-mode="primary">
+                        <xpath expr="." position="replace">
+                            <div overriden-attr="overriden">
+                                And I grew strong
+                                <p>And I learned how to get along</p>
+                            </div>
+                        </xpath>
+                    </t>
+                </templates>
+                """,
+        }
+
+        contents = HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=True)
+        expected = b"""
+            <templates>
+                <form t-name="template_1_1" random-attr="gloria">
+                    <div>At first I was afraid</div>
+                 </form>
+                 <form overriden-attr="overriden" t-name="template_1_2" t-inherit="template_1_1">
+                    And I grew strong
+                    <p>And I learned how to get along</p>
+                 </form>
+            </templates>
+        """
+
+        self.assertXMLEqual(contents, expected)
+
+    def test_replace_in_nodebug_mode1(self):
+        """Comments already in the arch are ignored"""
+        self.modules = [
+            ('module_1_file_1', None, 'module_1'),
+        ]
+        self.template_files = {
+            'module_1_file_1': b"""
+                <templates id="template" xml:space="preserve">
+                    <form t-name="template_1_1" random-attr="gloria">
+                        <div>At first I was afraid</div>
+                    </form>
+                    <t t-name="template_1_2" t-inherit="template_1_1" t-inherit-mode="extension">
+                        <xpath expr="." position="replace">
+                            <div>
+                                <!-- Random Comment -->
+                                And I grew strong
+                                <p>And I learned how to get along</p>
+                                And so you're back
+                            </div>
+                        </xpath>
+                    </t>
+                </templates>
+                """,
+        }
+
+        contents = HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=False)
+        expected = b"""
+            <templates>
+                <form>
+                    And I grew strong
+                    <p>And I learned how to get along</p>
+                    And so you're back
+                </form>
+            </templates>
+        """
+
+        self.assertXMLEqual(contents, expected)
+
+
+@tagged('-standard', 'static_templates_performance')
+class TestStaticInheritancePerformance(TestStaticInheritanceCommon):
     def _sick_script(self, nMod, nFilePerMod, nTemplatePerFile, stepInheritInModule=2, stepInheritPreviousModule=3):
         """
         Make a sick amount of templates to test perf
@@ -430,24 +703,30 @@ class TestStaticInheritance(unittest.TestCase):
                 self.template_files[fname] = _file.encode()
         self.assertEqual(number_templates, nMod * nFilePerMod * nTemplatePerFile)
 
-    def test_performance_2500(self):
+    def test_static_templates_treatment_linearity(self):
+        # With 2500 templates for starters
         nMod, nFilePerMod, nTemplatePerFile = 50, 5, 10
         self._sick_script(nMod, nFilePerMod, nTemplatePerFile)
 
         before = datetime.now()
         contents = HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=True)
         after = datetime.now()
-        self.assertLessEqual(after - before, timedelta(milliseconds=130))
+        delta2500 = after - before
+        _logger.log(25, 'Static Templates Inheritance: 2500 templates treated in %s seconds' % delta2500.total_seconds())
 
         whole_tree = etree.fromstring(contents)
         self.assertEqual(len(whole_tree), nMod * nFilePerMod * nTemplatePerFile)
 
-    def test_performance_25000(self):
+        # With 25000 templates next
         nMod, nFilePerMod, nTemplatePerFile = 50, 5, 100
         self._sick_script(nMod, nFilePerMod, nTemplatePerFile)
 
         before = datetime.now()
         HomeStaticTemplateHelpers.get_qweb_templates(addons=self._get_module_names(), debug=True)
         after = datetime.now()
+        delta25000 = after - before
 
-        self.assertLessEqual(after - before, timedelta(milliseconds=1000))
+        time_ratio = delta25000.total_seconds() / delta2500.total_seconds()
+        _logger.log(25, 'Static Templates Inheritance: 25000 templates treated in %s seconds' % delta25000.total_seconds())
+        _logger.log(25, 'Static Templates Inheritance: Computed linearity ratio: %s' % time_ratio)
+        self.assertLessEqual(time_ratio, 10)

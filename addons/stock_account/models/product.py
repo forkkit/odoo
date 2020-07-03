@@ -239,7 +239,8 @@ class ProductProduct(models.Model):
             }
             am_vals_list.append(move_vals)
         account_moves = self.env['account.move'].create(am_vals_list)
-        account_moves.post()
+        if account_moves:
+            account_moves.post()
 
         # Actually update the standard price.
         self.with_context(force_company=company_id.id).sudo().write({'standard_price': new_price})
@@ -249,7 +250,7 @@ class ProductProduct(models.Model):
 
         # Find back incoming stock valuation layers (called candidates here) to value `quantity`.
         qty_to_take_on_candidates = quantity
-        candidates = self.env['stock.valuation.layer'].search([
+        candidates = self.env['stock.valuation.layer'].sudo().with_context(active_test=False).search([
             ('product_id', '=', self.id),
             ('remaining_qty', '>', 0),
             ('company_id', '=', company.id),
@@ -257,10 +258,10 @@ class ProductProduct(models.Model):
         new_standard_price = 0
         tmp_value = 0  # to accumulate the value taken on the candidates
         for candidate in candidates:
-            new_standard_price = candidate.unit_cost
             qty_taken_on_candidate = min(qty_to_take_on_candidates, candidate.remaining_qty)
 
             candidate_unit_cost = candidate.remaining_value / candidate.remaining_qty
+            new_standard_price = candidate_unit_cost
             value_taken_on_candidate = qty_taken_on_candidate * candidate_unit_cost
             value_taken_on_candidate = candidate.currency_id.round(value_taken_on_candidate)
             new_remaining_value = candidate.remaining_value - value_taken_on_candidate
@@ -317,7 +318,7 @@ class ProductProduct(models.Model):
             ('remaining_qty', '<', 0),
             ('stock_move_id', '!=', False),
             ('company_id', '=', company.id),
-        ])
+        ], order='create_date, id')
         for svl_to_vacuum in svls_to_vacuum:
             domain = [
                 ('company_id', '=', svl_to_vacuum.company_id.id),
@@ -331,7 +332,7 @@ class ProductProduct(models.Model):
             ]
             candidates = self.env['stock.valuation.layer'].sudo().search(domain)
             if not candidates:
-                continue
+                break
             qty_to_take_on_candidates = abs(svl_to_vacuum.remaining_qty)
             qty_taken_on_candidates = 0
             tmp_value = 0
@@ -375,12 +376,17 @@ class ProductProduct(models.Model):
                 'unit_cost': 0,
                 'quantity': 0,
                 'remaining_qty': 0,
-                'description': 'vacuum',
                 'stock_move_id': move.id,
                 'company_id': move.company_id.id,
                 'description': 'Revaluation of %s (negative inventory)' % move.picking_id.name or move.name,
+                'stock_valuation_layer_id': svl_to_vacuum.id,
             }
             vacuum_svl = self.env['stock.valuation.layer'].sudo().create(vals)
+
+            # If some negative stock were fixed, we need to recompute the standard price.
+            product = self.with_context(force_company=company.id)
+            if product.cost_method == 'average' and not float_is_zero(product.quantity_svl, precision_rounding=self.uom_id.rounding):
+                product.sudo().write({'standard_price': product.value_svl / product.quantity_svl})
 
             # Create the account move.
             if self.valuation != 'real_time':
@@ -466,6 +472,7 @@ class ProductProduct(models.Model):
                     'credit': abs(value),
                     'product_id': product.id,
                 })],
+                'type': 'entry',
             }
             move_vals_list.append(move_vals)
         return move_vals_list
@@ -501,6 +508,7 @@ class ProductProduct(models.Model):
                     'credit': abs(value),
                     'product_id': product.id,
                 })],
+                'type': 'entry',
             }
             move_vals_list.append(move_vals)
         return move_vals_list
@@ -544,8 +552,6 @@ class ProductProduct(models.Model):
                         'account_id': dacc,
                         'product_id': product.id,
                         'uom_id': uom.id,
-                        'account_analytic_id': account_analytic and account_analytic.id,
-                        'analytic_tag_ids': analytic_tags and analytic_tags.ids and [(6, 0, analytic_tags.ids)] or False,
                     },
 
                     {
@@ -583,6 +589,8 @@ class ProductProduct(models.Model):
         :rtype: float
         """
         self.ensure_one()
+        if not qty_to_invoice:
+            return 0.0
 
         candidates = stock_moves\
             .sudo()\
@@ -592,6 +600,8 @@ class ProductProduct(models.Model):
         tmp_value = 0  # to accumulate the value taken on the candidates
         for candidate in candidates:
             candidate_quantity = abs(candidate.quantity)
+            if float_is_zero(candidate_quantity, precision_rounding=candidate.uom_id.rounding):
+                continue  # correction entries
             if not float_is_zero(qty_invoiced, precision_rounding=candidate.uom_id.rounding):
                 qty_ignored = min(qty_invoiced, candidate_quantity)
                 qty_invoiced -= qty_ignored
@@ -601,7 +611,8 @@ class ProductProduct(models.Model):
             qty_taken_on_candidate = min(qty_to_take_on_candidates, candidate_quantity)
 
             qty_to_take_on_candidates -= qty_taken_on_candidate
-            tmp_value += qty_taken_on_candidate * (candidate.value / candidate.quantity)
+            tmp_value += qty_taken_on_candidate * \
+                ((candidate.value + sum(candidate.stock_valuation_layer_ids.mapped('value'))) / candidate.quantity)
             if float_is_zero(qty_to_take_on_candidates, precision_rounding=candidate.uom_id.rounding):
                 break
 
@@ -700,10 +711,10 @@ class ProductCategory(models.Model):
                 # Empty out the stock with the current cost method.
                 if new_cost_method:
                     description = _("Costing method change for product category %s: from %s to %s.") \
-                        % (self.display_name, self.property_cost_method, new_cost_method)
+                        % (product_category.display_name, product_category.property_cost_method, new_cost_method)
                 else:
                     description = _("Valuation method change for product category %s: from %s to %s.") \
-                        % (self.display_name, self.property_valuation, new_valuation)
+                        % (product_category.display_name, product_category.property_valuation, new_valuation)
                 out_svl_vals_list, products_orig_quantity_svl, products = Product\
                     ._svl_empty_stock(description, product_category=product_category)
                 out_stock_valuation_layers = SVL.sudo().create(out_svl_vals_list)

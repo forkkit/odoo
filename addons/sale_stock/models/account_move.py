@@ -15,9 +15,11 @@ class AccountMove(models.Model):
         Returns the stock moves associated to this invoice."""
         rslt = super(AccountMove, self)._stock_account_get_last_step_stock_moves()
         for invoice in self.filtered(lambda x: x.type == 'out_invoice'):
-            rslt += invoice.mapped('invoice_line_ids.sale_line_ids.order_id.picking_ids.move_lines').filtered(lambda x: x.state == 'done' and x.location_dest_id.usage == 'customer')
+            rslt += invoice.mapped('invoice_line_ids.sale_line_ids.move_ids').filtered(lambda x: x.state == 'done' and x.location_dest_id.usage == 'customer')
         for invoice in self.filtered(lambda x: x.type == 'out_refund'):
-            rslt += invoice.mapped('reversed_entry_id.invoice_line_ids.sale_line_ids.order_id.picking_ids.move_lines').filtered(lambda x: x.state == 'done' and x.location_id.usage == 'customer')
+            rslt += invoice.mapped('reversed_entry_id.invoice_line_ids.sale_line_ids.move_ids').filtered(lambda x: x.state == 'done' and x.location_id.usage == 'customer')
+            # Add refunds generated from the SO
+            rslt += invoice.mapped('invoice_line_ids.sale_line_ids.move_ids').filtered(lambda x: x.state == 'done' and x.location_id.usage == 'customer')
         return rslt
 
     def _get_invoiced_lot_values(self):
@@ -32,7 +34,7 @@ class AccountMove(models.Model):
 
         # Get the other customer invoices and refunds.
         ordered_invoice_ids = sale_orders.mapped('invoice_ids')\
-            .filtered(lambda i: i.state != 'draft')\
+            .filtered(lambda i: i.state not in ['draft', 'cancel'])\
             .sorted(lambda i: (i.invoice_date, i.id))
 
         # Get the position of self in other customer invoices and refunds.
@@ -88,7 +90,7 @@ class AccountMove(models.Model):
             if float_is_zero(qty, precision_rounding=lot_id.product_id.uom_id.rounding):
                 continue
             lot_values.append({
-                'product_name': lot_id.product_id.name,
+                'product_name': lot_id.product_id.display_name,
                 'quantity': qty,
                 'uom_name': lot_id.product_uom_id.name,
                 'lot_name': lot_id.name,
@@ -98,6 +100,11 @@ class AccountMove(models.Model):
 
 class AccountMoveLine(models.Model):
     _inherit = "account.move.line"
+
+    def _sale_can_be_reinvoice(self):
+        self.ensure_one()
+        return not self.is_anglo_saxon_line and super(AccountMoveLine, self)._sale_can_be_reinvoice()
+
 
     def _stock_account_get_anglo_saxon_price_unit(self):
         self.ensure_one()

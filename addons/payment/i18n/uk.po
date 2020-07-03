@@ -4,17 +4,17 @@
 # 
 # Translators:
 # Oleksandr Paziuk <o.paziuk@mobilunity.com>, 2019
-# Martin Trigaux, 2019
 # Bohdan Lisnenko, 2019
-# Alina Lisnenko <alinasemeniuk1@gmail.com>, 2019
+# Martin Trigaux, 2019
+# Alina Lisnenko <alinasemeniuk1@gmail.com>, 2020
 # 
 msgid ""
 msgstr ""
-"Project-Id-Version: Odoo Server saas~12.5\n"
+"Project-Id-Version: Odoo Server 13.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2019-10-01 12:10+0000\n"
+"POT-Creation-Date: 2020-04-27 09:22+0000\n"
 "PO-Revision-Date: 2019-08-26 09:12+0000\n"
-"Last-Translator: Alina Lisnenko <alinasemeniuk1@gmail.com>, 2019\n"
+"Last-Translator: Alina Lisnenko <alinasemeniuk1@gmail.com>, 2020\n"
 "Language-Team: Ukrainian (https://www.transifex.com/odoo/teams/41243/uk/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -315,6 +315,12 @@ msgid "Amount Max"
 msgstr "Максимальна сума"
 
 #. module: payment
+#: code:addons/payment/controllers/portal.py:0
+#, python-format
+msgid "An error occured during the processing of this payment"
+msgstr "Виникла помилка під час обробки платежу"
+
+#. module: payment
 #. openerp-web
 #: code:addons/payment/static/src/xml/payment_processing.xml:0
 #, python-format
@@ -441,8 +447,8 @@ msgstr "Скасовані платежі"
 #. openerp-web
 #: code:addons/payment/static/src/js/payment_form.js:0
 #, python-format
-msgid "Cannot set-up the payment"
-msgstr "Не вдається встановити оплату"
+msgid "Cannot setup the payment"
+msgstr "Неможливо встановити платіж"
 
 #. module: payment
 #: code:addons/payment/controllers/portal.py:0
@@ -689,6 +695,7 @@ msgstr "Визначте порядок відображення"
 
 #. module: payment
 #: model:ir.model.fields.selection,name:payment.selection__payment_acquirer__state__disabled
+#: model_terms:ir.ui.view,arch_db:payment.acquirer_form
 msgid "Disabled"
 msgstr "Відключено"
 
@@ -895,8 +902,8 @@ msgstr "Якщо не визначено, буде використано ім'�
 #. openerp-web
 #: code:addons/payment/static/src/xml/payment_processing.xml:0
 #, python-format
-msgid "If, the payment hasn't been confirmed you can contact us."
-msgstr "Якщо оплата не підтверджена, ви можете зв'язатися з нами."
+msgid "If the payment hasn't been confirmed you can contact us."
+msgstr "Ви можете зв'язатися з нами, якщо платіж не було підтверджено."
 
 #. module: payment
 #: model:ir.model.fields,field_description:payment.field_payment_acquirer__image_128
@@ -1155,6 +1162,16 @@ msgid "Never"
 msgstr "Ніколи"
 
 #. module: payment
+#: model_terms:ir.ui.view,arch_db:payment.payment_link_wizard_view_form
+msgid ""
+"This partner has no email, which may cause issues with some payment "
+"acquirers. Setting an email for this partner is advised."
+msgstr ""
+"У цього партнера немає електронної пошти, що може спричинити проблеми з "
+"деякими еквайєрами платежу. Налаштування електронної пошти для цього "
+"партнера рекомендується."
+
+#. module: payment
 #: code:addons/payment/wizards/payment_acquirer_onboarding_wizard.py:0
 #, python-format
 msgid ""
@@ -1224,31 +1241,6 @@ msgstr "Гаразд"
 #, python-format
 msgid "Only administrators can access this data."
 msgstr "Доступ до цих даних можуть отримати лише адміністратори."
-
-#. module: payment
-#: code:addons/payment/models/payment_acquirer.py:0
-#, python-format
-msgid "Only draft transaction can be authorized."
-msgstr "Лише чорнові операції можуть бути авторизовані."
-
-#. module: payment
-#: code:addons/payment/models/payment_acquirer.py:0
-#: code:addons/payment/models/payment_acquirer.py:0
-#, python-format
-msgid "Only draft transaction can be processed."
-msgstr "Можна обробляти лише чорнову операцію."
-
-#. module: payment
-#: code:addons/payment/models/payment_acquirer.py:0
-#, python-format
-msgid "Only draft/authorized transaction can be cancelled."
-msgstr "Лише чорнова/авторизована операція може бути скасована."
-
-#. module: payment
-#: code:addons/payment/models/payment_acquirer.py:0
-#, python-format
-msgid "Only draft/authorized transaction can be posted."
-msgstr "Лише чорнову/авторизовану операцію можна опублікувати."
 
 #. module: payment
 #: code:addons/payment/models/payment_acquirer.py:0
@@ -1728,6 +1720,7 @@ msgstr "Шаблон методу реєстрації"
 
 #. module: payment
 #: model:ir.model.fields.selection,name:payment.selection__payment_acquirer__state__test
+#: model_terms:ir.ui.view,arch_db:payment.acquirer_form
 #: model_terms:ir.ui.view,arch_db:payment.payment_tokens_list
 msgid "Test Mode"
 msgstr "Режим перевірки"
@@ -2007,15 +2000,9 @@ msgstr "Ми не можемо знайти ваш платіж, але не х�
 #. module: payment
 #. openerp-web
 #: code:addons/payment/static/src/js/payment_form.js:0
-#, python-format
-msgid "We are not able to redirect you to the payment form."
-msgstr "Ми не можемо перенаправити вас на форму оплати."
-
-#. module: payment
-#. openerp-web
 #: code:addons/payment/static/src/js/payment_form.js:0
 #, python-format
-msgid "We are not able to redirect you to the payment form. "
+msgid "We are not able to redirect you to the payment form."
 msgstr "Ми не можемо перенаправити вас на форму оплати."
 
 #. module: payment

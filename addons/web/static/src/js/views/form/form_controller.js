@@ -255,7 +255,9 @@ var FormController = BasicController.extend({
                 for (var k = 0; k < changedFields.length; k++) {
                     var field = fields[changedFields[k]];
                     var fieldData = data[changedFields[k]];
-                    if (field.translate && fieldData) {
+                    // An empty HTML field will always contain at least '<p><br></p>'. Do not
+                    // suggest a translation in this case.
+                    if (field.translate && fieldData && fieldData !== '<p><br></p>') {
                         alertFields[changedFields[k]] = field;
                     }
                 }
@@ -285,6 +287,15 @@ var FormController = BasicController.extend({
     //--------------------------------------------------------------------------
 
     /**
+     * @override
+     */
+    _applyChanges: async function () {
+        const result = await this._super.apply(this, arguments);
+        core.bus.trigger('DOM_updated');
+        return result;
+    },
+
+    /**
      * Archive the current selection
      *
      * @private
@@ -299,11 +310,11 @@ var FormController = BasicController.extend({
         if (archive) {
             return  this.model
             .actionArchive(ids, this.handle)
-            .then(this.update.bind(this, {}, {reload: false}));   
+            .then(this.update.bind(this, {}, {reload: false}));
         } else {
             return this.model
             .actionUnarchive(ids, this.handle)
-            .then(this.update.bind(this, {}, {reload: false}));   
+            .then(this.update.bind(this, {}, {reload: false}));
         }
     },
 
