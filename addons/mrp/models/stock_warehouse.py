@@ -57,11 +57,12 @@ class StockWarehouse(models.Model):
                     self.Routing(warehouse.sam_loc_id, warehouse.lot_stock_id, warehouse.sam_type_id, 'push'),
                 ],
             })
+            result[warehouse.id].update(warehouse._get_receive_rules_dict())
         return result
 
     @api.model
     def _get_production_location(self):
-        location = self.env['stock.location'].with_context(force_company=self.company_id.id).search([('usage', '=', 'production'), ('company_id', '=', self.company_id.id)], limit=1)
+        location = self.env['stock.location'].search([('usage', '=', 'production'), ('company_id', '=', self.company_id.id)], limit=1)
         if not location:
             raise UserError(_('Can\'t find any production location.'))
         return location
@@ -88,6 +89,7 @@ class StockWarehouse(models.Model):
                 }
             }
         })
+        routes.update(self._get_receive_routes_values('manufacture_to_resupply'))
         return routes
 
     def _get_route_name(self, route_type):
@@ -126,7 +128,7 @@ class StockWarehouse(models.Model):
             'manufacture_mto_pull_id': {
                 'depends': ['manufacture_steps', 'manufacture_to_resupply'],
                 'create_values': {
-                    'procure_method': 'make_to_order',
+                    'procure_method': 'mts_else_mto',
                     'company_id': self.company_id.id,
                     'action': 'pull',
                     'auto': 'manual',
@@ -188,7 +190,7 @@ class StockWarehouse(models.Model):
         values = super(StockWarehouse, self)._get_locations_values(vals, code=code)
         def_values = self.default_get(['manufacture_steps'])
         manufacture_steps = vals.get('manufacture_steps', def_values['manufacture_steps'])
-        code = vals.get('code') or code
+        code = vals.get('code') or code or ''
         code = code.replace(' ', '').upper()
         company_id = vals.get('company_id', self.company_id.id)
         values.update({
@@ -256,8 +258,14 @@ class StockWarehouse(models.Model):
     def _get_picking_type_update_values(self):
         data = super(StockWarehouse, self)._get_picking_type_update_values()
         data.update({
-            'pbm_type_id': {'active': self.manufacture_to_resupply and self.manufacture_steps in ('pbm', 'pbm_sam')},
-            'sam_type_id': {'active': self.manufacture_to_resupply and self.manufacture_steps == 'pbm_sam'},
+            'pbm_type_id': {
+                'active': self.manufacture_to_resupply and self.manufacture_steps in ('pbm', 'pbm_sam'),
+                'barcode': self.code.replace(" ", "").upper() + "-PC",
+            },
+            'sam_type_id': {
+                'active': self.manufacture_to_resupply and self.manufacture_steps == 'pbm_sam',
+                'barcode': self.code.replace(" ", "").upper() + "-SFP",
+            },
             'manu_type_id': {
                 'active': self.manufacture_to_resupply,
                 'default_location_src_id': self.manufacture_steps in ('pbm', 'pbm_sam') and self.pbm_loc_id.id or self.lot_stock_id.id,

@@ -43,7 +43,7 @@ class SaleOrder(models.Model):
                 values['price_unit'] = ticket.price
             else:
                 values['price_unit'] = ticket.price_reduce
-            values['name'] = ticket.get_ticket_multiline_description_sale()
+            values['name'] = ticket._get_ticket_multiline_description()
 
         # avoid writing related values that end up locking the product record
         values.pop('event_ok', None)
@@ -67,13 +67,13 @@ class SaleOrder(models.Model):
 
         # case: buying tickets for a sold out ticket
         values = {}
-        if ticket and ticket.seats_availability == 'limited' and ticket.seats_available <= 0:
+        if ticket and ticket.seats_limited and ticket.seats_available <= 0:
             values['warning'] = _('Sorry, The %(ticket)s tickets for the %(event)s event are sold out.') % {
                 'ticket': ticket.name,
                 'event': ticket.event_id.name}
-            new_qty, set_qty, add_qty = 0, 0, 0
+            new_qty, set_qty, add_qty = 0, 0, -old_qty
         # case: buying tickets, too much attendees
-        elif ticket and ticket.seats_availability == 'limited' and new_qty > ticket.seats_available:
+        elif ticket and ticket.seats_limited and new_qty > ticket.seats_available:
             values['warning'] = _('Sorry, only %(remaining_seats)d seats are still available for the %(ticket)s ticket for the %(event)s event.') % {
                 'remaining_seats': ticket.seats_available,
                 'ticket': ticket.name,
@@ -88,13 +88,11 @@ class SaleOrder(models.Model):
                 ('sale_order_id', 'in', self.ids),  # To avoid break on multi record set
                 ('event_ticket_id', '=', ticket.id),
             ], offset=new_qty, limit=(old_qty - new_qty), order='create_date asc')
-            attendees.button_reg_cancel()
+            attendees.action_cancel()
         # adding attendees
         elif ticket and new_qty > old_qty:
-            line = OrderLine.browse(values['line_id'])
-            line._update_registrations(confirm=False, cancel_to_draft=True, registration_data=kwargs.get('registration_data', []))
-            # add in return values the registrations, to display them on website (or not)
-            values['attendee_ids'] = self.env['event.registration'].search([('sale_order_line_id', '=', line.id), ('state', '!=', 'cancel')]).ids
+            # do not do anything, attendees will be created at SO confirmation if not given previously
+            pass
         return values
 
 

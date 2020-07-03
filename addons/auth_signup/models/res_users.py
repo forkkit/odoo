@@ -123,7 +123,7 @@ class ResUsers(models.Model):
             invite_partner = user.create_uid.partner_id
             if invite_partner:
                 # notify invite user that new user is connected
-                title = _("%s connected") % user.name
+                title = _("%s connected", user.name)
                 message = _("This is his first connection. Wish him welcome")
                 self.env['bus.bus'].sendone(
                     (self._cr.dbname, 'res.partner', invite_partner.id),
@@ -164,6 +164,8 @@ class ResUsers(models.Model):
 
     def action_reset_password(self):
         """ create signup token for each user, and send their signup url by email """
+        if self.filtered(lambda user: not user.active):
+            raise UserError(_("You cannot perform this action on an archived user."))
         # prepare reset password signup
         create_mode = bool(self.env.context.get('create_user'))
 
@@ -194,9 +196,11 @@ class ResUsers(models.Model):
 
         for user in self:
             if not user.email:
-                raise UserError(_("Cannot send email: user %s has no email address.") % user.name)
+                raise UserError(_("Cannot send email: user %s has no email address.", user.name))
+            # TDE FIXME: make this template technical (qweb)
             with self.env.cr.savepoint():
-                template.with_context(lang=user.lang).send_mail(user.id, force_send=True, raise_exception=True)
+                force_send = not(self.env.context.get('import_file', False))
+                template.send_mail(user.id, force_send=force_send, raise_exception=True)
             _logger.info("Password reset email sent for user <%s> to <%s>", user.login, user.email)
 
     def send_unregistered_user_reminder(self, after_days=5):
@@ -229,16 +233,18 @@ class ResUsers(models.Model):
             inactive_users.with_context(create_user=True).action_reset_password()
         return res
 
-    @api.model
-    def create(self, values):
+    @api.model_create_multi
+    def create(self, vals_list):
         # overridden to automatically invite user to sign up
-        user = super(ResUsers, self).create(values)
-        if user.email and not self.env.context.get('no_reset_password'):
-            try:
-                user.with_context(create_user=True).action_reset_password()
-            except MailDeliveryException:
-                user.partner_id.with_context(create_user=True).signup_cancel()
-        return user
+        users = super(ResUsers, self).create(vals_list)
+        if not self.env.context.get('no_reset_password'):
+            users_with_email = users.filtered('email')
+            if users_with_email:
+                try:
+                    users_with_email.with_context(create_user=True).action_reset_password()
+                except MailDeliveryException:
+                    users_with_email.partner_id.with_context(create_user=True).signup_cancel()
+        return users
 
     @api.returns('self', lambda value: value.id)
     def copy(self, default=None):

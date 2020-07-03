@@ -4,6 +4,9 @@ odoo.define('wysiwyg.widgets.LinkDialog', function (require) {
 var core = require('web.core');
 var Dialog = require('wysiwyg.widgets.Dialog');
 
+var dom = $.summernote.core.dom;
+var range = $.summernote.core.range;
+
 var _t = core._t;
 
 /**
@@ -16,6 +19,7 @@ var LinkDialog = Dialog.extend({
     ]),
     events: _.extend({}, Dialog.prototype.events || {}, {
         'input': '_onAnyChange',
+        'change [name="link_style_color"]': '_onTypeChange',
         'change': '_onAnyChange',
         'input input[name="url"]': '_onURLInput',
     }),
@@ -23,24 +27,130 @@ var LinkDialog = Dialog.extend({
     /**
      * @constructor
      */
-    init: function (parent, options, linkInfo) {
-        var self = this;
+    init: function (parent, options, editable, linkInfo) {
         this.options = options || {};
-
         this._super(parent, _.extend({
             title: _t("Link to"),
         }, this.options));
 
         this.trigger_up('getRecordInfo', {
             recordInfo: this.options,
-            callback: function (recordInfo) {
-                _.defaults(self.options, recordInfo);
+            callback: recordInfo => {
+                _.defaults(this.options, recordInfo);
             },
         });
 
+        this.colorsData = [
+            {type: '', label: _t("Link"), btnPreview: 'link'},
+            {type: 'primary', label: _t("Primary"), btnPreview: 'primary'},
+            {type: 'secondary', label: _t("Secondary"), btnPreview: 'secondary'},
+            // Note: by compatibility the dialog should be able to remove old
+            // colors that were suggested like the BS status colors or the
+            // alpha -> epsilon classes. This is currently done by removing
+            // all btn-* classes anyway.
+        ];
+
+        this.editable = editable;
         this.data = linkInfo || {};
-        this.needLabel = linkInfo.needLabel;
-        this.data.iniClassName = linkInfo.className || '';
+
+        this.data.className = "";
+        this.data.iniClassName = "";
+
+        var r = this.data.range;
+        this.needLabel = !r || (r.sc === r.ec && r.so === r.eo);
+
+        if (this.data.range) {
+            const $link = $(this.data.range.sc).filter("a");
+            this.data.iniClassName = $link.attr("class") || "";
+            this.colorCombinationClass = false;
+            let $node = $link;
+            while ($node.length && !$node.is('body')) {
+                const className = $node.attr('class') || '';
+                const m = className.match(/\b(o_cc\d+)\b/g);
+                if (m) {
+                    this.colorCombinationClass = m[0];
+                    break;
+                }
+                $node = $node.parent();
+            }
+            this.data.className = this.data.iniClassName.replace(/(^|\s+)btn(-[a-z0-9_-]*)?/gi, ' ');
+
+            var is_link = this.data.range.isOnAnchor();
+
+            var sc = r.sc;
+            var so = r.so;
+            var ec = r.ec;
+            var eo = r.eo;
+
+            var nodes;
+            if (!is_link) {
+                if (sc.tagName) {
+                    sc = dom.firstChild(so ? sc.childNodes[so] : sc);
+                    so = 0;
+                } else if (so !== sc.textContent.length) {
+                    if (sc === ec) {
+                        ec = sc = sc.splitText(so);
+                        eo -= so;
+                    } else {
+                        sc = sc.splitText(so);
+                    }
+                    so = 0;
+                }
+                if (ec.tagName) {
+                    ec = dom.lastChild(eo ? ec.childNodes[eo-1] : ec);
+                    eo = ec.textContent.length;
+                } else if (eo !== ec.textContent.length) {
+                    ec.splitText(eo);
+                }
+
+                nodes = dom.listBetween(sc, ec);
+
+                // browsers can't target a picture or void node
+                if (dom.isVoid(sc) || dom.isImg(sc)) {
+                    so = dom.listPrev(sc).length-1;
+                    sc = sc.parentNode;
+                }
+                if (dom.isBR(ec)) {
+                    eo = dom.listPrev(ec).length-1;
+                    ec = ec.parentNode;
+                } else if (dom.isVoid(ec) || dom.isImg(sc)) {
+                    eo = dom.listPrev(ec).length;
+                    ec = ec.parentNode;
+                }
+
+                this.data.range = range.create(sc, so, ec, eo);
+                $(editable).data("range", this.data.range);
+                this.data.range.select();
+            } else {
+                nodes = dom.ancestor(sc, dom.isAnchor).childNodes;
+            }
+
+            if (dom.isImg(sc) && nodes.indexOf(sc) === -1) {
+                nodes.push(sc);
+            }
+            if (nodes.length > 1 || dom.ancestor(nodes[0], dom.isImg)) {
+                var text = "";
+                this.data.images = [];
+                for (var i=0; i<nodes.length; i++) {
+                    if (dom.ancestor(nodes[i], dom.isImg)) {
+                        this.data.images.push(dom.ancestor(nodes[i], dom.isImg));
+                        text += '[IMG]';
+                    } else if (!is_link && nodes[i].nodeType === 1) {
+                        // just use text nodes from listBetween
+                    } else if (!is_link && i===0) {
+                        text += nodes[i].textContent.slice(so, Infinity);
+                    } else if (!is_link && i===nodes.length-1) {
+                        text += nodes[i].textContent.slice(0, eo);
+                    } else {
+                        text += nodes[i].textContent;
+                    }
+                }
+                this.data.text = text;
+            }
+        }
+
+        this.data.text = this.data.text.replace(/[ \t\r\n]+/g, ' ');
+
         var allBtnClassSuffixes = /(^|\s+)btn(-[a-z0-9_-]*)?/gi;
         var allBtnShapes = /\s*(rounded-circle|flat)\s*/gi;
         this.data.className = this.data.iniClassName
@@ -51,13 +161,14 @@ var LinkDialog = Dialog.extend({
      * @override
      */
     start: function () {
-        var self = this;
+        this.buttonOptsCollapseEl = this.el.querySelector('#o_link_dialog_button_opts_collapse');
 
-        this.$('input.link-style').prop('checked', false).first().prop('checked', true);
+        this.$styleInputs = this.$('input.link-style');
+        this.$styleInputs.prop('checked', false).filter('[value=""]').prop('checked', true);
         if (this.data.iniClassName) {
-            this.$('input[name="link_style_color"], select[name="link_style_size"] > option, select[name="link_style_shape"] > option').each(function () {
-                var $option = $(this);
-                if ($option.val() && self.data.iniClassName.match(new RegExp('(^|btn-| |btn-outline-)' + $option.val()))) {
+            _.each(this.$('input[name="link_style_color"], select[name="link_style_size"] > option, select[name="link_style_shape"] > option'), el => {
+                var $option = $(el);
+                if ($option.val() && this.data.iniClassName.match(new RegExp('(^|btn-| |btn-outline-)' + $option.val()))) {
                     if ($option.is("input")) {
                         $option.prop("checked", true);
                     } else {
@@ -74,21 +185,7 @@ var LinkDialog = Dialog.extend({
             this._onURLInput();
         }
 
-        // Hide the duplicate color buttons (most of the times, primary = alpha
-        // and secondary = beta for example but this may depend on the theme)
-        this.opened().then(function () {
-            var colors = [];
-            _.each(self.$('.o_link_dialog_color .o_btn_preview'), function (btn) {
-                var $btn = $(btn);
-                var color = $btn.css('background-color');
-                if (_.contains(colors, color)) {
-                    $btn.hide(); // Not remove to be able to edit buttons with those styles
-                } else {
-                    colors.push(color);
-                }
-            });
-        });
-
+        this._updateOptionsUI();
         this._adaptPreview();
 
         this.$('input:visible:first').focus();
@@ -138,17 +235,16 @@ var LinkDialog = Dialog.extend({
      * @private
      */
     _adaptPreview: function () {
-        var $preview = this.$("#link-preview");
         var data = this._getData();
         if (data === null) {
             return;
         }
-        var floatClass = /float-\w+/;
-        $preview.attr({
+        const attrs = {
             target: data.isNewWindow ? '_blank' : '',
             href: data.url && data.url.length ? data.url : '#',
-            class: data.classes.replace(floatClass, '') + ' o_btn_preview',
-        }).html((data.label && data.label.length) ? data.label : data.url);
+            class: `${data.classes.replace(/float-\w+/, '')} o_btn_preview`,
+        };
+        this.$("#link-preview").attr(attrs).html((data.label && data.label.length) ? data.label : data.url);
     },
     /**
      * Get the link's data (url, label and styles).
@@ -171,18 +267,17 @@ var LinkDialog = Dialog.extend({
             return null;
         }
 
-        var style = this.$('input[name="link_style_color"]:checked').val() || '';
-        var shape = this.$('select[name="link_style_shape"] option:selected').val() || '';
-        var size = this.$('select[name="link_style_size"] option:selected').val() || '';
-        var shapes = shape.split(',');
-        var outline = shapes[0] === 'outline';
-        shape = shapes.slice(outline ? 1 : 0).join(' ');
-        var classes = (this.data.className || '') +
-            (style ? (' btn btn-' + (outline ? 'outline-' : '') + style) : '') +
-            (shape ? (' ' + shape) : '') +
+        const type = this.$('input[name="link_style_color"]:checked').val() || '';
+        const size = this.$('select[name="link_style_size"]').val() || '';
+        const shape = this.$('select[name="link_style_shape"]').val() || '';
+        const shapes = shape ? shape.split(',') : [];
+        const style = ['outline', 'fill'].includes(shapes[0]) ? `${shapes[0]}-` : '';
+        const shapeClasses = shapes.slice(style ? 1 : 0).join(' ');
+        const classes = (this.data.className || '') +
+            (type ? (` btn btn-${style}${type}`) : '') +
+            (shapeClasses ? (` ${shapeClasses}`) : '') +
             (size ? (' btn-' + size) : '');
         var isNewWindow = this.$('input[name="is_new_window"]').prop('checked');
-
         if (url.indexOf('@') >= 0 && url.indexOf('mailto:') < 0 && !url.match(/^http[s]?/i)) {
             url = ('mailto:' + url);
         } else if (url.indexOf(location.origin) === 0 && this.$('#o_link_dialog_url_strip_domain').prop("checked")) {
@@ -197,6 +292,13 @@ var LinkDialog = Dialog.extend({
             isNewWindow: isNewWindow,
         };
     },
+    /**
+     * @private
+     */
+    _updateOptionsUI: function () {
+        const el = this.el.querySelector('[name="link_style_color"]:checked');
+        $(this.buttonOptsCollapseEl).collapse(el && el.value ? 'show' : 'hide');
+    },
 
     //--------------------------------------------------------------------------
     // Handlers
@@ -207,6 +309,12 @@ var LinkDialog = Dialog.extend({
      */
     _onAnyChange: function () {
         this._adaptPreview();
+    },
+    /**
+     * @private
+     */
+    _onTypeChange() {
+        this._updateOptionsUI();
     },
     /**
      * @private

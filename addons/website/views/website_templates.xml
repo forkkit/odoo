@@ -1,139 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-<!-- Assets -->
-<template id="_assets_primary_variables" inherit_id="portal._assets_primary_variables">
-    <xpath expr="//link[last()]" position="after">
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/primary_variables.scss"/>
 
-        <!-- Those files will be automatically edited by users -->
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/options/user_values.scss"/>
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/options/colors/user_color_palette.scss"/>
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/options/colors/user_theme_color_palette.scss"/>
-    </xpath>
-</template>
-<template id="_assets_secondary_variables" inherit_id="web_editor._assets_secondary_variables">
-    <xpath expr="//link" position="before">
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/secondary_variables.scss"/>
-    </xpath>
-</template>
-
-<template id="assets_tests" name="Website Assets Tests" inherit_id="web.assets_tests">
-    <xpath expr="." position="inside">
-        <script type="text/javascript" src="/website/static/tests/tours/reset_password.js"></script>
-        <script type="text/javascript" src="/website/static/tests/tours/rte.js"/>
-        <script type="text/javascript" src="/website/static/tests/tours/html_editor.js"/>
-        <script type="text/javascript" src="/website/static/tests/tours/restricted_editor.js"/>
-        <script type="text/javascript" src="/website/static/tests/tours/dashboard_tour.js"/>
-    </xpath>
-</template>
-
-<template id="assets_backend" inherit_id="web.assets_backend" name="Website Backend Assets (used in backend interface)">
-    <xpath expr="//link[last()]" position="after">
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/website.backend.scss"/>
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/website_visitor_views.scss"/>
-    </xpath>
-    <xpath expr="//script[last()]" position="after">
-        <script type="text/javascript" src="/website/static/src/js/backend/button.js"/>
-        <script type="text/javascript" src="/website/static/src/js/backend/dashboard.js"/>
-    </xpath>
-</template>
-
-<template id="qunit_suite" inherit_id="web.qunit_suite">
-    <xpath expr="//script[last()]" position="after">
-        <script type="text/javascript" src="/website/static/tests/website_tests.js"/>
-    </xpath>
-</template>
-
-<template id="_assets_frontend_helpers" inherit_id="portal._assets_frontend_helpers">
-    <xpath expr="//link" position="before">
-        <!-- Custom empty file for user custom bootstrap override -->
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/user_custom_bootstrap_overridden.scss"/>
-
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/bootstrap_overridden.scss"/>
-    </xpath>
-</template>
-
-<template id="assets_frontend" inherit_id="portal.assets_frontend" name="Website Assets">
-    <xpath expr="//link[last()]" position="after">
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/website.scss"/>
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/website.ui.scss"/>
-
-        <!-- Custom empty file for user custom rules -->
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/user_custom_rules.scss"/>
-    </xpath>
-    <xpath expr="//script[@src='/web/static/src/js/public/public_root_instance.js']" position="replace">
-        <script type="text/javascript" src="/website/static/src/js/content/website_root_instance.js"/>
-    </xpath>
-    <xpath expr="//script[last()]" position="after">
-        <script type="text/javascript" src="/website/static/src/js/set_view_track.js"/>
-        <script type="text/javascript" src="/website/static/lib/jstz.min.js"/>
-        <script type="text/javascript" src="/website/static/src/js/utils.js"/>
-
-        <script type="text/javascript" src="/website/static/src/js/content/website_root.js"/>
-        <script type="text/javascript" src="/website/static/src/js/content/compatibility.js"/>
-        <script type="text/javascript" src="/website/static/src/js/content/lazy_template_call.js"/>
-        <script type="text/javascript" src="/website/static/src/js/content/menu.js"/>
-        <script type="text/javascript" src="/website/static/src/js/content/snippets.animation.js"/>
-
-        <script type="text/javascript" src="/website/static/src/js/menu/navbar.js"/>
-
-        <script type="text/javascript" src="/website/static/src/js/visitor_timezone.js"/>
-        <!-- Custom empty file for user javascript -->
-        <script type="text/javascript" src="/website/static/src/js/user_custom_javascript.js"/>
-    </xpath>
-</template>
-
-<template id="assets_frontend_compatibility_for_12_0" inherit_id="website.assets_frontend" active="False">
-    <xpath expr="//link[last()]" position="after">
-        <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/compatibility/bs3_for_12_0.scss"/>
-    </xpath>
-</template>
-
-<template id="website.compiled_assets_wysiwyg" name="Website Editor Assets (used in website editor)">
-    <t t-call-assets="website.assets_wysiwyg"/>
-</template>
-
-<template id="website.assets_wysiwyg" name="Website Editor Assets (used in website editor)">
-    <t t-call="web._assets_helpers">
-        <link rel="stylesheet" type="text/scss" href="/web_editor/static/src/scss/bootstrap_overridden.scss"/>
-    </t>
-    <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/website.wysiwyg.scss"/>
-    <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/website.edit_mode.scss"/>
-
-    <script type="text/javascript" src="/website/static/src/js/editor/editor.js"/>
-    <script type="text/javascript" src="/website/static/src/js/editor/rte.summernote.js"/>
-    <script type="text/javascript" src="/website/static/src/js/editor/snippets.options.js"/>
-
-    <script type="text/javascript" src="/website/static/src/js/editor/wysiwyg_multizone.js"/>
-    <script type="text/javascript" src="/website/static/src/js/editor/wysiwyg_multizone_translate.js"/>
-    <script type="text/javascript" src="/website/static/src/js/editor/widget_link.js"/>
-</template>
-
-<template id="website.assets_editor" name="Website Editor Assets (used in website editor)">
-    <t t-call="web._assets_helpers"/>
-
-    <link rel="stylesheet" type="text/scss" href="/website/static/src/scss/website.editor.ui.scss"/>
-
-    <script type="text/javascript" src="/website/static/src/js/editor/editor_menu.js"/>
-    <script type="text/javascript" src="/website/static/src/js/editor/editor_menu_translate.js"/>
-
-    <script type="text/javascript" src="/website/static/src/js/menu/content.js"/>
-    <script type="text/javascript" src="/website/static/src/js/menu/customize.js"/>
-    <script type="text/javascript" src="/website/static/src/js/menu/debug_manager.js"/>
-    <script type="text/javascript" src="/website/static/src/js/menu/edit.js"/>
-    <script type="text/javascript" src="/website/static/src/js/menu/mobile_view.js"/>
-    <script type="text/javascript" src="/website/static/src/js/menu/new_content.js"/>
-    <script type="text/javascript" src="/website/static/src/js/menu/seo.js"/>
-    <script type="text/javascript" src="/website/static/src/js/menu/translate.js"/>
-
-    <script type="text/javascript" src="/website/static/src/js/tours/banner.js"/>
-    <script type="text/javascript" src="/website/static/src/js/tours/customize.js"/>
-
-    <script type="text/javascript" src="/website/static/src/js/widgets/ace.js"/>
-    <script type="text/javascript" src="/website/static/src/js/widgets/theme.js"/>
-</template>
-
-<!-- Layout -->
 <template id="submenu" name="Submenu">
     <t t-set="has_visible_submenu" t-value="(submenu.is_mega_menu and submenu.is_visible) or submenu.child_id.filtered(lambda menu: menu.is_visible)"/>
     <li t-if="submenu.is_visible and not has_visible_submenu" t-attf-class="#{item_class or ''}">
@@ -257,8 +124,9 @@
     <xpath expr="//header" position="attributes">
         <attribute name="data-name">Header</attribute>
     </xpath>
-    <xpath expr="//header//a[hasclass('navbar-brand')]" position="replace">
-        <a class="navbar-brand" href="/" t-if="website" t-field="website.name">My Website</a>
+    <xpath expr="//header/nav" position="attributes">
+        <!-- Background now controlled by css configuration, using color combinations -->
+        <attribute name="class" add="o_colored_level o_cc" remove="bg-light" separator=" "/>
     </xpath>
     <xpath expr="//header//ul[@id='top_menu']" position="attributes">
         <attribute name="class" separator=" " add="o_menu_loading"/>
@@ -278,7 +146,17 @@
         </t>
     </xpath>
 
-    <xpath expr="//div[hasclass('o_footer_copyright')]//span[@t-field='res_company.name']" position="after">
+    <xpath expr="//footer" position="attributes">
+        <attribute name="data-name">Footer</attribute>
+        <!-- Background now controlled by css configuration, using color combinations -->
+        <attribute name="t-attf-class" add="o_colored_level o_cc" remove="bg-light" separator=" "/>
+    </xpath>
+    <xpath expr="//div[hasclass('o_footer_copyright')]" position="attributes">
+        <attribute name="data-name">Copyright</attribute>
+        <!-- Background now controlled by css configuration, using color combinations -->
+        <attribute name="class" add="o_colored_level o_cc" separator=" "/>
+    </xpath>
+    <xpath expr="//div[hasclass('o_footer_copyright')]//span[hasclass('o_footer_copyright_name')]" position="after">
         <t t-call="website.language_selector"/>
     </xpath>
     <xpath expr="//t[@t-call='web.brand_promotion']/.." position="attributes">
@@ -293,7 +171,7 @@
             m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
             })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
 
-            ga('create', _.str.trim('<t t-esc="website.google_analytics_key"/>'), 'auto');
+            ga('create', '<t t-esc="website.google_analytics_key"/>'.trim(), 'auto');
             ga('send','pageview');
         </script>
     </xpath>
@@ -301,7 +179,7 @@
     <!-- Page options -->
     <xpath expr="//div[@id='wrapwrap']" position="before">
         <t groups="website.group_website_publisher">
-            <t t-foreach="['header_overlay', 'header_color']" t-as="optionName">
+            <t t-foreach="['header_overlay', 'header_color', 'header_visible', 'footer_visible']" t-as="optionName">
                 <input t-if="optionName in main_object" type="hidden" class="o_page_option_data" t-att-name="optionName" t-att-value="main_object[optionName]"/>
             </t>
         </t>
@@ -312,6 +190,27 @@
     <xpath expr="//header" position="attributes">
         <attribute name="t-attf-class" add="#{main_object.header_color if 'header_color' in main_object else ''}" separator=" "/>
     </xpath>
+    <xpath expr="//header" position="attributes">
+        <attribute name="t-attf-class" add="#{'d-none o_snippet_invisible' if 'header_visible' in main_object and not main_object.header_visible else ''}" separator=" "/>
+    </xpath>
+    <xpath expr="//footer[@id='bottom']" position="attributes">
+        <attribute name="t-attf-class" add="#{'d-none o_snippet_invisible' if 'footer_visible' in main_object and not main_object.footer_visible else ''}" separator=" "/>
+    </xpath>
+</template>
+
+<template id="custom_code_layout" name="Custom Code Layout" inherit_id="website.layout" priority="55">
+    <xpath expr="//head" position="inside">
+        <t t-raw="website.custom_code_head"/>
+    </xpath>
+    <xpath expr="//body" position="inside">
+        <t t-raw="website.custom_code_footer"/>
+    </xpath>
+</template>
+
+<template id="website_name" inherit_id="website.layout" name="Website Name" active="False">
+    <xpath expr="//header//a[hasclass('navbar-brand')]" position="replace">
+        <a class="navbar-brand" href="/">My Website</a>
+    </xpath>
 </template>
 
 <template id="brand_promotion" inherit_id="web.brand_promotion" name="Brand Promotion">
@@ -320,8 +219,43 @@
             <t t-set="_message">
                 Create a <a target="_blank" href="http://www.odoo.com/page/website-builder?utm_source=db&amp;utm_medium=website">free website</a>
             </t>
-            <t t-set="_utm_medium">website</t>
+            <t t-set="_utm_medium" t-valuef="website"/>
         </t>
+    </xpath>
+</template>
+
+<!-- Header templates -->
+<template id="template_header_hamburger" inherit_id="website.layout" name="Template Header Logo Hamburger" active="False">
+    <xpath expr="//header//nav[hasclass('navbar')]" position="attributes">
+        <attribute name="class" remove="navbar-expand-md" separator=" "/>
+    </xpath>
+    <xpath expr="//header//button[hasclass('navbar-toggler')]" position="replace">
+        <div class="o_navbar_toggler_container">$0</div>
+    </xpath>
+</template>
+
+<template id="template_header_navbar_text_center" inherit_id="website.layout" name="Template Header Navbar Text Center" active="False">
+    <xpath expr="//header//ul[hasclass('nav')]" position="attributes">
+        <attribute name="class" remove="text-right" add="text-center" separator=" "/>
+    </xpath>
+</template>
+
+<template id="template_header_hamburger_left" inherit_id="website.layout" name="Template Header Hamburger" active="False">
+    <xpath expr="//header//a[hasclass('navbar-brand')]" position="before">
+        <div class="o_navbar_toggler_container o_not_editable"></div>
+    </xpath>
+    <xpath expr="//div[hasclass('o_navbar_toggler_container')]" position="inside">
+        <xpath expr="//header//button[hasclass('navbar-toggler')]" position="move"/>
+    </xpath>
+    <xpath expr="//header//ul[hasclass('nav')]" position="attributes">
+        <attribute name="class" remove="text-right" add="text-left" separator=" "/>
+    </xpath>
+</template>
+
+<!-- Header options -->
+<template id="option_layout_hide_header" inherit_id="website.layout" active="False">
+    <xpath expr="//header" position="before">
+        <t t-set="no_header" t-value="True"/>
     </xpath>
 </template>
 
@@ -333,15 +267,59 @@
     </xpath>
 </template>
 
-<template id="affix_top_menu" inherit_id="website.layout" name="Fixed Top Menu">
+<template id="header_logo_none" inherit_id="website.layout" name="No Logo" active="False">
+    <xpath expr="//header//a[hasclass('navbar-brand')]" position="replace">
+        <a href="/" class="navbar-brand d-none"/>
+    </xpath>
+</template>
+
+<template id="header_visibility_standard" inherit_id="website.layout" name="Header Effect Standard">
     <xpath expr="//header" position="attributes">
-        <attribute name="t-attf-class" add="#{'o_affix_enabled'}" separator=" "/>
+        <attribute name="t-attf-class" add="o_header_standard o_top_fixed_element" separator=" "/>
+    </xpath>
+</template>
+
+<template id="header_visibility_fixed" inherit_id="website.layout" name="Header Effect Fixed" active="False">
+    <xpath expr="//header" position="attributes">
+        <attribute name="t-attf-class" add="o_header_fixed o_top_fixed_element" separator=" "/>
+    </xpath>
+</template>
+
+<template id="header_visibility_disappears" inherit_id="website.layout" name="Header Effect Disappears" active="False">
+    <xpath expr="//header" position="attributes">
+        <attribute name="t-attf-class" add="o_header_disappears o_top_fixed_element" separator=" "/>
+    </xpath>
+</template>
+
+<template id="header_visibility_fade_out" inherit_id="website.layout" name="Header Effect Fade Out" active="False">
+    <xpath expr="//header" position="attributes">
+        <attribute name="t-attf-class" add="o_header_fade_out o_top_fixed_element" separator=" "/>
     </xpath>
 </template>
 
 <template id="no_autohide_menu" inherit_id="website.layout" active="False">
     <xpath expr="//header" position="attributes">
         <attribute name="t-attf-class" add="#{'o_no_autohide_menu'}" separator=" "/>
+    </xpath>
+</template>
+
+<template id="header_shadow" inherit_id="website.layout" name="Header Shadow" active="False">
+    <xpath expr="//header" position="attributes">
+        <attribute name="t-attf-class" add="shadow" separator=" "/>
+    </xpath>
+</template>
+
+<template id="header_hoverable_dropdown" inherit_id="website.layout" name="Header Hoverable Dropdown" active="False">
+    <xpath expr="//header" position="attributes">
+        <attribute name="t-attf-class" add="o_hoverable_dropdown" separator=" "/>
+    </xpath>
+</template>
+
+<template id="header_button" inherit_id="website.layout" name="Header Button" active="False">
+    <xpath expr="//ul[@id='top_menu']" position="inside">
+        <li class="nav-item align-self-md-center ml-1 o_header_menu_button">
+            <a href="/contactus" class="btn btn-primary">Contact us</a>
+        </li>
     </xpath>
 </template>
 
@@ -354,10 +332,11 @@
     </xpath>
 </template>
 
+<!-- Footer options -->
 <template id="footer_custom" inherit_id="website.layout" name="Footer">
     <xpath expr="//div[@id='footer']" position="replace">
         <div id="footer" class="oe_structure oe_structure_solo" t-ignore="true" t-if="not no_footer">
-            <section class="s_text_block pt16 pb8">
+            <section class="s_text_block pt16 pb8" data-snippet="s_text_block">
                 <div class="container">
                     <div class="row">
                         <div class="col-lg-4">
@@ -370,31 +349,79 @@
                             <h5>Connect with us</h5>
                             <ul class="list-unstyled">
                                 <li><a href="/contactus">Contact us</a></li>
-                                <li><i class="fa fa-phone"/> <span class="o_force_ltr" t-field="res_company.phone"/></li>
-                                <li><i class="fa fa-envelope"/>  <span t-field="res_company.email"/></li>
+                                <li><i class="fa fa-phone fa-fw"/> <span class="o_force_ltr"><a href="tel:1 (650) 691-3277">1 (650) 691-3277</a></span></li>
+                                <li><i class="fa fa-envelope fa-fw"/>  <span><a href="mailto:info@yourcompany.example.com">info@yourcompany.example.com</a></span></li>
                             </ul>
-                            <p>
-                                <a t-if="website.social_facebook" t-att-href="website.social_facebook" class="btn btn-sm btn-link"><i class="fa fa-2x fa-facebook-square"/></a>
-                                <a t-if="website.social_twitter" t-att-href="website.social_twitter" class="btn btn-sm btn-link"><i class="fa fa-2x fa-twitter"/></a>
-                                <a t-if="website.social_linkedin" t-att-href="website.social_linkedin" class="btn btn-sm btn-link"><i class="fa fa-2x fa-linkedin"/></a>
-                                <a t-if="website.social_youtube" t-att-href="website.social_youtube" class="btn btn-sm btn-link"><i class="fa fa-2x fa-youtube-play"/></a>
-                                <a t-if="website.social_github" t-att-href="website.social_github" class="btn btn-sm btn-link"><i class="fa fa-2x fa-github"/></a>
-                                <a t-if="website.social_instagram" t-att-href="website.social_instagram" class="btn btn-sm btn-link"><i class="fa fa-2x fa-instagram"/></a>
+                            <p class="o_footer_social_media_links">
+                                <a href="/website/social/facebook" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-facebook-square"/></a>
+                                <a href="/website/social/twitter" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-twitter"/></a>
+                                <a href="/website/social/linkedin" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-linkedin"/></a>
+                                <a href="/website/social/youtube" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-youtube-play"/></a>
+                                <a href="/website/social/github" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-github"/></a>
+                                <a href="/website/social/instagram" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-instagram"/></a>
                             </p>
                         </div>
                         <div class="col-lg-4">
-                            <h5>
-                                <span t-field="res_company.name"/>
-                                <small> - <a href="/aboutus">About us</a></small>
-                            </h5>
-                            <p>
-                                We are a team of passionate people whose goal is to improve everyone's
-                                life through disruptive products. We build great products to solve your
-                                business problems.
-                            </p>
-                            <p>
-                                Our products are designed for small to medium size companies willing to optimize
-                                their performance.
+                            <div class="o_footer_about_us">
+                                <h5>
+                                    <span>YourCompany</span>
+                                </h5>
+                                <p>
+                                    We are a team of passionate people whose goal is to improve everyone's
+                                    life through disruptive products. We build great products to solve your
+                                    business problems.
+                                </p>
+                                <p>
+                                    Our products are designed for small to medium size companies willing to optimize
+                                    their performance.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </xpath>
+</template>
+
+<!-- Logo - About us (below)-->
+<template id="template_footer_logo_about_us_below" inherit_id="website.layout" name="Template Footer Logo About Us Below" active="False">
+    <xpath expr="//div[@id='footer']" position="replace">
+        <div id="footer" class="oe_structure oe_structure_solo" t-ignore="true" t-if="not no_footer">
+            <section class="s_text_block pt16 pb8">
+                <div class="container">
+                    <div class="row">
+                        <div class="col-md-5 o_footer_logo">
+                            <a href="/" class="footer-brand logo">
+                                <img src="/website/static/src/img/website_logo.png" class="img-fluid" aria-label="Logo of MyCompany" title="MyCompany" role="img" style="width: 50%;"/>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-lg-5">
+                            <div class="o_footer_about_us">
+                                <h5>
+                                    <span>YourCompany</span>
+                                </h5>
+                                <p>
+                                    We are a team of passionate people whose goal is to improve everyone's
+                                    life through disruptive products. We build great products to solve your
+                                    business problems.
+                                </p>
+                                <p>
+                                    Our products are designed for small to medium size companies willing to optimize
+                                    their performance.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="col-lg-7 text-lg-right">
+                            <p class="o_footer_social_media_links text-lg-right">
+                                <a href="/website/social/facebook" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-facebook-square"/></a>
+                                <a href="/website/social/twitter" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-twitter"/></a>
+                                <a href="/website/social/linkedin" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-linkedin"/></a>
+                                <a href="/website/social/youtube" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-youtube-play"/></a>
+                                <a href="/website/social/github" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-github"/></a>
+                                <a href="/website/social/instagram" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-instagram"/></a>
                             </p>
                         </div>
                     </div>
@@ -404,7 +431,170 @@
     </xpath>
 </template>
 
-<template id="language_selector">
+<!-- Links - Address - Logo-->
+<template id="template_footer_links_address_logo" inherit_id="website.layout" name="Template Footer Links Address Logo" active="False">
+    <xpath expr="//div[@id='footer']" position="replace">
+        <div id="footer" class="oe_structure oe_structure_solo" t-ignore="true" t-if="not no_footer">
+            <section class="s_text_block pt16 pb8">
+                <div class="container">
+                    <p class="o_footer_social_media_links">
+                        <a href="/website/social/facebook" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-facebook-square"/></a>
+                        <a href="/website/social/twitter" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-twitter"/></a>
+                        <a href="/website/social/linkedin" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-linkedin"/></a>
+                        <a href="/website/social/youtube" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-youtube-play"/></a>
+                        <a href="/website/social/github" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-github"/></a>
+                        <a href="/website/social/instagram" class="btn btn-sm btn-link" target="_blank"><i class="fa fa-2x fa-instagram"/></a>
+                    </p>
+                    <ul class="list-inline">
+                        <li class="list-inline-item"><a href="/">Home</a></li>
+                        <li class="list-inline-item"><a href="/contactus">Contact us</a></li>
+                    </ul>
+                    <div class="o_footer_address">
+                        250 Executive Park Blvd, Suite 3400<br/>San Francisco CA 94134<br/>United States
+                    </div>
+                    <div class="row s_nb_column_fixed">
+                        <div class="offset-md-3 col-md-6 o_footer_logo">
+                            <a href="/" class="footer-brand logo">
+                                <img src="/website/static/src/img/website_logo.png" class="img-fluid" aria-label="Logo of MyCompany" title="MyCompany" role="img" style="width: 50%;"/>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </xpath>
+</template>
+
+<!-- Website name - Logo - (below) Links - About us-->
+<template id="template_footer_name_logo_links_about_us" inherit_id="website.layout" name="Template Footer Name Logo Links About us" active="False">
+    <xpath expr="//div[@id='footer']" position="replace">
+        <div id="footer" class="oe_structure oe_structure_solo" t-ignore="true" t-if="not no_footer">
+            <section class="s_text_block pt16 pb8">
+                <div class="container">
+                    <div class="row mt-2 mb-4">
+                        <div class="col-lg-6 mb-3 mb-lg-0">
+                            <h3><a href="/" class="text-decoration-none">YourCompany</a></h3>
+                        </div>
+                        <div class="col-lg-6 o_footer_logo text-center text-lg-right">
+                            <a href="/" class="footer-brand logo">
+                                <img src="/website/static/src/img/website_logo.png" class="img-fluid" aria-label="Logo of MyCompany" title="MyCompany" role="img" style="width: 50%;"/>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-lg-6">
+                            <ul class="list-inline">
+                                <li class="list-inline-item"><a href="/">Home</a></li>
+                                <li class="list-inline-item"><a href="/contactus">Contact us</a></li>
+                            </ul>
+                        </div>
+                        <div class="col-lg-6 text-lg-right">
+                            <p>
+                                We are a team of passionate people whose goal is to improve everyone's
+                                life through disruptive products. We build great products to solve your
+                                business problems. Our products are designed for small to medium size
+                                companies willing to optimize their performance.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </xpath>
+</template>
+
+<!-- Logo only-->
+<template id="template_footer_logo_only" inherit_id="website.layout" name="Template Footer Logo Only" active="False">
+    <xpath expr="//div[@id='footer']" position="replace">
+        <div id="footer" class="oe_structure oe_structure_solo" t-ignore="true" t-if="not no_footer">
+            <section class="s_text_block pt16 pb8">
+                <div class="container">
+                    <div class="row s_nb_column_fixed">
+                        <div class="offset-md-3 col-md-6 o_footer_logo text-center my-3">
+                            <a href="/" class="footer-brand logo">
+                                <img src="/website/static/src/img/website_logo.png" class="img-fluid" aria-label="Logo of MyCompany" title="MyCompany" role="img" style="width: 50%;"/>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </xpath>
+</template>
+
+<!-- Address - Logo (below)-->
+<template id="template_footer_address_logo" inherit_id="website.layout" name="Template Footer Address Logo" active="False">
+    <xpath expr="//div[@id='footer']" position="replace">
+        <div id="footer" class="oe_structure oe_structure_solo" t-ignore="true" t-if="not no_footer">
+            <section class="s_text_block pt16 pb8 text-center">
+                <div class="container">
+                    <div class="m-4">
+                        YourCompany, 250 Executive Park Blvd, Suite 3400,<br/>
+                        San Francisco CA 94134, United States<br/>
+                        <a href="tel:+1 (650) 691-3277">+1 (650) 691-3277</a> - <a href="mailto:info@yourcompany.example.com">info@yourcompany.example.com</a>
+                    </div>
+                    <div class="row">
+                        <div class="offset-lg-3 col-lg-6 o_footer_logo my-4">
+                            <a href="/" class="footer-brand logo">
+                                <img src="/website/static/src/img/website_logo.png" class="img-fluid" aria-label="Logo of MyCompany" title="MyCompany" role="img" style="width: 50%;"/>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </xpath>
+</template>
+
+<!-- slideout effect -->
+<template id="template_footer_slideout" inherit_id="website.layout" name="Template Footer Slideout" active="False">
+    <xpath expr="//footer[@id='bottom']" position="attributes">
+        <attribute name="t-attf-class" add="o_footer_slideout" separator=" "/>
+    </xpath>
+</template>
+
+<!-- Hide Copyright -->
+<template id="footer_no_copyright" inherit_id="website.layout" name="Footer No Copyright" active="False">
+    <xpath expr="//div[hasclass('o_footer_copyright')]" position="before">
+        <t t-set="no_copyright" t-value="True"/>
+    </xpath>
+</template>
+
+<template id="cookies_bar" inherit_id="website.footer_custom" name="Cookies Bar">
+    <xpath expr="//footer" position="after">
+        <div id="website_cookies_bar" t-if="website.cookies_bar" class="s_popup o_snippet_invisible" data-name="Cookies Bar" data-vcss="001" data-invisible="1">
+            <div class="modal s_popup_bottom s_popup_no_backdrop o_cookies_discrete"
+                 data-show-after="500"
+                 data-display="afterDelay"
+                 data-consents-duration="999"
+                 data-focus="false"
+                 data-backdrop="false"
+                 data-keyboard="false"
+                 tabindex="-1"
+                 role="dialog">
+                <div class="modal-dialog d-flex s_popup_size_full">
+                    <div class="modal-content oe_structure">
+                        <section class="o_colored_level o_cc o_cc1">
+                            <div class="container">
+                                <div class="row">
+                                    <div class="col-lg-8 pt16">
+                                        <p>We use cookies to provide you a better user experience.</p>
+                                    </div>
+                                    <div class="col-lg-4 pt16 text-right">
+                                        <a href="/cookie-policy" class="o_cookies_bar_text_policy btn btn-link btn-sm">Cookie Policy</a>
+                                        <a href="#" role="button" class="js_close_popup o_cookies_bar_text_button btn btn-primary btn-sm">I agree</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </xpath>
+</template>
+
+<template id="language_selector" name="Language Selector">
     <ul class="js_language_selector mb0 list-inline" t-if="(request and request.is_frontend_multilang and len(languages) &gt; 1) or (website and (editable or translatable))">
         <li class="list-inline-item">
             <div class="dropup">
@@ -435,15 +625,17 @@
 
 <template id="record_cover">
     <t t-set="_cp" t-value="_cp or json.loads(_record.cover_properties)"/>
-    <div t-att-data-use_size="use_size"
+    <t t-set="default_cover_name">Cover</t>
+    <div t-att-data-name="display_opt_name or default_cover_name"
+         t-att-style="_cp.get('background_color_style')"
+         t-att-data-use_size="use_size"
          t-att-data-use_filters="use_filters"
-         t-att-data-use_text_size="use_text_size"
          t-att-data-use_text_align="use_text_align"
          t-att-data-res-model="request.env.user.has_group('website.group_website_publisher') and _record._name"
          t-att-data-res-id="request.env.user.has_group('website.group_website_publisher') and _record.id"
-         t-attf-class="o_record_cover_container d-flex flex-column h-100 bg-secondary #{use_size and _cp.get('resize_class')} #{use_text_size and _cp.get('text_size_class')} #{use_text_align and _cp.get('text_align_class')} #{additionnal_classes}">
-        <div class="o_record_cover_component o_record_cover_image" t-attf-style="background-image: #{_cp.get('background-image')};"/>
-        <div t-if="use_filters" t-attf-class="o_record_cover_component o_record_cover_filter #{_cp.get('background-color')}" t-attf-style="opacity: #{_cp.get('opacity', 0.0)};"/>
+         t-attf-class="o_record_cover_container d-flex flex-column h-100 o_colored_level o_cc #{_cp.get('background_color_class')} #{use_size and _cp.get('resize_class')} #{use_text_align and _cp.get('text_align_class')} #{additionnal_classes}">
+        <div t-attf-class="o_record_cover_component o_record_cover_image #{snippet_autofocus and 'o_we_snippet_autofocus'}" t-attf-style="background-image: #{_cp.get('background-image')};"/>
+        <div t-if="use_filters" t-attf-class="o_record_cover_component o_record_cover_filter oe_black" t-attf-style="opacity: #{_cp.get('opacity', 0.0)};"/>
         <t t-raw="0"/>
     </div>
 </template>
@@ -451,7 +643,7 @@
 <!-- Util template -->
 <template id="publish_management">
     <div groups="website.group_website_publisher" t-ignore="true" class="float-right css_editable_mode_hidden" t-att-style="style or None">
-        <div t-attf-class="btn-group #{btn_class} js_publish_management #{object.website_published and 'css_published' or 'css_unpublished'}" t-att-data-id="object.id" t-att-data-object="object._name" t-att-data-controller="publish_controller">
+        <div t-attf-class="btn-group #{btn_class} js_publish_management #{object.website_published and 'css_published' or 'css_unpublished'}" t-att-data-id="object.id" t-att-data-object="object._name" t-att-data-description="env['ir.model']._get(object._name).display_name" t-att-data-controller="publish_controller">
             <button class="btn btn-danger js_publish_btn">Unpublished</button>
             <button class="btn btn-success js_publish_btn">Published</button>
             <button type="button" t-attf-class="btn btn-default dropdown-toggle dropdown-toggle-split" t-att-id="'dopprod-%s' % object.id" data-toggle="dropdown"/>
@@ -466,7 +658,7 @@
 
 <template id="publish_short">
     <t groups="website.group_website_publisher" t-ignore="true">
-        <div t-attf-class="float-right js_publish_management #{object.website_published and 'css_published' or 'css_unpublished'}" t-att-data-id="object.id" t-att-data-object="object._name" t-att-data-controller="publish_controller">
+        <div t-attf-class="float-right js_publish_management #{object.website_published and 'css_published' or 'css_unpublished'}" t-att-data-id="object.id" t-att-data-object="object._name" t-att-data-description="env['ir.model']._get(object._name).display_name" t-att-data-controller="publish_controller">
             <button t-attf-class="btn btn-danger js_publish_btn #{additionnal_btn_classes or ''}">Unpublished</button>
             <button t-attf-class="btn btn-success js_publish_btn #{additionnal_btn_classes or ''}">Published</button>
         </div>
@@ -474,135 +666,6 @@
 </template>
 
 <template id="pager" name="Pager" inherit_id="portal.pager">
-</template>
-
-<!--
-    XML template to be processed for theme customization modal.
-
-    Allowed tags in the root <div/> elements:
-
-    <content>: Declares a new set of options (a tab pane in the dialog)
-        -> string = tab's nav text
-        -> title = tab's heading
-
-    In the <content/> elements:
-
-    <opt>: Declares a new toggle option
-        -> id (optional) = an ID to associate to the option
-
-        -> string (optional) = option's text
-        -> data-icon (optional) = an image URL to set as option's background
-        -> data-font (optional) = indicates which fonts to use to style the
-                option and adds default sample text if no 'string' is specified
-                (see $o-theme-fonts in scss)
-        -> data-col (optional, default 6) = bootstrap column size for the option
-                (ignored for options in a <list/>)
-
-        -> data-xmlid (optional) = template(s) to enable if the input is
-                checked (list of comma-separated xml ids)
-        -> data-enable (optional) = enable other options (list of
-                comma-separated option ids)
-        -> data-disable (optional) = disable other options (list of
-                comma-separated option ids)
-        -> data-reload (optional) = force the reloading of the page if the url
-                matches the value. Otherwise, only the main assets are reloaded
-
-        -> data-widget (optional) = indicates which widget to use (available
-                widgets are: color_palette)
-
-    <list>: Declares a subset of options showed as a list
-        -> string = list's title
-        -> data-col (optional, default 6) = bootstrap column size for the list
-
-    <selection>: Declares a subset of options showed as a selection (dropdown)
-        -> data-col (optional, default 6) = bootstrap column size for the option
-                (ignored for options in a <list/>)
-
-    Other elements will be ignored and their children will be processed as if
-    that element was omitted, except that those children will be considered as
-    in a new set of option. That allows to wrap an option in a fake element to
-    indicate it is a standalone option for example.
-
-    Note: if an option is the only one of its group, a toggle element will be
-    rendered.
--->
-<template id="theme_customize">
-    <div>
-        <!-- Color options -->
-        <content id="theme_customize_content_colors" string="Colors" title="Choose the theme colors">
-            <list string="Main">
-                <opt data-widget="color" data-color-type="theme" data-color="primary" string="Primary"/>
-                <opt data-widget="color" data-color-type="theme" data-color="secondary" string="Secondary"/>
-                <opt data-widget="color" data-color-type="theme" data-color="alpha" string="Primary"/>
-                <opt data-widget="color" data-color-type="theme" data-color="beta" string="Secondary"/>
-                <opt data-widget="color" data-color-type="theme" data-color="gamma" string="Extra Color"/>
-                <opt data-widget="color" data-color-type="theme" data-color="delta" string="Extra Color"/>
-                <opt data-widget="color" data-color-type="theme" data-color="epsilon" string="Extra Color"/>
-            </list>
-            <list string="Status">
-                <opt data-widget="color" data-color-type="theme" data-color="success" string="Success"/>
-                <opt data-widget="color" data-color-type="theme" data-color="info" string="Info"/>
-                <opt data-widget="color" data-color-type="theme" data-color="warning" string="Warning"/>
-                <opt data-widget="color" data-color-type="theme" data-color="danger" string="Error"/>
-            </list>
-            <list string="Text">
-                <opt data-widget="color" data-color="text" string="Text"/>
-                <opt data-widget="color" data-color="h1" string="Headings 1"/>
-                <opt data-widget="color" data-color="h2" string="Headings 2"/>
-                <opt data-widget="color" data-color="h3" string="Headings 3"/>
-                <opt data-widget="color" data-color="h4" string="Headings 4"/>
-                <opt data-widget="color" data-color="h5" string="Headings 5"/>
-                <opt data-widget="color" data-color="h6" string="Headings 6"/>
-            </list>
-            <list string="Background">
-                <opt data-widget="color" data-color="body" string="Body"/>
-                <opt data-widget="color" data-color="menu" string="Menus"/>
-                <opt data-widget="color" data-color="footer" string="Footer"/>
-            </list>
-        </content>
-
-        <!-- Menu options -->
-        <content id="theme_customize_content_navbar" string="Navbar" title="Choose your navbar">
-            <list string="Main Layout">
-                <checkbox><opt data-xmlid="website.affix_top_menu" data-reload="/"/></checkbox>
-                <checkbox><opt data-xmlid="portal.portal_show_sign_in" data-reload="/"/></checkbox>
-                <opt data-widget="input" data-unit="rem" data-variable="header-font-size" string="Font Size"/>
-            </list>
-            <list string="Logo">
-                <checkbox><opt data-xmlid="website.layout_logo_show" data-reload="/"/></checkbox>
-                <opt data-widget="input" data-unit="rem" data-variable="logo-height" string="Logo Height"/>
-            </list>
-        </content>
-
-        <!-- Layout Options -->
-        <content id="theme_customize_content_layout" string="Layout" title="Choose your layout">
-            <list string="Body">
-                <opt string="Full" data-xmlid="" data-icon="/website/static/src/img/options/layout-full.png"/>
-                <opt id="option_layout_boxed" string="Boxed" data-xmlid="website.option_layout_boxed_variables" data-icon="/website/static/src/img/options/layout-boxed.png"/>
-            </list>
-            <list string="Background">
-                <opt id="option_no_background" string="None" data-xmlid=""/>
-                <opt string="Choose an image" data-xmlid="website.option_custom_body_image"/>
-                <opt string="Choose a pattern" data-xmlid="website.option_custom_body_image, website.option_custom_body_pattern"/>
-            </list>
-        </content>
-
-        <!-- Font options -->
-        <content id="theme_customize_content_fonts" string="Fonts" title="Choose your fonts">
-            <list string="Title">
-                <fontselection data-variable="headings-font-number"/>
-            </list>
-            <list string="Body">
-                <fontselection data-variable="font-number"/>
-            </list>
-            <list string="Button">
-                <fontselection data-variable="buttons-font-number"/>
-            </list>
-            <list string="Navbar">
-                <fontselection data-variable="navbar-font-number"/>
-            </list>
-        </content>
-    </div>
 </template>
 
 <!-- Layout options -->
@@ -716,27 +779,23 @@
                     <dd>
                         <span t-raw="app.summary"/>
                     </dd><dd class="text-muted" groups='base.group_no_one'>
-                        Technical name: <span t-field="app.name"/>, updated: <span t-field="app.write_date"/>, author: <span t-field="app.author"/>
+                        Technical name: <span t-field="app.name"/>, author: <span t-field="app.author"/>
                     </dd>
                 </dl>
 
-                <div groups='base.group_no_one'>
-                    <h2>Installed Modules</h2>
-                    <dl class="dl-horizontal">
-                        <t t-foreach="modules" t-as="app">
-                            <dt>
-                                <span t-raw="app.shortdesc"/>
-                            </dt>
-                            <dd t-if="app.summary">
-                                <span t-raw="app.summary"/>
-                            </dd><dd>
-                                Technical name: <span t-field="app.name"/>,
-                                updated: <span t-field="app.write_date"/>
-                                <t t-if="app.author">
-                                    , author: <span t-field="app.author"/>
-                                </t>
-                            </dd>
-                        </t>
+                <div t-if="l10n">
+                    <h2 class='mt32'>Installed Localizations / Account Charts</h2>
+                    <dl class="dl-horizontal" t-foreach="l10n" t-as="app">
+                        <dt>
+                            <a t-attf-href="https://www.odoo.com/page/accounting/#{app.name}">
+                                <t t-raw="app.shortdesc"/>
+                            </a>
+                        </dt>
+                        <dd>
+                            <span t-raw="app.summary"/>
+                        </dd><dd class="text-muted" groups='base.group_no_one'>
+                            Technical name: <span t-field="app.name"/>, author: <span t-field="app.author"/>
+                        </dd>
                     </dl>
                 </div>
               </t>
@@ -786,16 +845,52 @@
     1,2,3
 </template>
 
-<template id="page_404">
+<template id="page_404" name="Page Not Found">
     <t t-call="http_routing.404">
-        <div class="container">
+        <div class="container o_not_editable">
             <div class="alert alert-info mt32">
                 <p>This page does not exist, but you can create it as you are administrator of this site.</p>
-                <a role="button" class="btn btn-primary js_disable_on_click" t-attf-href="/website/add/#{ path }#{ from_template and '?template=%s' % from_template }">Create Page</a>
+                <a role="button" class="btn btn-primary js_disable_on_click post_link" t-attf-href="/website/add/#{ path }#{ from_template and '?template=%s' % from_template }">Create Page</a>
             </div>
             <div class="text-center text-muted">Edit the content below this line to adapt the default "page not found" page.</div>
         </div>
         <hr/>
+    </t>
+</template>
+
+<template id="protected_403" name="Page Protected">
+    <t t-call="website.login_layout">
+        <div class="container">
+            <div class='row'>
+                <form class="offset-md-3 col-md-6" method="POST">
+                    <div class="alert alert-info mt32" t-if="not request.params.get('visibility_password')">
+                        <div class="h5 text-center">
+                            <i class="fa fa-lock fa-2x"/><br/>
+                            <span class="mt-1">A password is required to access this page.</span>
+                        </div>
+                    </div>
+                    <div class="alert alert-warning mt32" t-else="">
+                        <div class="h5 text-center">
+                            <i class="fa fa-lock fa-2x"/><br/>
+                            <span class="mt-1">Wrong password</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <div class="input-group">
+                            <input type="hidden" name="url" t-att-value="path" />
+                            <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()" />
+                            <input type="password" id="password" class="form-control" required="required" name="visibility_password" />
+                            <div class="input-group-append">
+                              <button class="btn btn-secondary" type="button" id="showPass">
+                                <i class="fa fa-eye"></i>
+                              </button>
+                          </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="h4 btn btn-primary btn-block">Access to this page</button>
+                </form>
+            </div>
+        </div>
     </t>
 </template>
 
@@ -893,15 +988,18 @@
     </xpath>
 </template>
 
-<template id="portal_404" inherit_id="portal.portal_404">
-    <xpath expr="//li" position="before">
-        <li><a href="/">Homepage</a></li>
-    </xpath>
-</template>
-
 <template id="robots">
+<t t-translation="off">
 User-agent: *
 Sitemap: <t t-esc="url_root"/>sitemap.xml
+
+
+##############
+#   custom   #
+##############
+
+<t t-raw="request.website.sudo().robots_txt" />
+</t>
 </template>
 
 <template id="sitemap_locs">
@@ -1046,9 +1144,9 @@ Sitemap: <t t-esc="url_root"/>sitemap.xml
         </td>
         <td class="text-center">
             <t t-set='date_formatted'><t t-options='{"widget": "date"}' t-esc="page.date_publish"/></t>
-            <i t-if="page.is_visible" class="fa fa-check" title="Visible"/>
-            <i t-elif="page.website_published" class="fa fa-eye-slash" t-attf-title="This page will be visible on {{ date_formatted }}"/>
-            <i t-else="" class="fa fa-times text-muted" title="Not visible"/>
+            <i t-if="page.is_visible" class="fa fa-check" title="Published"/>
+            <i t-elif="page.website_published" class="fa fa-eye-slash" t-attf-title="This page will be published on {{ date_formatted }}"/>
+            <i t-else="" class="fa fa-times text-muted" title="Not published"/>
         </td>
         <td class="text-center">
             <i t-if="page.website_indexed" class="fa fa-check" title="Indexed"/>

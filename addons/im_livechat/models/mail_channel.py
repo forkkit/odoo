@@ -6,8 +6,8 @@ from odoo import api, fields, models, _
 class ChannelPartner(models.Model):
     _inherit = 'mail.channel.partner'
 
-    @api.model
-    def unpin_old_livechat_sessions(self):
+    @api.autovacuum
+    def _gc_unpin_livechat_sessions(self):
         """ Unpin livechat sessions with no activity for at least one day to
             clean the operator's interface """
         self.env.cr.execute("""
@@ -33,6 +33,7 @@ class MailChannel(models.Model):
 
     anonymous_name = fields.Char('Anonymous Name')
     channel_type = fields.Selection(selection_add=[('livechat', 'Livechat Conversation')])
+    livechat_active = fields.Boolean('Is livechat ongoing?', help='Livechat session is active until visitor leave the conversation.')
     livechat_channel_id = fields.Many2one('im_livechat.channel', 'Channel')
     livechat_operator_id = fields.Many2one('res.partner', string='Operator', help="""Operator for this specific channel""")
     country_id = fields.Many2one('res.country', string="Country", help="Country of the visitor of the channel")
@@ -45,8 +46,6 @@ class MailChannel(models.Model):
         for record in self:
             if record.channel_type == 'livechat':
                 record.is_chat = True
-            else:
-                record.is_chat = False
 
     def _channel_message_notifications(self, message, message_format=False):
         """ When a anonymous user create a mail.channel, the operator is not notify (to avoid massive polling when
@@ -84,9 +83,10 @@ class MailChannel(models.Model):
             if channel.channel_type == 'livechat':
                 # add the operator id
                 if channel.livechat_operator_id:
-                    channel_infos_dict[channel.id]['operator_pid'] = channel.livechat_operator_id.with_context(im_livechat_use_username=True).name_get()[0]
+                    res = channel.livechat_operator_id.with_context(im_livechat_use_username=True).name_get()[0]
+                    channel_infos_dict[channel.id]['operator_pid'] = (res[0], res[1].replace(',', ''))
                 # add the anonymous or partner name
-                channel_infos_dict[channel.id]['correspondent_name'] = channel._channel_get_livechat_partner_name()
+                channel_infos_dict[channel.id]['livechat_visitor'] = channel._channel_get_livechat_visitor_info()
                 last_msg = self.env['mail.message'].search([("channel_ids", "in", [channel.id])], limit=1)
                 if last_msg:
                     channel_infos_dict[channel.id]['last_message_date'] = last_msg.date
@@ -98,6 +98,26 @@ class MailChannel(models.Model):
         pinned_channels = self.env['mail.channel.partner'].search([('partner_id', '=', self.env.user.partner_id.id), ('is_pinned', '=', True)]).mapped('channel_id')
         values['channel_livechat'] = self.search([('channel_type', '=', 'livechat'), ('id', 'in', pinned_channels.ids)]).channel_info()
         return values
+
+    def _channel_get_livechat_visitor_info(self):
+        partners = self.channel_partner_ids - self.livechat_operator_id
+        if partners:
+            return {
+                'country': partners[0].country_id.name_get() if partners[0].country_id else False,
+                'id': partners[0].id,
+                'name': partners[0].name,
+            }
+        if self.anonymous_name:
+            return {
+                'country': False,
+                'id': False,
+                'name': self.anonymous_name,
+            }
+        return {
+            'country': False,
+            'id': False,
+            'name': _("Visitor"),
+        }
 
     def _channel_get_livechat_partner_name(self):
         if self.livechat_operator_id in self.channel_partner_ids:
@@ -116,8 +136,8 @@ class MailChannel(models.Model):
             return self.anonymous_name
         return _("Visitor")
 
-    @api.model
-    def remove_empty_livechat_sessions(self):
+    @api.autovacuum
+    def _gc_empty_livechat_sessions(self):
         hours = 1  # never remove empty session created within the last hour
         self.env.cr.execute("""
             SELECT id as id
@@ -157,6 +177,21 @@ class MailChannel(models.Model):
             'info': 'transient_message',
         })
 
+    def _get_visitor_leave_message(self, operator=False, cancel=False):
+        return _('Visitor has left the conversation.')
+
+    def _close_livechat_session(self, **kwargs):
+        """ Set deactivate the livechat channel and notify (the operator) the reason of closing the session."""
+        self.ensure_one()
+        if self.livechat_active:
+            self.livechat_active = False
+            # avoid useless notification if the channel is empty
+            if not self.channel_message_ids:
+                return
+            # Notify that the visitor has left the conversation
+            self.message_post(author_id=self.env.ref('base.partner_root').id,
+                              body=self._get_visitor_leave_message(**kwargs), message_type='comment', subtype_xmlid='mail.mt_comment')
+
     # Rating Mixin
 
     def _rating_get_parent_field_name(self):
@@ -169,11 +204,12 @@ class MailChannel(models.Model):
             "channel": self,
         }
         template = self.env.ref('im_livechat.livechat_email_template')
-        mail_body = template.render(render_context, engine='ir.qweb', minimal_qcontext=True)
-        mail_body = self.env['mail.thread']._replace_local_links(mail_body)
-        mail = self.env['mail.mail'].create({
-            'subject': _('Conversation with %s') % self.livechat_operator_id.name,
-            'email_from': self.env.company.email,
+        mail_body = template._render(render_context, engine='ir.qweb', minimal_qcontext=True)
+        mail_body = self.env['mail.render.mixin']._replace_local_links(mail_body)
+        mail = self.env['mail.mail'].sudo().create({
+            'subject': _('Conversation with %s', self.livechat_operator_id.name),
+            'email_from': company.catchall_formatted or company.email_formatted,
+            'author_id': self.env.user.partner_id.id,
             'email_to': email,
             'body_html': mail_body,
         })

@@ -7,13 +7,29 @@
 
         <script type="text/javascript" src="/web/static/src/js/fields/field_utils.js"></script>
 
-        <script type="text/javascript" src="/survey/static/src/js/survey_result.js" />
-        <script type="text/javascript" src="/survey/static/src/js/survey.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_quick_access.js" />
         <script type="text/javascript" src="/survey/static/src/js/survey_timer.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_breadcrumb.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_form.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_print.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_result.js" />
 
+        <t t-call="web._assets_helpers">
+            <t t-call="web._assets_frontend_helpers"/>
+        </t>
         <link href="/survey/static/src/css/survey_print.css" rel="stylesheet" type="text/css"/>
         <link href="/survey/static/src/css/survey_result.css" rel="stylesheet" type="text/css"></link>
-        <link rel="stylesheet" type="text/scss" href="/survey/static/src/scss/survey_templates.scss"/>
+        <link rel="stylesheet" type="text/scss" href="/survey/static/src/scss/survey_form.scss"/>
+    </template>
+
+    <!-- survey user input session assets  -->
+    <template id="survey_user_input_session_assets" name="Survey User Input Session Assets">
+        <script type="text/javascript" src="/survey/static/src/js/libs/chartjs-plugin-datalabels.min.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_session_colors.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_session_chart.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_session_text_answers.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_session_leaderboard.js" />
+        <script type="text/javascript" src="/survey/static/src/js/survey_session_manage.js" />
     </template>
 
     <template id="survey_report_assets_pdf" inherit_id="web.report_assets_pdf">
@@ -26,6 +42,7 @@
         <xpath expr="." position="inside">
             <link rel="stylesheet" href="/survey/static/src/css/survey_result.css"/>
             <script type="text/javascript" src="/survey/static/src/js/fields_section_one2many.js"/>
+            <script type="text/javascript" src="/survey/static/src/js/fields_form_page_description.js"/>
         </xpath>
     </template>
 
@@ -41,6 +58,11 @@
             <script type="text/javascript" src="/survey/static/tests/tours/certification_success.js"></script>
             <script type="text/javascript" src="/survey/static/tests/tours/survey.js"></script>
             <script type="text/javascript" src="/survey/static/tests/tours/survey_prefill.js"></script>
+            <script type="text/javascript" src="/survey/static/tests/tours/survey_tour_session_tools.js"></script>
+            <script type="text/javascript" src="/survey/static/tests/tours/survey_tour_session_create.js"></script>
+            <script type="text/javascript" src="/survey/static/tests/tours/survey_tour_session_start.js"></script>
+            <script type="text/javascript" src="/survey/static/tests/tours/survey_tour_session_manage.js"></script>
+            <script type="text/javascript" src="/survey/static/tests/tours/survey_session_manage_test.js"></script>
         </xpath>
     </template>
 </data>

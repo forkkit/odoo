@@ -9,7 +9,6 @@ from odoo import api, fields, models, tools, _
 from odoo.exceptions import ValidationError
 from odoo.http import request
 from odoo.modules import get_module_resource
-from odoo.tools.safe_eval import safe_eval
 
 MENU_ITEM_SEPARATOR = "/"
 NUMBER_PARENS = re.compile(r"\(([0-9]+)\)")
@@ -170,7 +169,8 @@ class IrUiMenu(models.Model):
         # cascade-delete submenus blindly. We also can't use ondelete=set null because
         # that is not supported when _parent_store is used (would silently corrupt it).
         # TODO: ideally we should move them under a generic "Orphans" menu somewhere?
-        extra = {'ir.ui.menu.full_list': True}
+        extra = {'ir.ui.menu.full_list': True,
+                 'active_test': False}
         direct_children = self.with_context(**extra).search([('parent_id', 'in', self.ids)])
         direct_children.write({'parent_id': False})
 

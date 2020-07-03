@@ -1,23 +1,31 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class EventTypeMail(models.Model):
     _inherit = 'event.type.mail'
 
-    notification_type = fields.Selection(selection_add=[('sms', 'SMS')])
+    notification_type = fields.Selection(selection_add=[
+        ('sms', 'SMS')
+    ], ondelete={'sms': 'set default'})
     sms_template_id = fields.Many2one(
         'sms.template', string='SMS Template',
         domain=[('model', '=', 'event.registration')], ondelete='restrict',
         help='This field contains the template of the SMS that will be automatically sent')
 
+    @api.model
+    def _get_event_mail_fields_whitelist(self):
+        return super(EventTypeMail, self)._get_event_mail_fields_whitelist() + ['sms_template_id']
+
 
 class EventMailScheduler(models.Model):
     _inherit = 'event.mail'
 
-    notification_type = fields.Selection(selection_add=[('sms', 'SMS')])
+    notification_type = fields.Selection(selection_add=[
+        ('sms', 'SMS')
+    ], ondelete={'sms': 'set default'})
     sms_template_id = fields.Many2one(
         'sms.template', string='SMS Template',
         domain=[('model', '=', 'event.registration')], ondelete='restrict',

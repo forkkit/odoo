@@ -15,6 +15,7 @@ var core = require('web.core');
 var dom = require('web.dom');
 var ListRenderer = require('web.ListRenderer');
 var utils = require('web.utils');
+const { WidgetAdapterMixin } = require('web.OwlCompatibility');
 
 var _t = core._t;
 
@@ -42,7 +43,6 @@ ListRenderer.include({
      * @param {boolean} params.isMultiEditable
      */
     init: function (parent, state, params) {
-        var self = this;
         this._super.apply(this, arguments);
 
         this.editable = params.editable;
@@ -62,33 +62,27 @@ ListRenderer.include({
 
         // The following code will browse the arch to find
         // all the <create> that are inside <control>
-
-        if (this.addCreateLine) {
-            this.creates = [];
-
-            _.each(this.arch.children, function (child) {
-                if (child.tag !== 'control') {
+        this.creates = [];
+        this.arch.children.forEach(child => {
+            if (child.tag !== 'control') {
+                return;
+            }
+            child.children.forEach(child => {
+                if (child.tag !== 'create' || child.attrs.invisible) {
                     return;
                 }
-
-                _.each(child.children, function (child) {
-                    if (child.tag !== 'create' || child.attrs.invisible) {
-                        return;
-                    }
-
-                    self.creates.push({
-                        context: child.attrs.context,
-                        string: child.attrs.string,
-                    });
+                this.creates.push({
+                    context: child.attrs.context,
+                    string: child.attrs.string,
                 });
             });
+        });
 
-            // Add the default button if we didn't find any custom button.
-            if (this.creates.length === 0) {
-                this.creates.push({
-                    string: _t("Add a line"),
-                });
-            }
+        // Add the default button if we didn't find any custom button.
+        if (this.creates.length === 0) {
+            this.creates.push({
+                string: _t("Add a line"),
+            });
         }
 
         // if addTrashIcon is true, there will be a small trash icon at the end
@@ -111,6 +105,7 @@ ListRenderer.include({
     start: function () {
         core.bus.on('click', this, this._onWindowClicked.bind(this));
         core.bus.on('resize', this, _.debounce(this._onResize.bind(this), this.RESIZE_DELAY));
+        core.bus.on('DOM_updated', this, () => this._freezeColumnWidths());
         return this._super();
     },
     /**
@@ -133,8 +128,11 @@ ListRenderer.include({
      */
     on_attach_callback: function () {
         this.isInDOM = true;
-        this._freezeColumnWidths();
         this._super();
+        // _freezeColumnWidths requests style information, which produces a
+        // repaint, so we call it after _super to prevent flickering (in case
+        // other code would also modify the DOM post rendering/before repaint)
+        this._freezeColumnWidths();
     },
     /**
      * The list renderer needs to know if it is in the DOM to properly compute
@@ -191,7 +189,7 @@ ListRenderer.include({
             if (widgets.length) {
                 var $row = self._getRow(recordID);
                 var record = self._getRecord(recordID);
-                self._setDecorationClasses(record, $row);
+                self._setDecorationClasses($row, self.rowDecorations, record);
                 self._updateFooter();
             }
             return widgets;
@@ -225,7 +223,7 @@ ListRenderer.include({
         var self = this;
 
         var oldData = this.state.data;
-        this.state = state;
+        this._setState(state);
         return this.confirmChange(state, id, fields, ev).then(function () {
             // If no record with 'id' can be found in the state, the
             // confirmChange method will have rerendered the whole view already,
@@ -371,7 +369,7 @@ ListRenderer.include({
      * @param {string} recordID
      */
     removeLine: function (state, recordID) {
-        this.state = state;
+        this._setState(state);
         var $row = this._getRow(recordID);
         if ($row.length === 0) {
             return;
@@ -390,12 +388,10 @@ ListRenderer.include({
             // we want to always keep at least 4 (possibly empty) rows
             var $emptyRow = this._renderEmptyRow();
             $row.replaceWith($emptyRow);
-            if (this.editable === "top") {
-                // move the empty row we just inserted after data rows
-                var $lastDataRow = this.$('.o_data_row:last');
-                if ($lastDataRow.length) {
-                    $emptyRow.insertAfter($lastDataRow);
-                }
+            // move the empty row we just inserted after last data row
+            const $lastDataRow = this.$('.o_data_row:last');
+            if ($lastDataRow.length) {
+                $emptyRow.insertAfter($lastDataRow);
             }
         }
     },
@@ -468,6 +464,9 @@ ListRenderer.include({
         }
 
         return Promise.all(defs).then(function () {
+            // mark Owl sub components as mounted
+            WidgetAdapterMixin.on_attach_callback.call(self);
+
             // necessary to trigger resize on fieldtexts
             core.bus.trigger('DOM_updated');
         });
@@ -506,12 +505,12 @@ ListRenderer.include({
                 onSuccess: resolve,
                 onFailure: reject,
             });
-        }).then(changedFields => {
+        }).then(selectNextRow => {
             this._enableRecordSelectors();
             // If any field has changed and if the list is in multiple edition,
             // we send a truthy boolean to _selectRow to tell it not to select
             // the following record.
-            return changedFields && changedFields.length && this.isInMultipleRecordEdition(recordID);
+            return selectNextRow;
         }).guardedCatch(() => {
             toggleWidgets(false);
         });
@@ -520,7 +519,6 @@ ListRenderer.include({
      * @override
      */
     updateState: function (state, params) {
-        this.columnWidths = false;
         // There are some cases where a record is added to an invisible list
         // e.g. set a quotation template with optionnal products
         if (params.keepWidths && this.$el.is(':visible')) {
@@ -531,6 +529,15 @@ ListRenderer.include({
             // remove computed modifiers data (as they are obsolete) to force
             // them to be recomputed at next (sub-)rendering
             this.allModifiersData = [];
+        }
+        if ('addTrashIcon' in params) {
+            if (this.addTrashIcon !== params.addTrashIcon) {
+                this.columnWidths = false; // columns changed, so forget stored widths
+            }
+            this.addTrashIcon = params.addTrashIcon;
+        }
+        if ('addCreateLine' in params) {
+            this.addCreateLine = params.addCreateLine;
         }
         return this._super.apply(this, arguments);
     },
@@ -554,6 +561,56 @@ ListRenderer.include({
     _addEventListener: function (type, el, callback, options) {
         el.addEventListener(type, callback, options);
         this.eventListeners.push({ type, el, callback, options });
+    },
+    /**
+     * Handles the assignation of default widths for each column header.
+     * If the list is empty, an arbitrary absolute or relative width will be
+     * given to the header
+     *
+     * @see _getColumnWidth for detailed information about which width is
+     * given to a certain field type.
+     *
+     * @private
+     */
+    _computeDefaultWidths: function () {
+        const isListEmpty = !this._hasVisibleRecords(this.state);
+        const relativeWidths = [];
+        this.columns.forEach(column => {
+            const th = this._getColumnHeader(column);
+            if (th.offsetParent === null) {
+                relativeWidths.push(false);
+            } else {
+                const width = this._getColumnWidth(column);
+                if (width.match(/[a-zA-Z]/)) { // absolute width with measure unit (e.g. 100px)
+                    if (isListEmpty) {
+                        th.style.width = width;
+                    } else {
+                        // If there are records, we force a min-width for fields with an absolute
+                        // width to ensure a correct rendering in edition
+                        th.style.minWidth = width;
+                    }
+                    relativeWidths.push(false);
+                } else { // relative width expressed as a weight (e.g. 1.5)
+                    relativeWidths.push(parseFloat(width, 10));
+                }
+            }
+        });
+
+        // Assignation of relative widths
+        if (isListEmpty) {
+            const totalWidth = this._getColumnsTotalWidth(relativeWidths);
+            for (let i in this.columns) {
+                if (relativeWidths[i]) {
+                    const th = this._getColumnHeader(this.columns[i]);
+                    th.style.width = (relativeWidths[i] / totalWidth * 100) + '%';
+                }
+            }
+            // Manualy assigns trash icon header width since it's not in the columns
+            const trashHeader = this.el.getElementsByClassName('o_list_record_remove_header')[0];
+            if (trashHeader) {
+                trashHeader.style.width = '32px';
+            }
+        }
     },
     /**
      * Destroy all field widgets corresponding to a record.  Useful when we are
@@ -598,24 +655,29 @@ ListRenderer.include({
      * @private
      */
     _freezeColumnWidths: function () {
-        if (!this.columnWidths && (!this._hasVisibleRecords(this.state) || !this.$el.is(':visible'))) {
+        if (!this.columnWidths && this.el.offsetParent === null) {
             // there is no record nor widths to restore or the list is not visible
             // -> don't force column's widths w.r.t. their label
             return;
         }
-        const table = this.el.getElementsByTagName('table')[0];
-        const thead = table.getElementsByTagName('thead')[0];
-        const thElements = [...thead.getElementsByTagName('th')];
-
+        const thElements = [...this.el.querySelectorAll('table thead th')];
+        if (!thElements.length) {
+            return;
+        }
+        const table = this.el.getElementsByClassName('o_list_table')[0];
         let columnWidths = this.columnWidths;
-        if (!columnWidths) { // no column widths to restore
+
+        if (!columnWidths || !columnWidths.length) { // no column widths to restore
             // Set table layout auto and remove inline style to make sure that css
             // rules apply (e.g. fixed width of record selector)
             table.style.tableLayout = 'auto';
-            thElements.forEach((th) => {
+            thElements.forEach(th => {
                 th.style.width = null;
                 th.style.maxWidth = null;
             });
+
+            // Resets the default widths computation now that the table is visible.
+            this._computeDefaultWidths();
 
             // Squeeze the table by applying a max-width on largest columns to
             // ensure that it doesn't overflow
@@ -623,7 +685,10 @@ ListRenderer.include({
         }
 
         thElements.forEach((th, index) => {
-            th.style.width = `${columnWidths[index]}px`;
+            // Width already set by default relative width computation
+            if (!th.style.width) {
+                th.style.width = `${columnWidths[index]}px`;
+            }
         });
 
         // Set the table layout to fixed
@@ -643,16 +708,17 @@ ListRenderer.include({
         return $borderDataRow;
     },
     /**
-     * Compute the sum of the weights for each columns, excluding
-     * those with an absolute width. param `$thread` is useful for studio, in
-     * order to show column hooks.
+     * Compute the sum of the weights for each column, given an array containing
+     * all relative widths. param `$thead` is useful for studio, in order to
+     * show column hooks.
      *
      * @private
      * @param {jQuery} $thead
+     * @param {number[]} relativeWidths
      * @return {integer}
      */
-    _getColumnsTotalWidth($thead) {
-        return this.columns.reduce((acc, column) => acc + (column.attrs.relativeWidth || 0), 0);
+    _getColumnsTotalWidth(relativeWidths) {
+        return relativeWidths.reduce((acc, width) => acc + width, 0);
     },
     /**
      * Returns the width of a column according the 'width' attribute set in the
@@ -690,7 +756,7 @@ ListRenderer.include({
             return '1';
         }
         const fixedWidths = {
-            boolean: '50px',
+            boolean: '70px',
             date: '92px',
             datetime: '146px',
             float: '92px',
@@ -702,6 +768,23 @@ ListRenderer.include({
             type = fieldsInfo[name].widget;
         }
         return fixedWidths[type] || '1';
+    },
+    /**
+     * Gets the th element corresponding to a given column.
+     *
+     * @private
+     * @param {Object} column
+     * @returns {HTMLElement}
+     */
+    _getColumnHeader: function (column) {
+        const { icon, name, string } = column.attrs;
+        if (name) {
+            return this.el.querySelector(`thead th[data-name="${name}"]`);
+        } else if (string) {
+            return this.el.querySelector(`thead th[data-string="${string}"]`);
+        } else if (icon) {
+            return this.el.querySelector(`thead th[data-icon="${icon}"]`);
+        }
     },
     /**
      * Returns the nearest editable row starting from a given table row.
@@ -968,17 +1051,6 @@ ListRenderer.include({
         } else {
             this.columnWidths = false; // columns changed, so forget stored widths
         }
-        // if we don't have widths yet, computed them
-        if (!this.columnWidths) {
-            this.columns.forEach((column) => {
-                const width = this._getColumnWidth(column);
-                if (width.match(/[a-zA-Z]/)) { // absolute width with measure unit (e.g. 100px)
-                    column.attrs.absoluteWidth = width;
-                } else { // relative width expressed as a weight (e.g. 1.5)
-                    column.attrs.relativeWidth = parseFloat(width, 10);
-                }
-            });
-        }
     },
     /**
      * @override
@@ -1064,33 +1136,6 @@ ListRenderer.include({
      */
     _renderHeader: function () {
         var $thead = this._super.apply(this, arguments);
-
-        if (!this.columnWidths) {
-            if (!this._hasVisibleRecords(this.state)) {
-                var totalWidth = this._getColumnsTotalWidth($thead);
-                this.columns.forEach(function (column) {
-                    let width;
-                    if (column.attrs.absoluteWidth) {
-                        width = column.attrs.absoluteWidth;
-                    } else if (column.attrs.relativeWidth) {
-                        width = ((column.attrs.relativeWidth / totalWidth * 100) + '%');
-                    }
-                    if (width) {
-                        $thead.find('th[data-name=' + column.attrs.name + ']').css('width', width);
-                    }
-                });
-            } else {
-                // if there are records, we force a min-width for fields with an
-                // absolute width to ensure a correct rendering in edition
-                this.columns.forEach(function (column) {
-                    if (column.attrs.absoluteWidth) {
-                        let width = column.attrs.absoluteWidth;
-                        $thead.find('th[data-name=' + column.attrs.name + ']').css('min-width', width);
-                    }
-                });
-            }
-        }
-
         if (this.addTrashIcon) {
             $thead.find('tr').append($('<th>', {class: 'o_list_record_remove_header'}));
         }
@@ -1162,15 +1207,17 @@ ListRenderer.include({
             $tr.append($td);
             $rows.push($tr);
 
-            _.each(this.creates, function (create, index) {
-                var $a = $('<a href="#" role="button">')
-                    .attr('data-context', create.context)
-                    .text(create.string);
-                if (index > 0) {
-                    $a.addClass('ml16');
-                }
-                $td.append($a);
-            });
+            if (this.addCreateLine) {
+                _.each(this.creates, function (create, index) {
+                    var $a = $('<a href="#" role="button">')
+                        .attr('data-context', create.context)
+                        .text(create.string);
+                    if (index > 0) {
+                        $a.addClass('ml16');
+                    }
+                    $td.append($a);
+                });
+            }
         }
         return $rows;
     },
@@ -1182,7 +1229,7 @@ ListRenderer.include({
     _renderView: function () {
         this.currentRow = null;
         return this._super.apply(this, arguments).then(() => {
-            const table = this.el.getElementsByTagName('table')[0];
+            const table = this.el.getElementsByClassName('o_list_table')[0];
             if (table) {
                 table.classList.toggle('o_empty_list', !this._hasVisibleRecords(this.state));
                 this._freezeColumnWidths();
@@ -1218,11 +1265,11 @@ ListRenderer.include({
             return Promise.resolve();
         }
         var wrap = options.wrap === undefined ? true : options.wrap;
+        var recordID = this._getRecordID(rowIndex);
 
         // Select the row then activate the widget in the correct cell
         var self = this;
         return this._selectRow(rowIndex).then(function () {
-            var recordID = self._getRecordID(rowIndex);
             var record = self._getRecord(recordID);
             if (fieldIndex >= (self.allFieldWidgets[record.id] || []).length) {
                 return Promise.reject();
@@ -1259,12 +1306,11 @@ ListRenderer.include({
             // we don't want the column widths to change when selecting rows
             this._storeColumnWidths();
         }
-        this._freezeColumnWidths();
         var recordId = this._getRecordID(rowIndex);
         // To select a row, the currently selected one must be unselected first
         var self = this;
-        return this.unselectRow().then(noSelectNext => {
-            if (noSelectNext) {
+        return this.unselectRow().then((selectNextRow = true) => {
+            if (!selectNextRow) {
                 return Promise.resolve();
             }
             if (!recordId) {
@@ -1296,7 +1342,7 @@ ListRenderer.include({
      *   overflow
      */
     _squeezeTable: function () {
-        const table = this.el.getElementsByTagName('table')[0];
+        const table = this.el.getElementsByClassName('o_list_table')[0];
         const thead = table.getElementsByTagName('thead')[0];
         const thElements = [...thead.getElementsByTagName('th')];
         const columnWidths = thElements.map(th => th.offsetWidth);
@@ -1512,6 +1558,10 @@ ListRenderer.include({
             return;
         }
         ev.stopPropagation(); // stop the event, the action is done by this renderer
+        if (ev.data.originalEvent && ['next', 'previous'].includes(ev.data.direction)) {
+            ev.data.originalEvent.preventDefault();
+            ev.data.originalEvent.stopPropagation();
+        }
         switch (ev.data.direction) {
             case 'previous':
                 if (this.currentFieldIndex > 0) {
@@ -1635,7 +1685,7 @@ ListRenderer.include({
 
         this.isResizing = true;
 
-        const table = this.el.getElementsByTagName('table')[0];
+        const table = this.el.getElementsByClassName('o_list_table')[0];
         const th = ev.target.closest('th');
         table.style.width = `${table.offsetWidth}px`;
         const thPosition = [...th.parentNode.children].indexOf(th);
@@ -1652,6 +1702,11 @@ ListRenderer.include({
             'mousedown',
             'mouseup',
         ];
+
+        // Fix container width to prevent the table from overflowing when being resized
+        if (!this.el.style.width) {
+            this.el.style.width = `${initialTableWidth}px`;
+        }
 
         // Apply classes to table and selected column
         table.classList.add('o_resizing');

@@ -89,12 +89,7 @@ class SaleOrder(models.Model):
         else:
             domain += [('product_custom_attribute_value_ids', '=', False)]
 
-        lines = self.env['sale.order.line'].sudo().search(domain)
-
-        if line_id:
-            return lines
-
-        return self.env['sale.order.line']
+        return self.env['sale.order.line'].sudo().search(domain)
 
     def _website_product_id_change(self, order_id, product_id, qty=0):
         order = self.sudo().browse(order_id)
@@ -106,7 +101,7 @@ class SaleOrder(models.Model):
             'date': order.date_order,
             'pricelist': order.pricelist_id.id,
         })
-        product = self.env['product.product'].with_context(product_context).browse(product_id)
+        product = self.env['product.product'].with_context(product_context).with_company(order.company_id.id).browse(product_id)
         discount = 0
 
         if order.pricelist_id.discount_policy == 'without_discount':
@@ -258,7 +253,7 @@ class SaleOrder(models.Model):
                     'date': order.date_order,
                     'pricelist': order.pricelist_id.id,
                 })
-                product_with_context = self.env['product.product'].with_context(product_context)
+                product_with_context = self.env['product.product'].with_context(product_context).with_company(order.company_id.id)
                 product = product_with_context.browse(product_id)
                 values['price_unit'] = self.env['account.tax']._fix_tax_included_price_company(
                     order_line._get_display_price(product),
@@ -298,7 +293,8 @@ class SaleOrder(models.Model):
                 accessory_products |= line.product_id.accessory_product_ids.filtered(lambda product:
                     product.website_published and
                     product not in products and
-                    product._is_variant_possible(parent_combination=combination)
+                    product._is_variant_possible(parent_combination=combination) and
+                    (product.company_id == line.company_id or not product.company_id)
                 )
 
             return random.sample(accessory_products, len(accessory_products))
@@ -365,9 +361,9 @@ class SaleOrderLine(models.Model):
     def get_sale_order_line_multiline_description_sale(self, product):
         description = super(SaleOrderLine, self).get_sale_order_line_multiline_description_sale(product)
         if self.linked_line_id:
-            description += "\n" + _("Option for: %s") % self.linked_line_id.product_id.display_name
+            description += "\n" + _("Option for: %s", self.linked_line_id.product_id.display_name)
         if self.option_line_ids:
-            description += "\n" + '\n'.join([_("Option: %s") % option_line.product_id.display_name for option_line in self.option_line_ids])
+            description += "\n" + '\n'.join([_("Option: %s", option_line.product_id.display_name) for option_line in self.option_line_ids])
         return description
 
     @api.depends('product_id.display_name')

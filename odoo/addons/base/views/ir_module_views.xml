@@ -48,6 +48,9 @@
                         <filter string="Category" name="category" domain="[]" context="{'group_by':'category_id'}"/>
                         <filter string="State" name="state" domain="[]" context="{'group_by':'state'}"/>
                     </group>
+                    <searchpanel>
+                        <field name="category_id" string="Categories" enable_counters="1"/>
+                    </searchpanel>
                </search>
             </field>
         </record>
@@ -68,19 +71,22 @@
                         </h3>
                         <div>
                             <button name="button_immediate_install" string="Install" attrs="{'invisible': ['|', ('to_buy','=',True), ('state','!=', 'uninstalled')]}" type="object" class="btn btn-primary mr-1"/>
-                            <a href="https://odoo.com/pricing?utm_source=db&amp;utm_medium=module#hosting=on_premise" class="btn btn-primary mr-1" states="uninstalled,uninstallable" attrs="{'invisible': [('to_buy','=',False)]}" role="button">Upgrade</a>
+                            <a href="https://odoo.com/pricing?utm_source=db&amp;utm_medium=module#hosting=on_premise" class="btn btn-primary mr-1"
+                               attrs="{'invisible': ['|', ('to_buy','=',False), ('state', 'not in', ('uninstalled', 'uninstallable'))]}" role="button">Upgrade</a>
                             <button name="button_immediate_upgrade" states="installed" string="Upgrade" type="object" class="btn btn-primary mr-1"/>
                             <button name="button_uninstall_wizard" states="installed" string="Uninstall" type="object"  class="btn btn-secondary mr-1"/>
                             <button name="button_uninstall_cancel" states="to remove" string="Cancel Uninstall" type="object" class="btn btn-secondary mr-1"/>
                             <button name="button_upgrade_cancel" states="to upgrade" string="Cancel Upgrade" type="object" class="btn btn-secondary mr-1"/>
                             <button name="button_install_cancel" states="to install" string="Cancel Install" type="object" class="btn btn-secondary mr-1"/>
                         </div>
+                        <h6 class="text-muted mt-2" attrs="{'invisible': [('has_iap', '=', False)]}">Contains In-App Purchases</h6>
                     </div>
                     <div class="oe_clear"/>
                     <notebook groups="base.group_no_one">
-                        <page string="Information">
+                        <page string="Information" name="information">
                             <group>
                                 <group>
+                                    <field name="has_iap" invisible="1"/>
                                     <field name="website" widget="url" attrs="{'invisible':[('website','=',False)]}"/>
                                     <field name="category_id" widget="selection"/>
                                     <field name="summary"/>
@@ -93,7 +99,7 @@
                                 </group>
                             </group>
                         </page>
-                        <page string="Technical Data">
+                        <page string="Technical Data" name="technical_data">
                             <group col="4">
                                 <field name="demo"/>
                                 <field name="application"/>
@@ -119,7 +125,7 @@
                                 </tree>
                             </field>
                         </page>
-                        <page string="Installed Features" attrs="{'invisible':[('state','!=','installed')]}">
+                        <page string="Installed Features" name="installed_features" attrs="{'invisible':[('state','!=','installed')]}">
                             <group string="Created Menus"/>
                             <p class="oe_grey" attrs="{'invisible': [('menus_by_module','not in',[None,False])]}"> -This module does not create menu.</p>
                             <field name="menus_by_module"/>
@@ -226,13 +232,13 @@
         <!--link to stores-->
         <record model='ir.actions.act_url' id='action_third_party'>
             <field name='name'>Third-Party Apps</field>
-            <field name='url'>https://www.odoo.com/apps/modules</field>
+            <field name='url'>https://apps.odoo.com/apps/modules</field>
         </record>
         <menuitem id="menu_third_party" parent="menu_apps" name="Third-Party Apps" sequence="20" action="action_third_party"/>
 
         <record model='ir.actions.act_url' id='action_theme_store'>
             <field name='name'>Theme Store</field>
-            <field name='url'>https://www.odoo.com/apps/themes</field>
+            <field name='url'>https://apps.odoo.com/apps/themes</field>
         </record>
         <menuitem id="menu_theme_store" parent="menu_apps" name="Theme Store" sequence="10" action="action_theme_store"/>
 

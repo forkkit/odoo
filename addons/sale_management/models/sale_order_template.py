@@ -37,7 +37,11 @@ class SaleOrderTemplate(models.Model):
             if len(companies) > 1:
                 raise ValidationError(_("Your template cannot contain products from multiple companies."))
             elif companies and companies != template.company_id:
-                raise ValidationError((_("Your template contains products from company %s whereas your template belongs to company %s. \n Please change the company of your template or remove the products from other companies.") % (companies.mapped('display_name'), template.company_id.display_name)))
+                raise ValidationError(_(
+                    "Your template contains products from company %(product_company)s whereas your template belongs to company %(template_company)s. \n Please change the company of your template or remove the products from other companies.",
+                    product_company=', '.join(companies.mapped('display_name')),
+                    template_company=template.company_id.display_name,
+                ))
 
     @api.onchange('sale_order_template_line_ids', 'sale_order_template_option_ids')
     def _onchange_template_line_ids(self):
@@ -45,13 +49,52 @@ class SaleOrderTemplate(models.Model):
         if companies and self.company_id not in companies:
             self.company_id = companies[0]
 
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super(SaleOrderTemplate, self).create(vals_list)
+        records._update_product_translations()
+        return records
+
     def write(self, vals):
         if 'active' in vals and not vals.get('active'):
-            template_id = self.env['ir.default'].get('sale.order', 'sale_order_template_id')
-            for template in self:
-                if template_id and template_id == template.id:
-                    raise UserError(_('Before archiving "%s" please select another default template in the settings.') % template.name)
-        return super(SaleOrderTemplate, self).write(vals)
+            companies = self.env['res.company'].sudo().search([('sale_order_template_id', 'in', self.ids)])
+            companies.sale_order_template_id = None
+        result = super(SaleOrderTemplate, self).write(vals)
+        self._update_product_translations()
+        return result
+
+    def _update_product_translations(self):
+        languages = self.env['res.lang'].search([('active', '=', 'true')])
+        for lang in languages:
+            for line in self.sale_order_template_line_ids:
+                if line.name == line.product_id.get_product_multiline_description_sale():
+                    self.create_or_update_translations(model_name='sale.order.template.line,name', lang_code=lang.code,
+                                                       res_id=line.id,src=line.name,
+                                                       value=line.product_id.with_context(lang=lang.code).get_product_multiline_description_sale())
+            for option in self.sale_order_template_option_ids:
+                if option.name == option.product_id.get_product_multiline_description_sale():
+                    self.create_or_update_translations(model_name='sale.order.template.option,name', lang_code=lang.code,
+                                                       res_id=option.id,src=option.name,
+                                                       value=option.product_id.with_context(lang=lang.code).get_product_multiline_description_sale())
+
+    def create_or_update_translations(self, model_name, lang_code, res_id, src, value):
+        data = {
+            'type': 'model',
+            'name': model_name,
+            'lang': lang_code,
+            'res_id': res_id,
+            'src': src,
+            'value': value,
+            'state': 'inprogress',
+        }
+        existing_trans = self.env['ir.translation'].search([('name', '=', model_name),
+                                                            ('res_id', '=', res_id),
+                                                            ('lang', '=', lang_code)])
+        if not existing_trans:
+            self.env['ir.translation'].create(data)
+        else:
+            existing_trans.write(data)
+
 
 
 class SaleOrderTemplateLine(models.Model):
@@ -69,8 +112,6 @@ class SaleOrderTemplateLine(models.Model):
     product_id = fields.Many2one(
         'product.product', 'Product', check_company=True,
         domain=[('sale_ok', '=', True)])
-    price_unit = fields.Float('Unit Price', required=True, digits='Product Price')
-    discount = fields.Float('Discount (%)', digits='Discount', default=0.0)
     product_uom_qty = fields.Float('Quantity', required=True, digits='Product UoS', default=1)
     product_uom_id = fields.Many2one('uom.uom', 'Unit of Measure', domain="[('category_id', '=', product_uom_category_id)]")
     product_uom_category_id = fields.Many2one(related='product_id.uom_id.category_id', readonly=True)
@@ -83,22 +124,13 @@ class SaleOrderTemplateLine(models.Model):
     def _onchange_product_id(self):
         self.ensure_one()
         if self.product_id:
-            name = self.product_id.display_name
-            if self.product_id.description_sale:
-                name += '\n' + self.product_id.description_sale
-            self.name = name
-            self.price_unit = self.product_id.lst_price
             self.product_uom_id = self.product_id.uom_id.id
-
-    @api.onchange('product_uom_id')
-    def _onchange_product_uom(self):
-        if self.product_id and self.product_uom_id:
-            self.price_unit = self.product_id.uom_id._compute_price(self.product_id.lst_price, self.product_uom_id)
+            self.name = self.product_id.get_product_multiline_description_sale()
 
     @api.model
     def create(self, values):
         if values.get('display_type', self.default_get(['display_type'])['display_type']):
-            values.update(product_id=False, price_unit=0, product_uom_qty=0, product_uom_id=False)
+            values.update(product_id=False, product_uom_qty=0, product_uom_id=False)
         return super(SaleOrderTemplateLine, self).create(values)
 
     def write(self, values):
@@ -112,7 +144,7 @@ class SaleOrderTemplateLine(models.Model):
             "Missing required product and UoM on accountable sale quote line."),
 
         ('non_accountable_fields_null',
-            "CHECK(display_type IS NULL OR (product_id IS NULL AND price_unit = 0 AND product_uom_qty = 0 AND product_uom_id IS NULL))",
+            "CHECK(display_type IS NULL OR (product_id IS NULL AND product_uom_qty = 0 AND product_uom_id IS NULL))",
             "Forbidden product, unit price, quantity, and UoM on non-accountable sale quote line"),
     ]
 
@@ -129,8 +161,6 @@ class SaleOrderTemplateOption(models.Model):
     product_id = fields.Many2one(
         'product.product', 'Product', domain=[('sale_ok', '=', True)],
         required=True, check_company=True)
-    price_unit = fields.Float('Unit Price', required=True, digits='Product Price')
-    discount = fields.Float('Discount (%)', digits='Discount')
     uom_id = fields.Many2one('uom.uom', 'Unit of Measure ', required=True, domain="[('category_id', '=', product_uom_category_id)]")
     product_uom_category_id = fields.Many2one(related='product_id.uom_id.category_id', readonly=True)
     quantity = fields.Float('Quantity', required=True, digits='Product UoS', default=1)
@@ -139,22 +169,5 @@ class SaleOrderTemplateOption(models.Model):
     def _onchange_product_id(self):
         if not self.product_id:
             return
-        product = self.product_id
-        self.price_unit = product.list_price
-        name = product.name
-        if self.product_id.description_sale:
-            name += '\n' + self.product_id.description_sale
-        self.name = name
-        self.uom_id = product.uom_id
-        domain = {'uom_id': [('category_id', '=', self.product_id.uom_id.category_id.id)]}
-        return {'domain': domain}
-
-    @api.onchange('uom_id')
-    def _onchange_product_uom(self):
-        if not self.product_id:
-            return
-        if not self.uom_id:
-            self.price_unit = 0.0
-            return
-        if self.uom_id.id != self.product_id.uom_id.id:
-            self.price_unit = self.product_id.uom_id._compute_price(self.price_unit, self.uom_id)
+        self.uom_id = self.product_id.uom_id
+        self.name = self.product_id.get_product_multiline_description_sale()

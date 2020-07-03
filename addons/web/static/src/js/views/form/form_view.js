@@ -25,19 +25,19 @@ var FormView = BasicView.extend({
      * @override
      */
     init: function (viewInfo, params) {
-        var hasSidebar = params.hasSidebar;
+        var hasActionMenus = params.hasActionMenus;
         this._super.apply(this, arguments);
 
         var mode = params.mode || (params.currentId ? 'readonly' : 'edit');
         this.loadParams.type = 'record';
 
         // this is kind of strange, but the param object is modified by
-        // AbstractView, so we only need to use its hasSidebar value if it was
+        // AbstractView, so we only need to use its hasActionMenus value if it was
         // not already present in the beginning of this method
-        if (hasSidebar === undefined) {
-            hasSidebar = params.hasSidebar;
+        if (hasActionMenus === undefined) {
+            hasActionMenus = params.hasActionMenus;
         }
-        this.controllerParams.hasSidebar = hasSidebar;
+        this.controllerParams.hasActionMenus = hasActionMenus;
         this.controllerParams.disableAutofocus = params.disable_autofocus;
         this.controllerParams.toolbarActions = viewInfo.toolbar;
         this.controllerParams.footerToButtons = params.footerToButtons;
@@ -47,6 +47,7 @@ var FormView = BasicView.extend({
         this.controllerParams.mode = mode;
 
         this.rendererParams.mode = mode;
+        this.rendererParams.isFromFormViewDialog = params.isFromFormViewDialog;
     },
 
     //--------------------------------------------------------------------------
@@ -75,7 +76,7 @@ var FormView = BasicView.extend({
         params.withControlPanel = !(inDialog || inline);
         params.footerToButtons = inDialog;
         params.hasSearchView = inDialog ? false : params.hasSearchView;
-        params.hasSidebar = !inDialog && !inline;
+        params.hasActionMenus = !inDialog && !inline;
         params.searchMenuTypes = inDialog ? [] : params.searchMenuTypes;
         if (inDialog || inline || fullscreen) {
             params.mode = 'edit';
@@ -156,11 +157,8 @@ var FormView = BasicView.extend({
      */
     _setSubViewLimit: function (attrs) {
         var view = attrs.views && attrs.views[attrs.mode];
-        var limit = view && view.arch.attrs.limit && parseInt(view.arch.attrs.limit);
-        if (!limit && attrs.widget === 'many2many_tags') {
-            limit = 1000;
-        }
-        attrs.limit = limit || 40;
+        var limit = view && view.arch.attrs.limit && parseInt(view.arch.attrs.limit, 10);
+        attrs.limit = limit || attrs.Widget.prototype.limit || 40;
     },
 });
 

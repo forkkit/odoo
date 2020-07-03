@@ -46,7 +46,7 @@ odoo.define('point_of_sale.tour.pricelist', function (require) {
 
     var steps = [{ // Leave category displayed by default
         content: 'waiting for loading to finish',
-        trigger: 'body:has(.loader:hidden)',
+        trigger: 'body:not(:has(.loader))',
         run: function () {
             var product_wall_shelf = posmodel.db.search_product_in_category(0, 'Wall Shelf Unit')[0];
             var product_small_shelf = posmodel.db.search_product_in_category(0, 'Small Shelf')[0];
@@ -55,7 +55,6 @@ odoo.define('point_of_sale.tour.pricelist', function (require) {
             var product_desk_pad = posmodel.db.search_product_in_category(0, 'Desk Pad')[0];
             var product_letter_tray = posmodel.db.search_product_in_category(0, 'Letter Tray')[0];
             var product_whiteboard = posmodel.db.search_product_in_category(0, 'Whiteboard')[0];
-            var product_miscellaneous = posmodel.db.search_product_in_category(0, 'Discount')[0];
 
             compare_backend_frontend(product_letter_tray, 'Public Pricelist', 0, undefined)()
                 .then(compare_backend_frontend(product_letter_tray, 'Public Pricelist', 1, undefined))
@@ -76,9 +75,6 @@ odoo.define('point_of_sale.tour.pricelist', function (require) {
                 .then(compare_backend_frontend(product_letter_tray, 'Category', 1, undefined))
                 .then(compare_backend_frontend(product_wall_shelf, 'Product template', 1, undefined))
                 .then(compare_backend_frontend(product_wall_shelf, 'Dates', 1, undefined))
-                .then(compare_backend_frontend(product_miscellaneous, 'Cost base', 1, undefined))
-                .then(compare_backend_frontend(product_miscellaneous, 'Pricelist base', 1, undefined))
-                .then(compare_backend_frontend(product_miscellaneous, 'Pricelist base 2', 1, undefined))
                 .then(compare_backend_frontend(product_small_shelf, 'Pricelist base rounding', 1, undefined))
                 .then(compare_backend_frontend(product_whiteboard, 'Public Pricelist', 1, undefined))
                 .then(function () {
@@ -93,7 +89,7 @@ odoo.define('point_of_sale.tour.pricelist', function (require) {
         run: function () {}, // it's a check
     }, {
         content: "click category switch",
-        trigger: ".js-category-switch",
+        trigger: ".breadcrumb-home",
         run: 'click',
     }, {
         content: "click pricelist button",
@@ -105,10 +101,6 @@ odoo.define('point_of_sale.tour.pricelist', function (require) {
     }, {
         content: "select fixed pricelist",
         trigger: ".selection-item:contains('Fixed')",
-    }, {
-        content: "prices should be updated in the product screen",
-        trigger: ".product:contains('Discount'):contains('$ 1.00')",
-        run: function () {}, // it's a check
     }, {
         content: "open customer list",
         trigger: "button.set-customer",
@@ -128,10 +120,6 @@ odoo.define('point_of_sale.tour.pricelist', function (require) {
     }, {
         content: "cancel pricelist dialog",
         trigger: ".button.cancel:visible",
-    }, {
-        content: "prices should be updated in the product screen",
-        trigger: ".product:contains('Discount'):contains('$ 0.00')",
-        run: function () {}, // it's a check
     }, {
         content: "open customer list",
         trigger: "button.set-customer",
@@ -195,19 +183,6 @@ shelf have not (their price was manually overridden)",
         content: "select fixed pricelist",
         trigger: ".selection-item:contains('min_quantity ordering')",
     }, {
-        content: "order 1 miscellaneous product",
-        trigger: ".product:contains('Discount')",
-    }, {
-        content: "order 1 miscellaneous product",
-        trigger: ".product:contains('Discount')",
-    }, {
-        content: "order 1 miscellaneous product",
-        trigger: ".product:contains('Discount')",
-    }, {
-        content: "verify there is one line with 3 miscellaneous products",
-        trigger: ".orderline:contains('Discount') em:contains('3.000')",
-        run: function () {}, // it's a check
-    }, {
         content: "close the Point of Sale frontend",
         trigger: ".header-button",
     }, {
@@ -258,7 +233,11 @@ odoo.define('point_of_sale.tour.acceptance', function (require) {
                 trigger: keypad_selector + ' .input-button:contains("' + current_char + '"):visible'
             });
         }
-
+        steps.push({
+            content: 'do nothing check',
+            trigger: '.pos',
+            run: function () {},
+        })
         return steps;
     }
 
@@ -313,38 +292,38 @@ odoo.define('point_of_sale.tour.acceptance', function (require) {
             // sending email should be checked in different test
             content: "deactivate email",
             trigger: '.button.js_email',
+        }, {
+            content: "email button should not be highlighted after deactivating",
+            trigger: '.button.js_email:not(.highlight)',
+            run: function() {},
         }];
     }
 
     function finish_order() {
         return [{
             content: "validate the order",
-            trigger: '.button.next:visible',
-        }, {
-            content: "verify that the order is being sent to the backend",
-            trigger: ".js_connecting:visible",
-            run: function () {}, // it's a check
+            trigger: '.payment-screen .button.next.highlight:visible',
         }, {
             content: "verify that the order has been successfully sent to the backend",
             trigger: ".js_connected:visible",
             run: function () {}, // it's a check
         }, {
-            content: "next order",
-            trigger: '.button.next:visible',
-        }, { // Leave category displayed by default
-            content: "click category switch",
-            trigger: ".js-category-switch",
-            run: 'click',
+            content: "click Next Order",
+            trigger: '.receipt-screen .button.next.highlight:visible',
+        }, {
+            content: "check if we left the receipt screen",
+            trigger: '.pos-content .screen:not(:has(.receipt-screen))',
+            run: function () {},
         }];
     }
 
     var steps = [{
             content: 'waiting for loading to finish',
-            trigger: 'body:has(.loader:hidden)',
+            trigger: 'body:not(:has(.loader))',
             run: function () {}, // it's a check
         }, { // Leave category displayed by default
             content: "click category switch",
-            trigger: ".js-category-switch",
+            trigger: ".breadcrumb-home",
             run: 'click',
         }];
 
@@ -354,15 +333,47 @@ odoo.define('point_of_sale.tour.acceptance', function (require) {
     steps = steps.concat(add_product_to_order('Desk Organizer'));
     steps = steps.concat(verify_order_total('10.20'));
     steps = steps.concat(goto_payment_screen_and_select_payment_method());
-    steps = steps.concat(generate_payment_screen_keypad_steps("12.20"));
 
+    /*  add payment line of only 5.20
+        status:
+            order-total := 10.20
+            total-payment := 11.70
+        expect:
+            remaining := 0.00
+            change := 1.50
+    */
+    steps = steps.concat(generate_payment_screen_keypad_steps("5.20"));
     steps = steps.concat([{
-        content: "verify tendered",
-        trigger: '.col-tendered:contains("12.20")',
+        content: "verify remaining",
+        trigger: '.payment-status-remaining .amount:contains("5.00")',
         run: function () {}, // it's a check
     }, {
         content: "verify change",
-        trigger: '.col-change:contains("2.00")',
+        trigger: '.payment-status-change .amount:contains("0.00")',
+        run: function () {}, // it's a check
+    }]);
+
+    /*  make additional payment line of 6.50
+        status:
+            order-total := 10.20
+            total-payment := 11.70
+        expect:
+            remaining := 0.00
+            change := 1.50
+    */
+    steps = steps.concat([{
+        content: "pay with cash",
+        trigger: '.paymentmethod:contains("Cash")',
+    }]);
+    steps = steps.concat(generate_payment_screen_keypad_steps("6.50"));
+
+    steps = steps.concat([{
+        content: "verify remaining",
+        trigger: '.payment-status-remaining .amount:contains("0.00")',
+        run: function () {}, // it's a check
+    }, {
+        content: "verify change",
+        trigger: '.payment-status-change .amount:contains("1.50")',
         run: function () {}, // it's a check
     }]);
 
@@ -388,7 +399,7 @@ odoo.define('point_of_sale.tour.acceptance', function (require) {
         trigger: ".header-button",
     }, {
         content: "confirm closing the frontend",
-        trigger: ".header-button",
+        trigger: ".header-button.confirm",
         run: function() {}, //it's a check,
     }]);
 

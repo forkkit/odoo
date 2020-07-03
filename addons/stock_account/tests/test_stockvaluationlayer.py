@@ -108,7 +108,7 @@ class TestStockValuationCommon(SavepointCase):
             'picking_type_id': self.picking_type_out.id,
         })
         if unit_cost:
-            dropshipped.unit_cost = unit_cost
+            dropshipped.price_unit = unit_cost
         dropshipped._action_confirm()
         dropshipped._action_assign()
         dropshipped.move_line_ids.qty_done = quantity
@@ -123,7 +123,7 @@ class TestStockValuationCommon(SavepointCase):
         stock_return_picking_action = stock_return_picking.create_returns()
         return_pick = self.env['stock.picking'].browse(stock_return_picking_action['res_id'])
         return_pick.move_lines[0].move_line_ids[0].qty_done = quantity_to_return
-        return_pick.action_done()
+        return_pick._action_done()
         return return_pick.move_lines
 
 
@@ -211,7 +211,7 @@ class TestStockValuationStandard(TestStockValuationCommon):
         move3 = self._make_out_move(self.product1, 15)
 
         # change cost from 10 to 15
-        self.product1._change_standard_price(15.0)
+        self.product1.standard_price = 15.0
 
         self.assertEqual(self.product1.value_svl, 75)
         self.assertEqual(self.product1.quantity_svl, 5)
@@ -381,6 +381,17 @@ class TestStockValuationAVCO(TestStockValuationCommon):
 
         self.assertEqual(self.product1.value_svl, 0)
         self.assertEqual(self.product1.quantity_svl, 0)
+
+    def test_negative_3(self):
+        self.product1.product_tmpl_id.categ_id.property_valuation = 'manual_periodic'
+        move1 = self._make_out_move(self.product1, 2, force_assign=True)
+        self.assertEqual(move1.stock_valuation_layer_ids.value, 0)
+        move2 = self._make_in_move(self.product1, 20, unit_cost=3.33)
+        self.assertEqual(move1.stock_valuation_layer_ids[1].value, -6.66)
+
+        self.assertEqual(self.product1.standard_price, 3.33)
+        self.assertEqual(self.product1.value_svl, 59.94)
+        self.assertEqual(self.product1.quantity_svl, 18)
 
     def test_return_receipt_1(self):
         move1 = self._make_in_move(self.product1, 1, unit_cost=10, create_picking=True)
@@ -587,14 +598,13 @@ class TestStockValuationFIFO(TestStockValuationCommon):
         self.assertEqual(self.product1.quantity_svl, 1)
 
     def test_dropship_1(self):
-        orig_standard_price = self.product1.standard_price
         move1 = self._make_in_move(self.product1, 1, unit_cost=10)
         move2 = self._make_in_move(self.product1, 1, unit_cost=20)
         move3 = self._make_dropship_move(self.product1, 1, unit_cost=10)
 
         self.assertEqual(self.product1.value_svl, 30)
         self.assertEqual(self.product1.quantity_svl, 2)
-        self.assertEqual(orig_standard_price, self.product1.standard_price)
+        self.assertAlmostEqual(self.product1.standard_price, 10)
 
 
 class TestStockValuationChangeCostMethod(TestStockValuationCommon):
@@ -768,7 +778,10 @@ class TestStockValuationChangeValuation(TestStockValuationCommon):
             'property_stock_journal': self.stock_journal.id,
         })
 
-        self.product1.categ_id = cat2
+        # Try to change the product category with a `default_type` key in the context and
+        # check it doesn't break the account move generation.
+        self.product1.with_context(default_type='product').categ_id = cat2
+        self.assertEqual(self.product1.categ_id, cat2)
 
         self.assertEqual(self.product1.value_svl, 100)
         self.assertEqual(self.product1.quantity_svl, 10)

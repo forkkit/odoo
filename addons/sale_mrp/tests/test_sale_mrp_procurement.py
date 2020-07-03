@@ -39,9 +39,7 @@ class TestSaleMrpProcurement(TransactionCase):
         product.route_ids.add(warehouse0.mto_pull_id.route_id)
         product_template_slidermobile0 = product.save()
 
-        std_price_wiz = Form(self.env['stock.change.standard.price'].with_context(active_id=product_template_slidermobile0.id, active_model='product.template'))
-        std_price_wiz.new_price = 189
-        std_price_wiz.save()
+        product_template_slidermobile0.standard_price = 189
 
         product_component = Form(self.env['product.product'])
         product_component.name = 'Battery'
@@ -55,7 +53,7 @@ class TestSaleMrpProcurement(TransactionCase):
 
         # I create a sale order for product Slider mobile
         so_form = Form(self.env['sale.order'])
-        so_form.partner_id = self.env.ref('base.res_partner_4')
+        so_form.partner_id = self.env['res.partner'].create({'name': 'Another Test Partner'})
         with so_form.order_line.new() as line:
             line.product_id = product_template_slidermobile0.product_variant_ids
             line.price_unit = 200
@@ -150,7 +148,7 @@ class TestSaleMrpProcurement(TransactionCase):
             warehouse.manufacture_steps = 'pbm_sam'
 
         so_form = Form(self.env['sale.order'])
-        so_form.partner_id = self.env.ref('base.res_partner_4')
+        so_form.partner_id = self.env['res.partner'].create({'name': 'Another Test Partner'})
         with so_form.order_line.new() as line:
             line.product_id = self.complex_product
             line.price_unit = 1

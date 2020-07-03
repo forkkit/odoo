@@ -4,6 +4,7 @@
     <template id="assets_backend" name="sale timesheet assets" inherit_id="web.assets_backend">
         <xpath expr="." position="inside">
             <link rel="stylesheet" type="text/scss" href="/sale_timesheet/static/src/scss/sale_timesheet.scss"/>
+                <script type="text/javascript" src="/sale_timesheet/static/src/js/project_overview.js"></script>
         </xpath>
     </template>
 
@@ -12,6 +13,7 @@
         <field name="type">qweb</field>
         <field name="model">project.project</field>
         <field name="arch" type="xml">
+        <qweb js_class="project_overview">
         <nav class="o_qweb_cp_buttons" t-if="actions">
             <button t-foreach="actions" t-as="action"
                     type="action" class="btn btn-primary"
@@ -27,7 +29,7 @@
                     <div class="o_timesheet_plan_sale_timesheet">
                         <div class="o_timesheet_plan_sale_timesheet_dashboard">
 
-                            <div class="o_timesheet_plan_stat_buttons oe_button_box">
+                            <div class="o_timesheet_plan_stat_buttons oe_button_box o_not_full">
                                 <t t-foreach="stat_buttons" t-as="stat_button">
                                     <a class="btn oe_stat_button"
                                        type="action"
@@ -35,19 +37,34 @@
                                     >
                                         <div t-attf-class="fa fa-fw o_button_icon #{stat_button['icon']}" role="img" aria-label="Statistics" title="Statistics"></div>
                                         <div class="o_field_widget o_stat_info o_readonly_modifier" t-att-title="stat_button['name']">
-                                            <span class="o_stat_value" t-if="stat_button.get('count')">
-                                                <t t-esc="stat_button['count']"/>
-                                            </span>
-                                            <span class="o_stat_text">
-                                                <t t-esc="stat_button['name']"/>
-                                            </span>
+                                            <t t-if="not isinstance(stat_button['name'], list)">
+                                                <span class="o_stat_value" t-if="'count' in stat_button">
+                                                    <t t-esc="stat_button['count']"/>
+                                                </span>
+                                                <span class="o_stat_text">
+                                                    <t t-esc="stat_button['name']"/>
+                                                </span>
+                                            </t>
+                                            <t t-if="isinstance(stat_button['name'], list)">
+                                                <div class="oe_inline">
+                                                    <span class="o_stat_value mr-1">
+                                                        <t t-esc="stat_button.get('count')"/>
+                                                    </span>
+                                                    <span class="o_stat_value">
+                                                        <t t-esc="stat_button['name'][0]"/>
+                                                    </span>
+                                                </div>
+                                                <span class="o_stat_text">
+                                                    <t t-esc="stat_button['name'][1]"/>
+                                                </span>
+                                            </t>
                                         </div>
                                     </a>
                                 </t>
                             </div>
 
                             <div class="o_title">
-                                <h2>Hours recorded and Profitability</h2>
+                                <h2>Recorded Hours and Profitability</h2>
                             </div>
 
                             <t t-set="display_cost" t-value="dashboard['profit']['expense_cost'] != 0.0"/>
@@ -66,7 +83,7 @@
                                                     <td class="o_timesheet_plan_dashboard_cell">
                                                         (<t t-esc="dashboard['rates']['billable_time']"/> %)
                                                     </td>
-                                                    <td title=" Includes the time logged into tasks for which you invoice based on ordered quantities or on milestones.">
+                                                    <td title="Includes the time logged into tasks for which you invoice based on timesheets on tasks.">
                                                         Billed on Timesheets
                                                     </td>
                                                 </tr>
@@ -77,7 +94,7 @@
                                                     <td class="o_timesheet_plan_dashboard_cell">
                                                         (<t t-esc="dashboard['rates']['billable_fixed']"/> %)
                                                     </td>
-                                                    <td title="Includes the time logged into tasks for which you invoice based on timesheets on tasks.">
+                                                    <td title="Includes the time logged into tasks for which you invoice based on ordered quantities or on milestones.">
                                                         Billed at a Fixed price
                                                     </td>
                                                 </tr>
@@ -144,13 +161,23 @@
                                                     <td class="o_timesheet_plan_dashboard_cell">
                                                         <t t-esc="dashboard['profit']['invoiced']" t-options='{"widget": "monetary", "display_currency": currency}'/>
                                                     </td>
-                                                    <td>Invoiced</td>
+                                                    <td title="Revenues linked to Timesheets already invoiced.">
+                                                        Invoiced
+                                                    </td>
                                                 </tr>
                                                 <tr>
                                                     <td class="o_timesheet_plan_dashboard_cell">
                                                         <t t-esc="dashboard['profit']['to_invoice']" t-options='{"widget": "monetary", "display_currency": currency}'/>
                                                     </td>
-                                                    <td>To invoice</td>
+                                                    <td title="Revenues linked to Timesheets not yet invoiced.">
+                                                        To invoice
+                                                    </td>
+                                                </tr>
+                                                <tr t-if="dashboard['profit']['other_revenues'] > 0">
+                                                    <td class="o_timesheet_plan_dashboard_cell">
+                                                        <t t-esc="dashboard['profit']['other_revenues']" t-options='{"widget": "monetary", "display_currency": currency}'/>
+                                                    </td>
+                                                    <td title="All revenues that are not from timesheets and that are linked to the analytic account of the project.">Other Revenues</td>
                                                 </tr>
                                                 <tr>
                                                     <td class="o_timesheet_plan_dashboard_cell">
@@ -164,13 +191,17 @@
                                                     <td class="o_timesheet_plan_dashboard_cell">
                                                         <t t-esc="dashboard['profit']['expense_cost']" t-options='{"widget": "monetary", "display_currency": currency}'/>
                                                     </td>
-                                                    <td>Other costs</td>
+                                                    <td title="Any cost linked to the Analytic Account of the Project.">
+                                                        Other costs
+                                                    </td>
                                                 </tr>
                                                 <tr t-if="display_cost &amp; (dashboard['profit']['expense_amount_untaxed_invoiced'] != 0)">
                                                     <td class="o_timesheet_plan_dashboard_cell">
                                                         <t t-esc="dashboard['profit']['expense_amount_untaxed_invoiced']" t-options='{"widget": "monetary", "display_currency": currency}'/>
                                                     </td>
-                                                    <td>Re-invoiced costs</td>
+                                                    <td title="Costs from expenses that were reinvoiced to your customer (provided that the Analytic Account of the Project was set on the Expense).">
+                                                        Re-invoiced costs
+                                                    </td>
                                                 </tr>
                                                 <tr>
                                                     <td class="o_timesheet_plan_dashboard_total">
@@ -222,38 +253,43 @@
                                             <t t-foreach="repartition_employee" t-as="employee_id">
                                                 <t t-set="employee" t-value="repartition_employee[employee_id]"/>
                                                 <tr>
-                                                    <td style="width: 15%">
+                                                    <td style="width: 3%; vertical-align: middle;">
+                                                        <img class="img rounded-circle mr-2 mb-2" t-attf-src="/web/image?model=hr.employee&amp;field=image_128&amp;id=#{employee['employee_id']}" t-att-title="employee['employee_name']" t-att-alt="employee['employee_name']" width="25" height="25"/>
+                                                    </td>
+                                                    <td style="width: 15%; vertical-align: middle;" >
                                                         <a type="action" data-model="account.analytic.line" t-att-data-domain="json.dumps(timesheet_domain)" t-att-data-context="json.dumps({'search_default_employee_id': employee_id})" data-views="[[0, &quot;list&quot;]]" tabindex="-1">
                                                             <t t-esc="employee['employee_name']"/>
                                                         </a>
                                                     </td>
-                                                    <td style="width: 10%">
+                                                    <td class="text-right pr-5" style="width: 10%; vertical-align: middle;">
                                                         <t t-esc="employee['total']" t-options="{'widget': 'float_time'}"/>
                                                     </td>
-                                                    <td>
-                                                        <div t-if="repartition_employee_max" class="progress" t-attf-style="width: {{employee['total'] / repartition_employee_max * 100}}%">
+                                                    <td style="vertical-align:middle">
+                                                        <div class="border rounded">
+                                                            <div t-if="repartition_employee_max" class="progress" t-attf-style="width: {{max(0, employee['total'] / repartition_employee_max * 100)}}%; margin-bottom: 0em;">
 
-                                                            <t t-set="total" t-value="employee['total'] or 1.0" />
-                                                            <t t-call="sale_timesheet.progressbar">
-                                                                <t t-set="label">Billed on Timesheets</t>
-                                                                <t t-set="key">billable_time</t>
-                                                            </t>
-                                                            <t t-call="sale_timesheet.progressbar">
-                                                                <t t-set="label">Billed at a Fixed price</t>
-                                                                <t t-set="key">billable_fixed</t>
-                                                            </t>
-                                                            <t t-call="sale_timesheet.progressbar">
-                                                                <t t-set="label">No task found</t>
-                                                                <t t-set="key">non_billable_project</t>
-                                                            </t>
-                                                            <t t-call="sale_timesheet.progressbar">
-                                                                <t t-set="label">Non billable tasks</t>
-                                                                <t t-set="key">non_billable</t>
-                                                            </t>
-                                                            <t t-call="sale_timesheet.progressbar">
-                                                                <t t-set="label">Cancelled</t>
-                                                                <t t-set="key">canceled</t>
-                                                            </t>
+                                                                <t t-set="total" t-value="employee['total'] or 1.0" />
+                                                                <t t-call="sale_timesheet.progressbar">
+                                                                    <t t-set="label">Billed on Timesheets</t>
+                                                                    <t t-set="key" t-translation="off">billable_time</t>
+                                                                </t>
+                                                                <t t-call="sale_timesheet.progressbar">
+                                                                    <t t-set="label">Billed at a Fixed price</t>
+                                                                    <t t-set="key" t-translation="off">billable_fixed</t>
+                                                                </t>
+                                                                <t t-call="sale_timesheet.progressbar">
+                                                                    <t t-set="label">No task found</t>
+                                                                    <t t-set="key" t-translation="off">non_billable_project</t>
+                                                                </t>
+                                                                <t t-call="sale_timesheet.progressbar">
+                                                                    <t t-set="label">Non billable tasks</t>
+                                                                    <t t-set="key" t-translation="off">non_billable</t>
+                                                                </t>
+                                                                <t t-call="sale_timesheet.progressbar">
+                                                                    <t t-set="label">Cancelled</t>
+                                                                    <t t-set="key" t-translation="off">canceled</t>
+                                                                </t>
+                                                            </div>
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -289,15 +325,28 @@
                                         </thead>
                                         <tbody>
                                             <t t-set="row_is_milestone" t-value="False"/>
+                                            <t t-set="current_order" t-value="False"/>
+                                            <t t-set="current_order_line" t-value="False"/>
                                             <t t-foreach="timesheet_forecast_table['rows']" t-as="row">
                                                 <t t-set="row_type" t-value="row[0].get('type')"/>
                                                 <t t-if="row_type == 'sale_order_line'">
                                                     <t t-set="row_is_milestone" t-value="row[0].get('is_milestone')"/>
                                                 </t>
-                                                <tr t-att-class="'o_timesheet_forecast_' + row_type">
+                                                <t t-if="row_type == 'sale_order'">
+                                                    <t t-set="current_order" t-value="False"/>
+                                                    <t t-set="current_order_line" t-value="False"/>
+                                                </t>
+                                                <t t-if="row_type == 'sale_order_line'">
+                                                    <t t-set="current_order_line" t-value="False"/>
+                                                </t>
+                                                <t t-set="foldable" t-value="row[0].get('has_children')"/>
+                                                <tr t-att-class="'o_timesheet_forecast_' + row_type + ' sale_order_' + str(current_order) + ' sale_order_line_' + str(current_order_line)"
+                                                    t-att-style="'display: none;' if row_type not in ('sale_order', 'sale_order_line') else ''">
                                                     <t t-foreach="row" t-as="row_value">
                                                         <td t-att-class="'o_right_bordered' if row_value_index in [5,10] else '' + ' text-center' if row_value_index != 0 else ''">
                                                             <t t-if="row_value_index == 0">
+                                                                <span t-if="foldable" t-att-class="('fa fa-caret-down' if row_type == 'sale_order' else 'fa fa-caret-right') + (' project_overview_foldable' if foldable else '')"
+                                                                      style="cursor: pointer;" t-att-data-model="row[0].get('res_model')" t-att-data-res-id="row[0].get('res_id')"/>
                                                                 <t t-if="row_type == 'sale_order'">
                                                                     <a type="action" t-att-data-model="row_value['res_model']" t-att-data-res-id="row_value['res_id']" t-att-class="'o_timesheet_plan_redirect' if row_value['res_id'] else ''">
                                                                         <t t-esc="row_value.get('label')"/>
@@ -333,6 +382,12 @@
                                                         </td>
                                                     </t>
                                                 </tr>
+                                                <t t-if="row_type == 'sale_order_line'">
+                                                    <t t-set="current_order_line" t-value="row[0].get('res_id')"/>
+                                                </t>
+                                                <t t-if="row_type == 'sale_order'">
+                                                    <t t-set="current_order" t-value="row[0].get('res_id')"/>
+                                                </t>
                                             </t>
                                         </tbody>
                                     </table>
@@ -344,12 +399,13 @@
                 </div>
             </div>
         </div>
+        </qweb>
         </field>
     </record>
 
     <template id="progressbar" name="project overview progressbar segments">
         <t t-set="amount" t-value="employee[key]"/>
-        <t t-if="amount">
+        <t t-if="amount &gt; 0">
             <t t-set="title"><t t-esc="label"/>: <t t-esc="amount" t-options="{'widget': 'float_time'}"/></t>
             <a t-attf-class="progress-bar o_progress_{{key}}"
                t-attf-style="width: {{amount / total * 100}}%"

@@ -8,7 +8,7 @@ from unittest.mock import patch
 from odoo import fields
 from odoo.tests import Form
 from odoo.tests.common import TransactionCase, tagged
-from odoo.addons.account.tests.account_test_classes import AccountingTestCase
+from odoo.addons.account.tests.common import AccountTestCommon
 from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
 
 
@@ -17,8 +17,16 @@ class TestStockValuation(TransactionCase):
         super(TestStockValuation, self).setUp()
         self.supplier_location = self.env.ref('stock.stock_location_suppliers')
         self.stock_location = self.env.ref('stock.stock_location_stock')
-        self.partner_id = self.env.ref('base.res_partner_1')
-        self.product1 = self.env.ref('product.product_product_8')
+        self.partner_id = self.env['res.partner'].create({
+            'name': 'Wood Corner Partner',
+            'company_id': self.env.user.company_id.id,
+        })
+        self.product1 = self.env['product.product'].create({
+            'name': 'Large Desk',
+            'standard_price': 1299.0,
+            'list_price': 1799.0,
+            'type': 'product',
+        })
         Account = self.env['account.account']
         self.stock_input_account = Account.create({
             'name': 'Stock Input',
@@ -84,7 +92,7 @@ class TestStockValuation(TransactionCase):
 
         # validate the receipt
         res_dict = picking1.button_validate()
-        wizard = self.env[(res_dict.get('res_model'))].browse(res_dict.get('res_id'))
+        wizard = Form(self.env[(res_dict.get('res_model'))].with_context(res_dict['context'])).save()
         wizard.process()
 
         # the unit price of the valuationlayer used the latest value
@@ -132,7 +140,7 @@ class TestStockValuation(TransactionCase):
 
         # validate the receipt
         res_dict = picking1.button_validate()
-        wizard = self.env[(res_dict.get('res_model'))].browse(res_dict.get('res_id'))
+        wizard = Form(self.env[(res_dict.get('res_model'))].with_context(res_dict['context'])).save()
         wizard.process()
 
         # the unit price of the valuation layer used the latest value
@@ -202,7 +210,7 @@ class TestStockValuation(TransactionCase):
 
         # validate the receipt
         res_dict = picking1.button_validate()
-        wizard = self.env[(res_dict.get('res_model'))].browse(res_dict.get('res_id'))
+        wizard = Form(self.env[(res_dict.get('res_model'))].with_context(res_dict['context'])).save()
         wizard.process()
 
         # the unit price of the valuation layer used the latest value
@@ -233,10 +241,7 @@ class TestStockValuation(TransactionCase):
         picking1 = po1.picking_ids[0]
         move1 = picking1.move_lines[0]
         move1.quantity_done = 15
-        res_dict = picking1.button_validate()
-        self.assertEqual(res_dict['res_model'], 'stock.overprocessed.transfer')
-        wizard = self.env[(res_dict.get('res_model'))].browse(res_dict.get('res_id'))
-        wizard.action_confirm()
+        picking1.button_validate()
 
         # there should be only one move
         self.assertEqual(len(picking1.move_lines), 1)
@@ -270,7 +275,7 @@ class TestStockValuation(TransactionCase):
         move1.quantity_done = 5
         res_dict = picking1.button_validate()
         self.assertEqual(res_dict['res_model'], 'stock.backorder.confirmation')
-        wizard = self.env[(res_dict.get('res_model'))].browse(res_dict.get('res_id'))
+        wizard = self.env[(res_dict.get('res_model'))].browse(res_dict.get('res_id')).with_context(res_dict['context'])
         wizard.process()
 
         self.assertEqual(len(picking1.move_lines), 1)
@@ -285,12 +290,13 @@ class TestStockValuation(TransactionCase):
 
 
 @tagged('post_install', '-at_install')
-class TestStockValuationWithCOA(AccountingTestCase):
+class TestStockValuationWithCOA(AccountTestCommon):
     def setUp(self):
         super(TestStockValuationWithCOA, self).setUp()
         self.supplier_location = self.env.ref('stock.stock_location_suppliers')
         self.stock_location = self.env.ref('stock.stock_location_stock')
-        self.partner_id = self.env.ref('base.res_partner_1')
+        self.partner_id = self.env['res.partner'].create({'name': 'Wood Corner Partner'})
+        self.product1 = self.env['product.product'].create({'name': 'Large Desk'})
 
         self.cat = self.env['product.category'].create({
             'name': 'cat',
@@ -370,7 +376,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         receipt_po1.move_lines.quantity_done = 10
         receipt_po1.button_validate()
 
-        move_form = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        move_form = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         move_form.partner_id = self.partner_id
         move_form.purchase_id = po1
         invoice_po1 = move_form.save()
@@ -395,7 +401,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         receipt_po2.move_lines.quantity_done = 10
         receipt_po2.button_validate()
 
-        move_form = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        move_form = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         move_form.partner_id = self.partner_id
         move_form.purchase_id = po2
         invoice_po2 = move_form.save()
@@ -419,7 +425,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         self.assertEqual(self.product1.value_svl, 200)
 
         # create a credit note for po2
-        move_form = Form(self.env['account.move'].with_context(default_type='in_refund'))
+        move_form = Form(self.env['account.move'].with_context(default_move_type='in_refund'))
         move_form.partner_id = self.partner_id
         move_form.purchase_id = po2
         with move_form.invoice_line_ids.edit(0) as line_form:
@@ -454,7 +460,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         receipt.button_validate()
 
         # Create an invoice with a different price
-        move_form = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        move_form = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         move_form.partner_id = order.partner_id
         move_form.purchase_id = order
         with move_form.invoice_line_ids.edit(0) as line_form:
@@ -488,8 +494,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         })
 
         self.product1.product_tmpl_id.categ_id.property_cost_method = 'fifo'
-        self.product1.product_tmpl_id.categ_id.valuation = 'real_time'
-
+        self.product1.product_tmpl_id.categ_id.property_valuation = 'real_time'
 
         # Receive 10@10 ; create the vendor bill
         po1 = self.env['purchase.order'].create({
@@ -523,6 +528,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         """
         company = self.env.user.company_id
         company.anglo_saxon_accounting = True
+        company.currency_id = self.usd_currency
 
         date_po = '2019-01-01'
 
@@ -568,8 +574,8 @@ class TestStockValuationWithCOA(AccountingTestCase):
         })
         po.button_confirm()
 
-        inv = self.env['account.move'].with_context(default_type='in_invoice').create({
-            'type': 'in_invoice',
+        inv = self.env['account.move'].with_context(default_move_type='in_invoice').create({
+            'move_type': 'in_invoice',
             'invoice_date': date_po,
             'date': date_po,
             'currency_id': self.eur_currency.id,
@@ -590,6 +596,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         self.assertEqual(len(move_lines), 2)
 
         payable_line = move_lines.filtered(lambda l: l.account_id.internal_type == 'payable')
+
         self.assertEqual(payable_line.amount_currency, -100.0)
         self.assertAlmostEqual(payable_line.balance, -66.67)
 
@@ -606,6 +613,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         """
         company = self.env.user.company_id
         company.anglo_saxon_accounting = True
+        company.currency_id = self.usd_currency
         self.product1.product_tmpl_id.categ_id.property_cost_method = 'average'
         self.product1.product_tmpl_id.categ_id.property_valuation = 'real_time'
 
@@ -699,8 +707,8 @@ class TestStockValuationWithCOA(AccountingTestCase):
         line_product_average = po.order_line.filtered(lambda l: l.product_id == self.product1)
         line_product_standard = po.order_line.filtered(lambda l: l.product_id == product_standard)
 
-        inv = self.env['account.move'].with_context(default_type='in_invoice').create({
-            'type': 'in_invoice',
+        inv = self.env['account.move'].with_context(default_move_type='in_invoice').create({
+            'move_type': 'in_invoice',
             'invoice_date': date_invoice,
             'date': date_invoice,
             'currency_id': self.eur_currency.id,
@@ -781,6 +789,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         """
         company = self.env.user.company_id
         company.anglo_saxon_accounting = True
+        company.currency_id = self.usd_currency
         self.product1.product_tmpl_id.categ_id.property_cost_method = 'average'
         self.product1.product_tmpl_id.categ_id.property_valuation = 'real_time'
 
@@ -873,8 +882,8 @@ class TestStockValuationWithCOA(AccountingTestCase):
         self.assertAlmostEqual(product_avg.standard_price, 42.86)
 
         today = date_invoice
-        inv = self.env['account.move'].with_context(default_type='in_invoice').create({
-            'type': 'in_invoice',
+        inv = self.env['account.move'].with_context(default_move_type='in_invoice').create({
+            'move_type': 'in_invoice',
             'invoice_date': date_invoice,
             'date': date_invoice,
             'currency_id': self.eur_currency.id,
@@ -941,6 +950,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         """
         company = self.env.user.company_id
         company.anglo_saxon_accounting = True
+        company.currency_id = self.usd_currency
         exchange_diff_journal = company.currency_exchange_journal_id.exists()
 
         date_po = '2019-01-01'
@@ -1044,13 +1054,13 @@ class TestStockValuationWithCOA(AccountingTestCase):
             .write({'quantity_done': 5.0}))
 
         picking.button_validate()
-        picking.action_done()  # Create Backorder
+        picking._action_done()  # Create Backorder
         # 5 Units received at rate 0.7 = 42.86
         self.assertAlmostEqual(product_avg.standard_price, 42.86)
 
         today = date_invoice
-        inv = self.env['account.move'].with_context(default_type='in_invoice').create({
-            'type': 'in_invoice',
+        inv = self.env['account.move'].with_context(default_move_type='in_invoice').create({
+            'move_type': 'in_invoice',
             'invoice_date': date_invoice,
             'date': date_invoice,
             'currency_id': self.eur_currency.id,
@@ -1079,8 +1089,8 @@ class TestStockValuationWithCOA(AccountingTestCase):
         self.assertAlmostEqual(product_avg.standard_price, 40.18)
 
         today = date_invoice1
-        inv1 = self.env['account.move'].with_context(default_type='in_invoice').create({
-            'type': 'in_invoice',
+        inv1 = self.env['account.move'].with_context(default_move_type='in_invoice').create({
+            'move_type': 'in_invoice',
             'invoice_date': date_invoice1,
             'date': date_invoice1,
             'currency_id': self.eur_currency.id,
@@ -1204,7 +1214,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         receipt.button_validate()
 
         # Create an invoice with a different price and a discount
-        invoice_form = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        invoice_form = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         invoice_form.purchase_id = order
         with invoice_form.invoice_line_ids.edit(0) as line_form:
             line_form.price_unit = 100.0
@@ -1251,7 +1261,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         receipt.button_validate()
 
         # Create an invoice with a different price and a discount
-        invoice_form = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        invoice_form = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         invoice_form.purchase_id = order
         with invoice_form.invoice_line_ids.edit(0) as line_form:
             line_form.tax_ids.clear()
@@ -1298,7 +1308,7 @@ class TestStockValuationWithCOA(AccountingTestCase):
         receipt.button_validate()
 
         # Create an invoice with a different price and a discount
-        invoice_form = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        invoice_form = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         invoice_form.purchase_id = order
         with invoice_form.invoice_line_ids.edit(0) as line_form:
             line_form.price_unit = 100.0

@@ -67,7 +67,7 @@
         </t>
     </td>
     <td valign="center" align="right">
-        <img t-att-src="'/logo.png?company=%s' % company.id" style="padding: 0px; margin: 0px; height: auto; max-width: 200px; max-height: 36px;" t-att-alt="'%s' % company.name"/>
+        <img t-att-src="'/logo.png?company=%s' % (company.id or 0)" style="padding: 0px; margin: 0px; height: auto; max-width: 200px; max-height: 36px;" t-att-alt="'%s' % company.name"/>
     </td>
     </tr><tr>
     <td colspan="2" style="text-align:center;">
@@ -115,7 +115,7 @@
                         <t t-esc="message.record_name"/>
                     </span>
                 </td><td valign="middle" align="right">
-                    <img t-att-src="'/logo.png?company=%s' % company.id" style="padding: 0px; margin: 0px; height: auto; width: 80px;" t-att-alt="'%s' % company.name"/>
+                    <img t-att-src="'/logo.png?company=%s' % (company.id or 0)" style="padding: 0px; margin: 0px; height: auto; width: 80px;" t-att-alt="'%s' % company.name"/>
                 </td></tr>
             </table>
         </td>
@@ -174,7 +174,7 @@
                         <t t-esc="message.record_name and message.record_name.replace('/','-') or ''"/>
                     </span>
                 </td><td valign="middle" align="right">
-                    <img t-att-src="'/logo.png?company=%s' % company.id" style="padding: 0px; margin: 0px; height: 48px;" t-att-alt="'%s' % company.name"/>
+                    <img t-att-src="'/logo.png?company=%s' % (company.id or 0)" style="padding: 0px; margin: 0px; height: 48px;" t-att-alt="'%s' % company.name"/>
                 </td></tr>
                 <tr><td colspan="2" style="text-align:center;">
                   <hr width="100%" style="background-color:rgb(204,204,204);border:medium none;clear:both;display:block;font-size:0px;min-height:1px;line-height:0; margin:4px 0px 32px 0px;"/>
@@ -244,7 +244,7 @@
                         <t t-esc="message.record_name"/>
                     </span>
                 </td><td valign="middle" align="right">
-                    <img t-att-src="'/logo.png?company=%s' % company.id" style="padding: 0px; margin: 0px; height: 48px;" t-att-alt="'%s' % company.name"/>
+                    <img t-att-src="'/logo.png?company=%s' % (company.id or 0)" style="padding: 0px; margin: 0px; height: 48px;" t-att-alt="'%s' % company.name"/>
                 </td></tr>
                 <tr><td colspan="2" style="text-align:center;">
                   <hr width="100%" style="background-color:rgb(204,204,204);border:medium none;clear:both;display:block;font-size:0px;min-height:1px;line-height:0; margin:4px 0px 32px 0px;"/>
@@ -308,7 +308,7 @@
     <span style="margin-top: 8px;">You have been assigned to the <t t-esc="model_description or 'document'"/> <t t-esc="object.display_name"/>.</span>
 </p>
 <p style="margin-top: 24px; margin-bottom: 16px;">
-    <a t-att-href="'/mail/view?model=%s&amp;res_id=%s' % (object._name, object.id)" style="background-color:#875A7B; padding: 10px; text-decoration: none; color: #fff; border-radius: 5px;">
+    <a t-att-href="access_link" t-att-data-oe-model="object._name" t-att-data-oe-id="object.id" style="background-color:#875A7B; padding: 10px; text-decoration: none; color: #fff; border-radius: 5px;">
             View <t t-esc="model_description or 'document'"/>
     </a>
 </p>
@@ -341,13 +341,23 @@
     on <span t-field="activity.res_name"/>
     to close for <span t-field="activity.date_deadline"/>.<br />
     <p style="margin: 16px 0px 16px 0px;">
-        <a t-att-href="'/mail/view?model=%s&amp;res_id=%s' % (activity.res_model, activity.res_id)"
+        <a t-att-href="access_link" t-att-data-oe-model="activity.res_model" t-att-data-oe-id="activity.res_id"
             style="background-color:#875A7B; padding: 8px 16px 8px 16px; text-decoration: none; color: #fff; border-radius: 5px;">
             View <t t-esc="model_description or 'document'"/>
         </a>
     </p>
     <div t-if="activity.note" style="margin-top: 8px;" t-field="activity.note"/>
 </div>
+        </template>
+
+        <template id="message_origin_link">
+            <p>
+                <t t-if="edit">This <t t-esc="self.env['ir.model']._get(self._name).name.lower()"/> has been modified from:</t>
+                <t t-else="">This <t t-esc="self.env['ir.model']._get(self._name).name.lower()"/> has been created from:</t>
+                <t t-foreach="origin" t-as="o">
+                    <a href="#" t-att-data-oe-model="o._name" t-att-data-oe-id="o.id"> <t t-esc="o.display_name"/></a><span t-if="origin.ids[-1:] != o.ids">, </span>
+                </t>
+            </p>
         </template>
 
         <!-- Mail gateway templates -->
@@ -363,13 +373,19 @@
 <blockquote><t t-esc="message['body']"/></blockquote>
         </template>
 
+        <!-- Mail bounce alias mail template -->
+        <template id="mail_bounce_alias_security">
+<div><t t-raw="body"/></div>
+<blockquote><t t-raw="message['body']"/></blockquote>
+        </template>
+
         <!-- Channel and moderation related data -->
         <template id="mail_channel_notify_moderation">
 <div>
     <p>Hello <t t-esc='record.name'/></p>
     <p>You have messages to moderate, please go for the proceedings.</p><br/><br/>
     <div style="text-align: center;">
-        <a href="/web#action=mail.action_discuss&amp;active_id=mailbox_moderation" style="background-color: #1abc9c; padding: 20px; text-decoration: none; color: #fff; border-radius: 5px; font-size: 16px;" class="o_default_snippet_text">Moderate Messages</a>
+        <a href="/web#action=mail.action_discuss&amp;active_id=mail.box_moderation" style="background-color: #1abc9c; padding: 20px; text-decoration: none; color: #fff; border-radius: 5px; font-size: 16px;" class="o_default_snippet_text">Moderate Messages</a>
         <br/><br/><br/>
     </div>
     <p>Thank you!</p>

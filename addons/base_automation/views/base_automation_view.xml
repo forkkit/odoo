@@ -12,17 +12,30 @@
                 </xpath>
                 <xpath expr="//button[@name='unlink_action']" position="replace">
                 </xpath>
+                <xpath expr="//button[@name='run']" position="replace">
+                </xpath>
+                <xpath expr="//field[@name='partner_ids']" position='attributes'>
+                    <attribute name="options">{'no_create': True}</attribute>
+                </xpath>
+                <xpath expr="//field[@name='channel_ids']" position='attributes'>
+                    <attribute name="options">{'no_create': True}</attribute>
+                </xpath>
+                <xpath expr="//field[@name='template_id']" position='attributes'>
+                    <attribute name="context">{'default_model_id': model_id}</attribute>
+                </xpath>
+                <xpath expr="//page[@name='security']" position='attributes'>
+                    <attribute name='invisible'>1</attribute>
+                </xpath>
                 <xpath expr="//group[@name='action_content']" position="inside">
-                    <field name="active" invisible="1"/>
+                    <field name="active" widget="boolean_toggle"/>
                     <field name="trigger"/>
-                    <field name="trigger_field_ids" domain="[('model_id', '=', model_id)]"
-                                    attrs="{'invisible': [('trigger', 'not in', ['on_write', 'on_create_or_write'])]}"/>
+                    <field name="trigger_field_ids" domain="[('model_id', '=', model_id)]" attrs="{'invisible': [('trigger', 'not in', ['on_write', 'on_create_or_write'])]}" widget="many2many_tags"/>
+                    <field name="on_change_field_ids" string="Trigger Fields" domain="[('model_id', '=', model_id)]"
+                        attrs="{'invisible': [('trigger', '!=', 'on_change')], 'required': [('trigger', '=', 'on_change')]}"
+                        widget='many2many_tags' options="{'no_create': True}"/>
 
                     <field name="filter_pre_domain" widget="domain" options="{'model': 'model_name', 'in_dialog': True}" attrs="{'invisible': [('trigger', 'not in', ['on_write','on_create_or_write'])]}"/>
                     <field name="filter_domain" widget="domain" options="{'model': 'model_name', 'in_dialog': True}"/>
-
-                    <field name="on_change_fields"
-                        attrs="{'invisible': [('trigger', '!=', 'on_change')], 'required': [('trigger', '=', 'on_change')]}"/>
                     <field name="trg_date_id"
                         attrs="{'invisible': [('trigger', '!=', 'on_time')], 'required': [('trigger', '=', 'on_time')]}"/>
                     <label for="trg_date_range"
@@ -33,6 +46,11 @@
                     </div>
                     <field name="trg_date_calendar_id"
                         attrs="{'invisible': ['|', ('trg_date_id','=',False), ('trg_date_range_type', '!=', 'day')]}"/>
+                </xpath>
+                <xpath expr="//group[@name='action_wrapper']" position="after">
+                    <div class="alert alert-info" role="alert" attrs="{'invisible': [('trigger', '!=', 'on_time')]}">
+                        <field name="least_delay_msg"/>
+                    </div>
                 </xpath>
             </field>
         </record>
@@ -85,5 +103,17 @@
 
         <menuitem id="menu_base_automation_form"
             parent="base.menu_automation" action="base_automation_act" sequence="1"/>
+
+        <template id="assets_backend" name="base_automation assets" inherit_id="web.assets_backend">
+            <xpath expr="." position="inside">
+                <script type="text/javascript" src="/base_automation/static/src/js/base_automation_error_dialog.js"/>
+            </xpath>
+        </template>
+
+        <template id="qunit_suite" name="base_automation_tests" inherit_id="web.qunit_suite_tests">
+            <xpath expr="." position="inside">
+                <script type="text/javascript" src="/base_automation/static/tests/base_automation_error_dialog.js"/>
+            </xpath>
+        </template>
 
 </odoo>

@@ -71,7 +71,7 @@ class StockMove(models.Model):
                     float_compare(self.quantity_done, self.product_uom_qty, precision_rounding=rounding) < 0:
                 return self._action_record_components()
         action = super(StockMove, self).action_show_details()
-        if self.is_subcontract:
+        if self.is_subcontract and self._has_tracked_subcontract_components():
             action['views'] = [(self.env.ref('stock.view_stock_move_operations').id, 'form')]
             action['context'].update({
                 'show_lots_m2o': self.has_tracking != 'none',
@@ -88,10 +88,16 @@ class StockMove(models.Model):
             'name': _('Raw Materials for %s') % (self.product_id.display_name),
             'type': 'ir.actions.act_window',
             'res_model': 'stock.move',
-            'views': [(tree_view.id, 'tree'), (form_view.id, 'form')],
+            'views': [(tree_view.id, 'list'), (form_view.id, 'form')],
             'target': 'current',
             'domain': [('id', 'in', moves.ids)],
         }
+
+    def _action_cancel(self):
+        for move in self:
+            if move.is_subcontract:
+                move.move_orig_ids.production_id._action_cancel()
+        return super()._action_cancel()
 
     def _action_confirm(self, merge=True, merge_into=False):
         subcontract_details_per_picking = defaultdict(list)
@@ -109,7 +115,7 @@ class StockMove(models.Model):
             subcontract_details_per_picking[move.picking_id].append((move, bom))
             move.write({
                 'is_subcontract': True,
-                'location_id': move.picking_id.partner_id.with_context(force_company=move.company_id.id).property_stock_subcontractor.id
+                'location_id': move.picking_id.partner_id.with_company(move.company_id).property_stock_subcontractor.id
             })
         for picking, subcontract_details in subcontract_details_per_picking.items():
             picking._subcontracted_produce(subcontract_details)
@@ -120,12 +126,21 @@ class StockMove(models.Model):
         return res
 
     def _action_record_components(self):
-        action = self.env.ref('mrp.act_mrp_product_produce').read()[0]
-        action['context'] = dict(
-            default_production_id=self.move_orig_ids.production_id.id,
-            default_subcontract_move_id=self.id
-        )
-        return action
+        self.ensure_one()
+        production = self.move_orig_ids.production_id
+        view = self.env.ref('mrp.mrp_production_form_view')
+        return {
+            'name': _('Subcontract'),
+            'type': 'ir.actions.act_window',
+            'view_mode': 'form',
+            'res_model': 'mrp.production',
+            'views': [(view.id, 'form')],
+            'view_id': view.id,
+            'target': 'new',
+            'res_id': production.id,
+            'context': dict(self.env.context, subcontract_move_id=self.id),
+        }
+
 
     def _check_overprocessed_subcontract_qty(self):
         """ If a subcontracted move use tracked components. Do not allow to add
@@ -141,8 +156,8 @@ class StockMove(models.Model):
             if not move._has_tracked_subcontract_components():
                 continue
             rounding = move.product_uom.rounding
-            if float_compare(move.quantity_done, move.move_orig_ids.production_id.qty_produced, precision_rounding=rounding) > 0:
-                overprocessed_moves |= move
+#            if float_compare(move.quantity_done, move.move_orig_ids.production_id.qty_produced, precision_rounding=rounding) > 0:
+#                overprocessed_moves |= move
         if overprocessed_moves:
             raise UserError(_("""
 You have to use 'Records Components' button in order to register quantity for a

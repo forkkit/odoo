@@ -8,9 +8,29 @@ body {
     // Set frontend direction that will be flipped with
     // rtlcss for right-to-left text direction.
     direction: ltr;
+    transition: padding 0.35s;
 }
 body.o_connected_user {
     padding-top: $o-navbar-height!important;
+
+    &.o_fullscreen {
+        padding-top: 0 !important;
+
+        &.editor_enable.editor_has_snippets {
+            padding-left: 0 !important;
+        }
+
+        #oe_main_menu_navbar, #web_editor-top-edit {
+            transform: translateY(-100%);
+        }
+
+        #oe_snippets {
+            transform: translateX(-100%);
+        }
+    }
+}
+#oe_main_menu_navbar, #web_editor-top-edit, #oe_snippets {
+    transition: transform 0.35s !important;
 }
 
 // MAIN MENU STYLE (added above navbar.scss)
@@ -47,6 +67,10 @@ body.o_connected_user {
 
             &[data-action="edit"], &[data-action="translate"], &.css_edit_dynamic {
                 @include button-variant($o-brand-primary, $o-brand-primary);
+            }
+
+            &, &:hover, &:focus {
+                text-decoration: none;
             }
         }
 
@@ -245,7 +269,7 @@ body .modal {
                 transition: 200ms;
                 display: inline-block;
                 padding: 23px 27px;
-                border: 2px dashed lighten(gray('600'), 30%);
+                border: 3px dashed lighten(gray('700'), 30%);
                 vertical-align: top;
                 cursor: pointer;
                 color: lighten(gray('600'), 30%);
@@ -329,6 +353,7 @@ body .modal {
             display: block;
             font-size: 34px;
             text-align: center;
+            text-decoration: none;
 
             i {
                 width: 110px;

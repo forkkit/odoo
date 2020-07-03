@@ -2,6 +2,7 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 import contextlib
 
+import base64
 import pytz
 import datetime
 import ipaddress
@@ -17,11 +18,13 @@ from lxml.builder import E
 import passlib.context
 
 from odoo import api, fields, models, tools, SUPERUSER_ID, _
+from odoo.addons.base.models.ir_model import MODULE_UNINSTALL_FLAG
 from odoo.exceptions import AccessDenied, AccessError, UserError, ValidationError
 from odoo.http import request
 from odoo.osv import expression
 from odoo.service.db import check_super
-from odoo.tools import partition, collections, lazy_property
+from odoo.tools import partition, collections, frozendict, lazy_property, image_process
+from odoo.modules.module import get_module_resource
 
 _logger = logging.getLogger(__name__)
 
@@ -163,7 +166,7 @@ class Groups(models.Model):
     def copy(self, default=None):
         self.ensure_one()
         chosen_name = default.get('name') if default else ''
-        default_name = chosen_name or _('%s (copy)') % self.name
+        default_name = chosen_name or _('%s (copy)', self.name)
         default = dict(default or {}, name=default_name)
         return super(Groups, self).copy(default)
 
@@ -187,6 +190,17 @@ class ResUsersLog(models.Model):
     # Currenly only uses the magical fields: create_uid, create_date,
     # for recording logins. To be extended for other uses (chat presence, etc.)
 
+    @api.autovacuum
+    def _gc_user_logs(self):
+        self._cr.execute("""
+            DELETE FROM res_users_log log1 WHERE EXISTS (
+                SELECT 1 FROM res_users_log log2
+                WHERE log1.create_uid = log2.create_uid
+                AND log1.create_date < log2.create_date
+            )
+        """)
+        _logger.info("GC'd %d user log entries", self._cr.rowcount)
+
 
 class Users(models.Model):
     """ User class. A res.users record models an OpenERP user and is different
@@ -208,11 +222,19 @@ class Users(models.Model):
     SELF_READABLE_FIELDS = ['signature', 'company_id', 'login', 'email', 'name', 'image_1920', 'image_1024', 'image_512', 'image_256', 'image_128', 'lang', 'tz', 'tz_offset', 'groups_id', 'partner_id', '__last_update', 'action_id']
 
     def _default_groups(self):
-        default_user = self.env.ref('base.default_user', raise_if_not_found=False)
-        return (default_user or self.env['res.users']).sudo().groups_id
+        default_user_id = self.env['ir.model.data'].xmlid_to_res_id('base.default_user', raise_if_not_found=False)
+        return self.env['res.users'].browse(default_user_id).sudo().groups_id if default_user_id else []
 
-    def _companies_count(self):
-        return self.env['res.company'].sudo().search_count([])
+    @api.model
+    def _get_default_image(self):
+        """ Get a default image when the user is created without image
+
+            Inspired to _get_default_image method in
+            https://github.com/odoo/odoo/blob/11.0/odoo/addons/base/res/res_partner.py
+        """
+        image_path = get_module_resource('base', 'static/img', 'avatar.png')
+        image = base64.b64encode(open(image_path, 'rb').read())
+        return image_process(image, colorize=True)
 
     partner_id = fields.Many2one('res.partner', required=True, ondelete='restrict', auto_join=True,
         string='Related Partner', help='Partner-related data of the user')
@@ -226,7 +248,7 @@ class Users(models.Model):
         help="Specify a value only when creating a user or if you're "\
              "changing the user's password, otherwise leave empty. After "\
              "a change of password, the user has to login again.")
-    signature = fields.Html(string="Email Signature")
+    signature = fields.Html(string="Email Signature", default="")
     active = fields.Boolean(default=True)
     active_partner = fields.Boolean(related='partner_id.active', readonly=True, string="Partner is Active")
     action_id = fields.Many2one('ir.actions.actions', string='Home Action',
@@ -236,7 +258,7 @@ class Users(models.Model):
     login_date = fields.Datetime(related='log_ids.create_date', string='Latest authentication', readonly=False)
     share = fields.Boolean(compute='_compute_share', compute_sudo=True, string='Share User', store=True,
          help="External user with limited access, created only for the purpose of sharing data.")
-    companies_count = fields.Integer(compute='_compute_companies_count', string="Number of Companies", default=_companies_count)
+    companies_count = fields.Integer(compute='_compute_companies_count', string="Number of Companies")
     tz_offset = fields.Char(compute='_compute_tz_offset', string='Timezone offset', invisible=True)
 
     # Special behavior for this field: res.company.search() will only return the companies
@@ -253,11 +275,12 @@ class Users(models.Model):
     email = fields.Char(related='partner_id.email', inherited=True, readonly=False)
 
     accesses_count = fields.Integer('# Access Rights', help='Number of access rights that apply to the current user',
-                                    compute='_compute_accesses_count')
+                                    compute='_compute_accesses_count', compute_sudo=True)
     rules_count = fields.Integer('# Record Rules', help='Number of record rules that apply to the current user',
-                                 compute='_compute_accesses_count')
+                                 compute='_compute_accesses_count', compute_sudo=True)
     groups_count = fields.Integer('# Groups', help='Number of groups that apply to the current user',
-                                  compute='_compute_accesses_count')
+                                  compute='_compute_accesses_count', compute_sudo=True)
+    image_1920 = fields.Image(related='partner_id.image_1920', inherited=True, readonly=False, default=_get_default_image)
 
     _sql_constraints = [
         ('login_key', 'UNIQUE (login)',  'You can not have two users with the same login !')
@@ -282,8 +305,9 @@ class Users(models.Model):
 
     def _set_password(self):
         ctx = self._crypt_context()
+        hash_password = ctx.hash if hasattr(ctx, 'hash') else ctx.encrypt
         for user in self:
-            self._set_encrypted_password(user.id, ctx.encrypt(user.password))
+            self._set_encrypted_password(user.id, hash_password(user.password))
 
     def _set_encrypted_password(self, uid, pw):
         assert self._crypt_context().identify(pw) != 'plaintext'
@@ -344,13 +368,13 @@ class Users(models.Model):
 
     @api.depends('groups_id')
     def _compute_share(self):
-        for user in self:
-            user.share = not user.has_group('base.group_user')
+        user_group_id = self.env['ir.model.data'].xmlid_to_res_id('base.group_user')
+        internal_users = self.filtered_domain([('groups_id', 'in', [user_group_id])])
+        internal_users.share = False
+        (self - internal_users).share = True
 
     def _compute_companies_count(self):
-        companies_count = self._companies_count()
-        for user in self:
-            user.companies_count = companies_count
+        self.companies_count = self.env['res.company'].sudo().search_count([])
 
     @api.depends('tz')
     def _compute_tz_offset(self):
@@ -389,7 +413,7 @@ class Users(models.Model):
 
     @api.constrains('company_id', 'company_ids')
     def _check_company(self):
-        if any(user.company_ids and user.company_id not in user.company_ids for user in self):
+        if any(user.company_id not in user.company_ids for user in self):
             raise ValidationError(_('The chosen company is not in the allowed companies for this user'))
 
     @api.constrains('action_id')
@@ -473,7 +497,10 @@ class Users(models.Model):
     def create(self, vals_list):
         users = super(Users, self).create(vals_list)
         for user in users:
-            user.partner_id.write({'company_id': user.company_id.id, 'active': user.active})
+            # if partner is global we keep it that way
+            if user.partner_id.company_id:
+                user.partner_id.company_id = user.company_id
+            user.partner_id.active = user.active
         return users
 
     def write(self, values):
@@ -503,8 +530,6 @@ class Users(models.Model):
                 # if partner is global we keep it that way
                 if user.partner_id.company_id and user.partner_id.company_id.id != values['company_id']:
                     user.partner_id.write({'company_id': user.company_id.id})
-            # clear default ir values when company changes
-            self.env['ir.default'].clear_caches()
 
         if 'company_id' in values or 'company_ids' in values:
             # Reset lazy properties `company` & `companies` on all envs
@@ -545,11 +570,13 @@ class Users(models.Model):
     @api.model
     def _name_search(self, name, args=None, operator='ilike', limit=100, name_get_uid=None):
         args = args or []
-        if operator == 'ilike' and not (name or '').strip():
-            domain = []
-        else:
-            domain = [('login', '=', name)]
-        user_ids = self._search(expression.AND([domain, args]), limit=limit, access_rights_uid=name_get_uid)
+        user_ids = []
+        if operator not in expression.NEGATIVE_TERM_OPERATORS:
+            if operator == 'ilike' and not (name or '').strip():
+                domain = []
+            else:
+                domain = [('login', '=', name)]
+            user_ids = self._search(expression.AND([domain, args]), limit=limit, access_rights_uid=name_get_uid)
         if not user_ids:
             user_ids = self._search(expression.AND([[('name', operator, name)], args]), limit=limit, access_rights_uid=name_get_uid)
         return models.lazy_name_get(self.browse(user_ids).with_user(name_get_uid))
@@ -558,9 +585,9 @@ class Users(models.Model):
         self.ensure_one()
         default = dict(default or {})
         if ('name' not in default) and ('partner_id' not in default):
-            default['name'] = _("%s (copy)") % self.name
+            default['name'] = _("%s (copy)", self.name)
         if 'login' not in default:
-            default['login'] = _("%s (copy)") % self.login
+            default['login'] = _("%s (copy)", self.login)
         return super(Users, self).copy(default)
 
     @api.model
@@ -576,10 +603,10 @@ class Users(models.Model):
         # use read() to not read other fields: this must work while modifying
         # the schema of models res.users or res.partner
         values = user.read(list(name_to_key), load=False)[0]
-        return {
+        return frozendict({
             key: values[name]
             for name, key in name_to_key.items()
-        }
+        })
 
     @api.model
     def action_get(self):
@@ -598,6 +625,10 @@ class Users(models.Model):
     def _get_login_domain(self, login):
         return [('login', '=', login)]
 
+    @api.model
+    def _get_login_order(self):
+        return self._order
+
     @classmethod
     def _login(cls, db, login, password):
         if not password:
@@ -607,7 +638,7 @@ class Users(models.Model):
             with cls.pool.cursor() as cr:
                 self = api.Environment(cr, SUPERUSER_ID, {})[cls._name]
                 with self._assert_can_auth():
-                    user = self.search(self._get_login_domain(login))
+                    user = self.search(self._get_login_domain(login), order=self._get_login_order(), limit=1)
                     if not user:
                         raise AccessDenied()
                     user = user.with_user(user)
@@ -912,6 +943,13 @@ class Users(models.Model):
     def _register_hook(self):
         if hasattr(self, 'check_credentials'):
             _logger.warning("The check_credentials method of res.users has been renamed _check_credentials. One of your installed modules defines one, but it will not be called anymore.")
+
+    def _get_placeholder_filename(self, field=None):
+        image_fields = ['image_%s' % size for size in [1920, 1024, 512, 256, 128]]
+        if field in image_fields and not self:
+            return 'base/static/img/user-slash.png'
+        return super()._get_placeholder_filename(field=field)
+
 #
 # Implied groups
 #
@@ -1038,8 +1076,14 @@ class GroupsView(models.Model):
         return user
 
     def write(self, values):
+        # determine which values the "user groups view" depends on
+        VIEW_DEPS = ('category_id', 'implied_ids')
+        view_values0 = [g[name] for name in VIEW_DEPS if name in values for g in self]
         res = super(GroupsView, self).write(values)
-        self._update_user_groups_view()
+        # update the "user groups view" only if necessary
+        view_values1 = [g[name] for name in VIEW_DEPS if name in values for g in self]
+        if view_values0 != view_values1:
+            self._update_user_groups_view()
         # actions.get_bindings() depends on action records
         self.env['ir.actions.actions'].clear_caches()
         return res
@@ -1059,14 +1103,20 @@ class GroupsView(models.Model):
         """ Modify the view with xmlid ``base.user_groups_view``, which inherits
             the user form view, and introduces the reified group fields.
         """
-
         # remove the language to avoid translations, it will be handled at the view level
         self = self.with_context(lang=None)
 
         # We have to try-catch this, because at first init the view does not
         # exist but we are already creating some basic groups.
         view = self.env.ref('base.user_groups_view', raise_if_not_found=False)
-        if view and view.exists() and view._name == 'ir.ui.view':
+        if not (view and view.exists() and view._name == 'ir.ui.view'):
+            return
+
+        if self._context.get('install_filename') or self._context.get(MODULE_UNINSTALL_FLAG):
+            # use a dummy view during install/upgrade/uninstall
+            xml = E.field(name="groups_id", position="after")
+
+        else:
             group_no_one = view.env.ref('base.group_no_one')
             group_employee = view.env.ref('base.group_user')
             xml1, xml2, xml3 = [], [], []
@@ -1125,8 +1175,7 @@ class GroupsView(models.Model):
                 user_type_attrs = {}
 
             for xml_cat in sorted(xml_by_category.keys(), key=lambda it: it[0]):
-                xml_cat_name = xml_cat[1]
-                master_category_name = (_(xml_cat_name))
+                master_category_name = xml_cat[1]
                 xml2.append(E.group(*(xml_by_category[xml_cat]), col="2", string=master_category_name))
 
             xml = E.field(
@@ -1134,10 +1183,12 @@ class GroupsView(models.Model):
                 E.group(*(xml2), col="2", attrs=str(user_type_attrs)),
                 E.group(*(xml3), col="4", attrs=str(user_type_attrs)), name="groups_id", position="replace")
             xml.addprevious(etree.Comment("GENERATED AUTOMATICALLY BY GROUPS"))
-            xml_content = etree.tostring(xml, pretty_print=True, encoding="unicode")
 
+        # serialize and update the view
+        xml_content = etree.tostring(xml, pretty_print=True, encoding="unicode")
+        if xml_content != view.arch:  # avoid useless xml validation if no change
             new_context = dict(view._context)
-            new_context.pop('install_mode_data', None)  # don't set arch_fs for this computed view
+            new_context.pop('install_filename', None)  # don't set arch_fs for this computed view
             new_context['lang'] = None
             view.with_context(new_context).write({'arch': xml_content})
 
@@ -1162,6 +1213,11 @@ class GroupsView(models.Model):
                 return (app, 'selection', gs.sorted('id'), category_name)
             # determine sequence order: a group appears after its implied groups
             order = {g: len(g.trans_implied_ids & gs) for g in gs}
+            # We want a selection for Accounting too. Auditor and Invoice are both
+            # children of Accountant, but the two of them make a full accountant
+            # so it makes no sense to have checkboxes.
+            if app.xml_id == 'base.module_category_accounting_accounting':
+                return (app, 'selection', gs.sorted(key=order.get), category_name)
             # check whether order is total, i.e., sequence orders are distinct
             if len(set(order.values())) == len(gs):
                 return (app, 'selection', gs.sorted(key=order.get), category_name)
@@ -1206,23 +1262,29 @@ class ModuleCategory(models.Model):
 class UsersView(models.Model):
     _inherit = 'res.users'
 
-    @api.model
-    def create(self, values):
-        values = self._remove_reified_groups(values)
-        user = super(UsersView, self).create(values)
-        group_multi_company = self.env.ref('base.group_multi_company', False)
-        if group_multi_company and 'company_ids' in values:
-            if len(user.company_ids) <= 1 and user.id in group_multi_company.users.ids:
-                user.write({'groups_id': [(3, group_multi_company.id)]})
-            elif len(user.company_ids) > 1 and user.id not in group_multi_company.users.ids:
-                user.write({'groups_id': [(4, group_multi_company.id)]})
-        return user
+    @api.model_create_multi
+    def create(self, vals_list):
+        new_vals_list = []
+        for values in vals_list:
+            new_vals_list.append(self._remove_reified_groups(values))
+        users = super(UsersView, self).create(new_vals_list)
+        group_multi_company_id = self.env['ir.model.data'].xmlid_to_res_id(
+            'base.group_multi_company', raise_if_not_found=False)
+        if group_multi_company_id:
+            for user in users:
+                if len(user.company_ids) <= 1 and group_multi_company_id in user.groups_id.ids:
+                    user.write({'groups_id': [(3, group_multi_company_id)]})
+                elif len(user.company_ids) > 1 and group_multi_company_id not in user.groups_id.ids:
+                    user.write({'groups_id': [(4, group_multi_company_id)]})
+        return users
 
     def write(self, values):
         values = self._remove_reified_groups(values)
         res = super(UsersView, self).write(values)
+        if 'company_ids' not in values:
+            return res
         group_multi_company = self.env.ref('base.group_multi_company', False)
-        if group_multi_company and 'company_ids' in values:
+        if group_multi_company:
             for user in self:
                 if len(user.company_ids) <= 1 and user.id in group_multi_company.users.ids:
                     user.write({'groups_id': [(3, group_multi_company.id)]})

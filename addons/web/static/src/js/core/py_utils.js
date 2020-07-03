@@ -419,15 +419,7 @@ function _formatAST(ast, lbp) {
         case "(number)":
             return String(ast.value);
         case "(string)":
-            // ast.value is a string that may contain a mix of single and double quotes.
-            // But we need to return a string that represents the string ast.value.
-            // We use for that JSON.stringify. It will return a string with quotes correctly
-            // escaped. For instance, for x = `""` JSON.stringify(x) is `"\"\""`.
-            // But this means that if we pass several times here, escapes will be
-            // done again and again, leading to a profusion of backslashes that we don't want.
-            // For fun consider y = `\\` and y = JSON.stringify(y).
-            // This is why we first deescape particular characters in ast.value.
-            return JSON.stringify(ast.value.replace(/(\\(['"\\]))/g,"\$2"));
+            return JSON.stringify(ast.value);
         case "(constant)":
             return ast.value;
         case "(name)":
@@ -472,6 +464,11 @@ function _formatAST(ast, lbp) {
             // real lbp is not accessible, it is inside a closure
             var actualBP = BINDING_POWERS[ast.id] || 130;
             return ast.id + _formatAST(ast.first, actualBP);
+        case "if":
+            var t = _formatAST(ast.ifTrue)
+                + ' if ' + _formatAST(ast.condition)
+                + ' else ' + _formatAST(ast.ifFalse);
+            return ast.lbp < lbp ? '(' + t + ')' : t;
         case ".":
             return _formatAST(ast.first, ast.lbp) + '.' + _formatAST(ast.second);
         case "not":

@@ -9,13 +9,14 @@ import email.policy
 import logging
 import re
 import smtplib
+import sys
 import threading
 
 import html2text
 
 from odoo import api, fields, models, tools, _
-from odoo.exceptions import except_orm, UserError
-from odoo.tools import ustr, pycompat
+from odoo.exceptions import UserError
+from odoo.tools import ustr, pycompat, formataddr
 
 _logger = logging.getLogger(__name__)
 _test_logger = logging.getLogger('odoo.tests')
@@ -23,10 +24,9 @@ _test_logger = logging.getLogger('odoo.tests')
 SMTP_TIMEOUT = 60
 
 
-class MailDeliveryException(except_orm):
+class MailDeliveryException(Exception):
     """Specific exception subclass for mail delivery errors"""
-    def __init__(self, name, value):
-        super(MailDeliveryException, self).__init__(name, value)
+
 
 # Python 3: patch SMTP's internal printer/debugger
 def _print_debug(self, *args):
@@ -52,7 +52,7 @@ def extract_rfc2822_addresses(text):
     if not text:
         return []
     candidates = address_pattern.findall(ustr(text))
-    return [c for c in candidates if is_ascii(c)]
+    return [formataddr(('', c), charset='ascii') for c in candidates]
 
 
 class IrMailServer(models.Model):
@@ -115,7 +115,7 @@ class IrMailServer(models.Model):
                 # let UserErrors (messages) bubble up
                 raise e
             except Exception as e:
-                raise UserError(_("Connection Test Failed! Here is what we got instead:\n %s") % ustr(e))
+                raise UserError(_("Connection Test Failed! Here is what we got instead:\n %s", ustr(e)))
             finally:
                 try:
                     if smtp:
@@ -126,9 +126,15 @@ class IrMailServer(models.Model):
 
         title = _("Connection Test Succeeded!")
         message = _("Everything seems properly set up!")
-        self.env['bus.bus'].sendone(
-            (self._cr.dbname, 'res.partner', self.env.user.partner_id.id),
-            {'type': 'simple_notification', 'title': title, 'message': message, 'sticky': False, 'warning': False})
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': title,
+                'message': message,
+                'sticky': False,
+            }
+        }
 
     def connect(self, host=None, port=None, user=None, password=None, encryption=None,
                 smtp_debug=False, mail_server_id=None):
@@ -243,9 +249,10 @@ class IrMailServer(models.Model):
            :rtype: email.message.EmailMessage
            :return: the new RFC2822 email message
         """
-        email_from = email_from or tools.config.get('email_from')
+        email_from = email_from or self._get_default_from_address()
         assert email_from, "You must either provide a sender address explicitly or configure "\
-                           "a global sender address in the server configuration or with the "\
+                           "using the combintion of `mail.catchall.domain` and `mail.default.from` "\
+                           "ICPs, in the server configuration file or with the "\
                            "--email-from startup parameter."
 
         headers = headers or {}         # need valid dict later
@@ -277,11 +284,11 @@ class IrMailServer(models.Model):
 
         email_body = ustr(body)
         if subtype == 'html' and not body_alternative:
-            msg.add_alternative(email_body, subtype=subtype, charset='utf-8')
             msg.add_alternative(html2text.html2text(email_body), subtype='plain', charset='utf-8')
-        elif body_alternative:
             msg.add_alternative(email_body, subtype=subtype, charset='utf-8')
+        elif body_alternative:
             msg.add_alternative(ustr(body_alternative), subtype=subtype_alternative, charset='utf-8')
+            msg.add_alternative(email_body, subtype=subtype, charset='utf-8')
         else:
             msg.set_content(email_body, subtype=subtype, charset='utf-8')
 
@@ -310,6 +317,26 @@ class IrMailServer(models.Model):
         domain = get_param('mail.catchall.domain')
         if postmaster and domain:
             return '%s@%s' % (postmaster, domain)
+
+    @api.model
+    def _get_default_from_address(self):
+        """Compute the default from address.
+
+        Used for the "header from" address when no other has been received.
+
+        :return str/None:
+            Combines config parameters ``mail.default.from`` and
+            ``mail.catchall.domain`` to generate a default sender address.
+
+            If some of those parameters is not defined, it will default to the
+            ``--email-from`` CLI/config parameter.
+        """
+        get_param = self.env['ir.config_parameter'].sudo().get_param
+        domain = get_param('mail.catchall.domain')
+        email_from = get_param("mail.default.from")
+        if email_from and domain:
+            return "%s@%s" % (email_from, domain)
+        return tools.config.get("email_from")
 
     @api.model
     def send_email(self, message, mail_server_id=None, smtp_server=None, smtp_port=None,
@@ -387,7 +414,22 @@ class IrMailServer(models.Model):
             smtp = smtp or self.connect(
                 smtp_server, smtp_port, smtp_user, smtp_password,
                 smtp_encryption, smtp_debug, mail_server_id=mail_server_id)
-            smtp.sendmail(smtp_from, smtp_to_list, message.as_string())
+
+            if sys.version_info < (3, 7, 4):
+                # header folding code is buggy and adds redundant carriage
+                # returns, it got fixed in 3.7.4 thanks to bpo-34424
+                message_str = message.as_string()
+                message_str = re.sub('\r+(?!\n)', '', message_str)
+
+                mail_options = []
+                if any((not is_ascii(addr) for addr in smtp_to_list + [smtp_from])):
+                    # non ascii email found, require SMTPUTF8 extension,
+                    # the relay may reject it
+                    mail_options.append("SMTPUTF8")
+                smtp.sendmail(smtp_from, smtp_to_list, message_str, mail_options=mail_options)
+            else:
+                smtp.send_message(message, smtp_from, smtp_to_list)
+
             # do not quit() a pre-established smtp_session
             if not smtp_session:
                 smtp.quit()
@@ -395,7 +437,7 @@ class IrMailServer(models.Model):
             raise
         except Exception as e:
             params = (ustr(smtp_server), e.__class__.__name__, ustr(e))
-            msg = _("Mail delivery failed via SMTP server '%s'.\n%s: %s") % params
+            msg = _("Mail delivery failed via SMTP server '%s'.\n%s: %s", *params)
             _logger.info(msg)
             raise MailDeliveryException(_("Mail Delivery Failed"), msg)
         return message_id

@@ -1,7 +1,7 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 {
     'name': 'Products Expiration Date',
-    'category': 'Operations/Inventory',
+    'category': 'Inventory/Inventory',
     'depends': ['stock'],
     'demo': [],
     'description': """
@@ -17,8 +17,12 @@ Following dates can be tracked:
 
 Also implements the removal strategy First Expiry First Out (FEFO) widely used, for example, in food industries.
 """,
-    'data': ['views/production_lot_views.xml',
+    'data': ['security/ir.model.access.csv',
+             'views/production_lot_views.xml',
              'views/product_template_views.xml',
+             'views/stock_move_views.xml',
              'views/stock_quant_views.xml',
+             'wizard/confirm_expiry_view.xml',
+             'report/report_lot_barcode.xml',
              'data/product_expiry_data.xml'],
 }

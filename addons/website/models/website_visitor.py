@@ -67,19 +67,19 @@ class WebsiteVisitor(models.Model):
     def name_get(self):
         return [(
             record.id,
-            (record.name or _('Website Visitor #%s') % record.id)
+            (record.name or _('Website Visitor #%s', record.id))
         ) for record in self]
 
-    @api.depends('partner_id.email_normalized', 'partner_id.mobile')
+    @api.depends('partner_id.email_normalized', 'partner_id.mobile', 'partner_id.phone')
     def _compute_email_phone(self):
         results = self.env['res.partner'].search_read(
             [('id', 'in', self.partner_id.ids)],
-            ['id', 'email_normalized', 'mobile'],
+            ['id', 'email_normalized', 'mobile', 'phone'],
         )
         mapped_data = {
             result['id']: {
                 'email_normalized': result['email_normalized'],
-                'mobile': result['mobile']
+                'mobile': result['mobile'] if result['mobile'] else result['phone']
             } for result in results
         }
 
@@ -117,49 +117,46 @@ class WebsiteVisitor(models.Model):
 
     @api.depends('last_connection_datetime')
     def _compute_time_statistics(self):
-        results = self.env['website.visitor'].search_read([('id', 'in', self.ids)], ['id', 'last_connection_datetime'])
-        mapped_data = {result['id']: result['last_connection_datetime'] for result in results}
-
         for visitor in self:
-            last_connection_date = mapped_data[visitor.id]
-            visitor.time_since_last_action = _format_time_ago(self.env, (datetime.now() - last_connection_date))
-            visitor.is_connected = (datetime.now() - last_connection_date) < timedelta(minutes=5)
+            visitor.time_since_last_action = _format_time_ago(self.env, (datetime.now() - visitor.last_connection_datetime))
+            visitor.is_connected = (datetime.now() - visitor.last_connection_datetime) < timedelta(minutes=5)
 
-    def _prepare_visitor_send_mail_values(self):
-        if self.partner_id.email:
-            return {
-                'res_model': 'res.partner',
-                'res_id': self.partner_id.id,
-                'partner_ids': [self.partner_id.id],
-            }
-        return {}
+    def _check_for_message_composer(self):
+        """ Purpose of this method is to actualize visitor model prior to contacting
+        him. Used notably for inheritance purpose, when dealing with leads that
+        could update the visitor model. """
+        return bool(self.partner_id and self.partner_id.email)
+
+    def _prepare_message_composer_context(self):
+        return {
+            'default_model': 'res.partner',
+            'default_res_id': self.partner_id.id,
+            'default_partner_ids': [self.partner_id.id],
+        }
 
     def action_send_mail(self):
         self.ensure_one()
-        visitor_mail_values = self._prepare_visitor_send_mail_values()
-        if not visitor_mail_values:
-            raise UserError(_("There is no email linked this visitor."))
+        if not self._check_for_message_composer():
+            raise UserError(_("There is no contact and/or no email linked this visitor."))
+        visitor_composer_ctx = self._prepare_message_composer_context()
         compose_form = self.env.ref('mail.email_compose_message_wizard_form', False)
-        ctx = dict(
-            default_model=visitor_mail_values.get('res_model'),
-            default_res_id=visitor_mail_values.get('res_id'),
+        compose_ctx = dict(
             default_use_template=False,
-            default_partner_ids=[(6, 0, visitor_mail_values.get('partner_ids'))],
             default_composition_mode='comment',
-            default_reply_to=self.env.user.partner_id.email,
         )
+        compose_ctx.update(**visitor_composer_ctx)
         return {
-            'name': _('Compose Email'),
+            'name': _('Contact Visitor'),
             'type': 'ir.actions.act_window',
             'view_mode': 'form',
             'res_model': 'mail.compose.message',
             'views': [(compose_form.id, 'form')],
             'view_id': compose_form.id,
             'target': 'new',
-            'context': ctx,
+            'context': compose_ctx,
         }
 
-    def _get_visitor_from_request(self):
+    def _get_visitor_from_request(self, force_create=False):
         """ Return the visitor as sudo from the request if there is a visitor_uuid cookie.
             It is possible that the partner has changed or has disconnected.
             In that case the cookie is still referencing the old visitor and need to be replaced
@@ -167,41 +164,41 @@ class WebsiteVisitor(models.Model):
 
         # This function can be called in json with mobile app.
         # In case of mobile app, no uid is set on the jsonRequest env.
-        if not request or not request.env.uid:
+        # In case of multi db, _env is None on request, and request.env unbound.
+        if not request:
             return None
         Visitor = self.env['website.visitor'].sudo()
         visitor = Visitor
         access_token = request.httprequest.cookies.get('visitor_uuid')
         if access_token:
             visitor = Visitor.with_context(active_test=False).search([('access_token', '=', access_token)])
+            # Prefetch access_token and other fields. Since access_token has a restricted group and we access
+            # a non restricted field (partner_id) first it is not fetched and will require an additional query to be retrieved.
+            visitor.access_token
 
-        if not request.env.user._is_public():
-            partner_id = request.env.user.partner_id
-            if not visitor or visitor.partner_id != partner_id:
+        if not self.env.user._is_public():
+            partner_id = self.env.user.partner_id
+            if not visitor or visitor.partner_id and visitor.partner_id != partner_id:
                 # Partner and no cookie or wrong cookie
                 visitor = Visitor.with_context(active_test=False).search([('partner_id', '=', partner_id.id)])
         elif visitor and visitor.partner_id:
             # Cookie associated to a Partner
             visitor = Visitor
-        return visitor
 
-    def _get_visitor_from_request_or_create(self):
-        """ Return a tuple (visitor, response), see _get_visitor_from_request
-            If there is no visitor creates it and ensure the consistancy of the cookie. """
-        visitor_sudo = self._get_visitor_from_request()
-        if not visitor_sudo:
-            visitor_sudo = self._create_visitor()
-        return visitor_sudo
+        if force_create and not visitor:
+            visitor = self._create_visitor()
+
+        return visitor
 
     def _handle_webpage_dispatch(self, response, website_page):
         # get visitor. Done here to avoid having to do it multiple times in case of override.
-        visitor_sudo = self._get_visitor_from_request_or_create()
+        visitor_sudo = self._get_visitor_from_request(force_create=True)
         if request.httprequest.cookies.get('visitor_uuid', '') != visitor_sudo.access_token:
             expiration_date = datetime.now() + timedelta(days=365)
             response.set_cookie('visitor_uuid', visitor_sudo.access_token, expires=expiration_date)
-        self._handle_website_page_visit(response, website_page, visitor_sudo)
+        self._handle_website_page_visit(website_page, visitor_sudo)
 
-    def _handle_website_page_visit(self, response, website_page, visitor_sudo):
+    def _handle_website_page_visit(self, website_page, visitor_sudo):
         """ Called on dispatch. This will create a website.visitor if the http request object
         is a tracked website page or a tracked view. Only on tracked elements to avoid having
         too much operations done on every page or other http requests.
@@ -229,8 +226,8 @@ class WebsiteVisitor(models.Model):
             self.env['website.track'].create(website_track_values)
         self._update_visitor_last_visit()
 
-    def _create_visitor(self, website_track_values=None):
-        """ Create a visitor and add a track to it if website_track_values is set."""
+    def _create_visitor(self):
+        """ Create a visitor. Tracking is added after the visitor has been created."""
         country_code = request.session.get('geoip', {}).get('country_code', False)
         country_id = request.env['res.country'].sudo().search([('code', '=', country_code)], limit=1).id if country_code else False
         vals = {
@@ -241,8 +238,6 @@ class WebsiteVisitor(models.Model):
         if not self.env.user._is_public():
             vals['partner_id'] = self.env.user.partner_id.id
             vals['name'] = self.env.user.partner_id.name
-        if website_track_values:
-            vals['website_track_ids'] = [(0, 0, website_track_values)]
         return self.sudo().create(vals)
 
     def _cron_archive_visitors(self):
@@ -254,7 +249,7 @@ class WebsiteVisitor(models.Model):
         """ We need to do this part here to avoid concurrent updates error. """
         try:
             with self.env.cr.savepoint():
-                query_lock = "SELECT * FROM website_visitor where id = %s FOR UPDATE NOWAIT"
+                query_lock = "SELECT * FROM website_visitor where id = %s FOR NO KEY UPDATE NOWAIT"
                 self.env.cr.execute(query_lock, (self.id,), log_exceptions=False)
 
                 date_now = datetime.now()

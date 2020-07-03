@@ -15,6 +15,7 @@ $o-we-zindex: $o-we-overlay-zindex + 1 !default;
     --o-we-dropdown-color: #{$o-we-dropdown-color};
 
     --o-we-snippets-bg-color: #{$o-we-bg-color};
+    --o-we-snippets-bg-info: #{$o-we-color-info};
     --o-we-snippets-color: #{$o-we-color};
 }
 
@@ -173,7 +174,7 @@ $o-we-zindex: $o-we-overlay-zindex + 1 !default;
     }
 }
 .note-color ul.show {
-    min-width: 172px !important;
+    min-width: 216px !important;
 }
 
 // ANIMATIONS
@@ -198,6 +199,16 @@ $o-we-zindex: $o-we-overlay-zindex + 1 !default;
     }
 }
 
+.o_we_horizontal_collapse {
+    width: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+}
+
+.o_we_transition_ease {
+    transition: all ease 0.35s;
+}
+
 // MODALS
 body .modal {
 
@@ -210,19 +221,14 @@ body .modal {
                 min-height: 300px;
             }
 
-            .o_we_images .o_existing_attachment_cell {
-                // give enough space for the hover buttons
-                min-width: 64px;
-                img {
-                    // prevent url images from being too big
-                    max-width: 256px;
-                    max-height: 192px;
-                }
+            .o_we_images > .o_existing_attachment_cell img {
+                max-width: 100%;
+                background-image: url("/web_editor/static/src/img/transparent.png");
             }
 
             .o_existing_attachment_cell {
                 cursor: pointer;
-                list-style: none;
+                margin: 1px;
 
                 .o_existing_attachment_optimize, .o_existing_attachment_remove {
                     background-color: scale-color($card-border-color, $alpha: -50%);
@@ -260,10 +266,15 @@ body .modal {
             }
 
             .o_we_attachment_selected {
-                &.o_we_attachment_highlight, .o_we_attachment_highlight, &.font-icons-icon {
-                    border-color: $o-brand-primary;
-                    box-shadow: 0px 0px 2px 2px $o-brand-primary;
-                }
+                border-color: $o-brand-primary;
+                box-shadow: 0px 0px 2px 2px $o-brand-primary;
+            }
+
+            .o_we_attachment_optimized .badge {
+                position: absolute;
+                bottom: 0;
+                right: 0;
+                margin: 2px;
             }
 
             .font-icons-icons {
@@ -325,54 +336,13 @@ body .modal {
         }
     }
 
-    // Crop Dialog
-    .o_crop_image_dialog .o_crop_area {
-        height: 350px;
-
-        .cropper-point {
-            background-color: white;
-            transition: all 400ms $o-we-md-ease 0s;
-            transform: scale(1.5, 1.5);
-            border-radius: 10px;
-            box-shadow: 0 0 1px 1px rgba(23, 23, 23, 0.5);
-            opacity: 1;
-
-            &:hover {
-                transform: scale(2.5, 2.5);
-            }
-        }
-
-        .cropper-line {
-            background: black;
-        }
-
-        .cropper-view-box {
-            outline: 2px solid white;
-        }
-    }
-
     // LINK EDITOR DIALOG COLOR SELECTOR
     .o_link_dialog {
-        .o_link_dialog_color > .o_link_dialog_color_item {
-            position: relative;
-            width: 30px;
-            height: 30px;
-            padding: 0; // Important for themes
-            border: 2px solid rgba(0, 0, 0, 0.25);
-            border-radius: 50%;
-
-            input:checked + i::before {
-                content: "\f00c";
-                @include o-position-absolute($top: 6px, $left: 5px);
-            }
-
-            &.btn-link {
-                padding: 3px 9px;
-
-                > span {
-                    text-decoration: underline;
-                }
-            }
+        input.link-style:checked + span::after {
+            content: "\f00c";
+            display: inline-block;
+            font-family: FontAwesome;
+            margin-left: 2px;
         }
 
         .o_link_dialog_preview {
@@ -393,9 +363,7 @@ body .modal {
 
 // Highlight selected image/icon
 %o-we-selected-image {
-    $o-selected-image-color: rgba(150, 150, 220, 0.3);
-    background: $o-selected-image-color;
-    outline: 3px solid $o-selected-image-color;
+    outline: 3px solid rgba(150, 150, 220, 0.3);
 }
 
 img.o_we_selected_image {
@@ -404,6 +372,11 @@ img.o_we_selected_image {
 
 .fa.o_we_selected_image::before {
     @extend %o-we-selected-image;
+}
+// Override default image selection color from portal. It prevents your from
+// seeing the images' quality clearly in the wysiwyg.
+img::selection {
+    background: transparent;
 }
 
 .fa.mx-auto,
@@ -442,6 +415,68 @@ img.o_we_custom_image.mx-auto {
 
         .modal-dialog {
             padding: 0.5rem 0; // To use more editor space if necessary
+        }
+    }
+}
+
+.o_we_no_pointer_events {
+    pointer-events: none;
+}
+
+.o_we_crop_widget {
+    background-color: rgba(128, 128, 128, 0.5);
+    @include o-position-absolute(0, 0, 0, 0);
+    z-index: 1024;
+
+    .o_we_cropper_wrapper {
+        position: absolute;
+    }
+
+    .o_we_crop_buttons {
+        margin-top: 0.5rem;
+        display: flex;
+        flex-wrap: wrap;
+
+        input[type=radio] {
+            display: none;
+        }
+
+        .btn-group {
+            border-radius: 0.25rem;
+            margin: 0.1rem;
+        }
+
+        button, label {
+            cursor: pointer !important;
+            padding: 0.2rem 0.3rem;
+        }
+
+        label {
+            display: flex;
+            align-items: center;
+        }
+
+        button:not(.btn), label {
+            margin: 0;
+            border: none;
+            border-right: 1px solid var(--o-we-bg-color-dark);
+            background-color: var(--o-we-bg-color);
+            color: var(--o-we-color);
+
+            &:hover {
+                background-color: var(--o-we-bg-color-dark);
+            }
+
+            &:first-child {
+                border-top-left-radius: 0.25rem;
+                border-bottom-left-radius: 0.25rem;
+            }
+
+            &:last-child {
+                border-top-right-radius: 0.25rem;
+                border-bottom-right-radius: 0.25rem;
+                border-right: none;
+            }
         }
     }
 }

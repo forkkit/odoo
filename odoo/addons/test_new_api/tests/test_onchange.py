@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-try:
-    from unittest.mock import patch
-except ImportError:
-    from mock import patch
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
+from unittest.mock import patch
+
+from odoo.addons.base.tests.common import SavepointCaseWithUserDemo
 from odoo.tests import common
 
 def strip_prefix(prefix, names):
     size = len(prefix)
     return [name[size:] for name in names if name.startswith(prefix)]
 
-class TestOnChange(common.TransactionCase):
+class TestOnChange(SavepointCaseWithUserDemo):
 
     def setUp(self):
         super(TestOnChange, self).setUp()
@@ -229,7 +229,7 @@ class TestOnChange(common.TransactionCase):
 
     def test_onchange_one2many_multi(self):
         """ test the effect of multiple onchange methods on one2many fields """
-        partner1 = self.env.ref('base.res_partner_1')
+        partner1 = self.env['res.partner'].create({'name': 'A partner'})
         multi = self.env['test_new_api.multi'].create({'partner': partner1.id})
         line1 = multi.lines.create({'multi': multi.id})
 
@@ -255,7 +255,7 @@ class TestOnChange(common.TransactionCase):
         #   -> set 'partner' on all lines
         #   -> recompute 'name'
         #       -> set 'name' on all lines
-        partner2 = self.env.ref('base.res_partner_2')
+        partner2 = self.env['res.partner'].create({'name': 'A second partner'})
         values = {
             'name': partner1.name,
             'partner': partner2.id,             # this one just changed
@@ -326,7 +326,7 @@ class TestOnChange(common.TransactionCase):
     def test_onchange_specific(self):
         """ test the effect of field-specific onchange method """
         discussion = self.env.ref('test_new_api.discussion_0')
-        demo = self.env.ref('base.user_demo')
+        demo = self.user_demo
 
         field_onchange = self.Discussion._onchange_spec()
         self.assertEqual(field_onchange.get('moderator'), '1')
@@ -381,7 +381,7 @@ class TestOnChange(common.TransactionCase):
     def test_onchange_one2many_value(self):
         """ test the value of the one2many field inside the onchange """
         discussion = self.env.ref('test_new_api.discussion_0')
-        demo = self.env.ref('base.user_demo')
+        demo = self.user_demo
 
         field_onchange = self.Discussion._onchange_spec()
         self.assertEqual(field_onchange.get('messages'), '1')
@@ -406,7 +406,7 @@ class TestOnChange(common.TransactionCase):
     def test_onchange_one2many_with_domain_on_related_field(self):
         """ test the value of the one2many field when defined with a domain on a related field"""
         discussion = self.env.ref('test_new_api.discussion_0')
-        demo = self.env.ref('base.user_demo')
+        demo = self.user_demo
 
         # mimic UI behaviour, so we get subfields
         # (we need at least subfield: 'important_emails.important')
@@ -489,7 +489,7 @@ class TestOnChange(common.TransactionCase):
         self.assertEqual(result['value'], onchange_result)
 
         self.env.cache.invalidate()
-        Message = self.env(user=self.env.ref('base.user_demo').id)['test_new_api.related']
+        Message = self.env(user=self.user_demo.id)['test_new_api.related']
         result = Message.onchange(value, ['message', 'message_name', 'message_currency'], field_onchange)
 
         self.assertEqual(result['value'], onchange_result)
@@ -548,6 +548,41 @@ class TestComputeOnchange(common.TransactionCase):
         record = model.create({'active': False, 'foo': "foo", 'bar': "bar", 'baz': "baz"})
         self.assertEqual(record.bar, "foo")
         self.assertEqual(record.baz, "baz")
+
+    def test_copy(self):
+        Model = self.env['test_new_api.compute.onchange']
+
+        # create tags
+        tag_foo, tag_bar = self.env['test_new_api.multi.tag'].create([
+            {'name': 'foo1'},
+            {'name': 'bar1'},
+        ])
+
+        # compute 'bar', 'baz', 'line_ids' and 'tag_ids'
+        record = Model.create({'active': True, 'foo': "foo1"})
+        self.assertEqual(record.bar, "foo1")
+        self.assertEqual(record.baz, "foo1")
+        self.assertEqual(record.line_ids.mapped('foo'), ['foo1'])
+        self.assertEqual(record.tag_ids, tag_foo)
+
+        # manually update 'baz' and 'lines' to test copy attribute
+        record.write({
+            'baz': "baz1",
+            'line_ids': [(0, 0, {'foo': 'bar'})],
+            'tag_ids': [(4, tag_bar.id)],
+        })
+        self.assertEqual(record.bar, "foo1")
+        self.assertEqual(record.baz, "baz1")
+        self.assertEqual(record.line_ids.mapped('foo'), ['foo1', 'bar'])
+        self.assertEqual(record.tag_ids, tag_foo + tag_bar)
+
+        # copy the record, and check results
+        copied = record.copy()
+        self.assertEqual(copied.foo, "foo1 (copy)")   # copied and modified
+        self.assertEqual(copied.bar, "foo1 (copy)")   # computed
+        self.assertEqual(copied.baz, "baz1")          # copied
+        self.assertEqual(record.line_ids.mapped('foo'), ['foo1', 'bar'])  # copied
+        self.assertEqual(record.tag_ids, tag_foo + tag_bar)  # copied
 
     def test_write(self):
         model = self.env['test_new_api.compute.onchange']
@@ -675,3 +710,31 @@ class TestComputeOnchange(common.TransactionCase):
         form.foo = "foo6"
         self.assertEqual(form.bar, "foo6")
         self.assertEqual(form.baz, "baz5")
+
+    def test_onchange_one2many(self):
+        record = self.env['test_new_api.model_parent_m2o'].create({
+            'name': 'Family',
+            'child_ids': [
+                (0, 0, {'name': 'W', 'cost': 10}),
+                (0, 0, {'name': 'X', 'cost': 10}),
+                (0, 0, {'name': 'Y'}),
+                (0, 0, {'name': 'Z'}),
+            ],
+        })
+        record.flush()
+        self.assertEqual(record.child_ids.mapped('name'), list('WXYZ'))
+        self.assertEqual(record.cost, 22)
+
+        # modifying a line should not recompute the cost on other lines
+        with common.Form(record) as form:
+            with form.child_ids.edit(1) as line:
+                line.name = 'XXX'
+            self.assertEqual(form.cost, 15)
+
+            with form.child_ids.edit(1) as line:
+                line.cost = 20
+            self.assertEqual(form.cost, 32)
+
+            with form.child_ids.edit(2) as line:
+                line.cost = 30
+            self.assertEqual(form.cost, 61)

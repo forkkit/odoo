@@ -2,6 +2,8 @@
 
 .. highlight:: xml
 
+.. _reference/reports:
+
 ============
 QWeb Reports
 ============
@@ -40,7 +42,10 @@ can take the following attributes:
     the model your report will be about
 ``report_type`` (mandatory)
     either ``qweb-pdf`` for PDF reports or ``qweb-html`` for HTML
-``report_name``
+``file``
+    The path to the main report file (depending on Report Type)
+    or empty if the content is in another field
+``print_report_name``
     the name of your report (which will be the name of the PDF output)
 ``groups``
     :class:`~odoo.fields.Many2many` field to the groups allowed to view/use
@@ -201,7 +206,7 @@ More parameters can be passed as a query string
 .. code-block:: html
 
     <img t-att-src="'/report/barcode/?
-        type=%s&value=%s&width=%s&height=%s'%('QR', 'text', 200, 200)"/>
+        type=%s&amp;value=%s&amp;width=%s&amp;height=%s'%('QR', 'text', 200, 200)"/>
 
 
 Useful Remarks
@@ -282,7 +287,7 @@ named :samp:`report.{module.report_name}`. If it exists, it will use it to
 call the QWeb engine; otherwise a generic function will be used. If you wish
 to customize your reports by including more things in the template (like
 records of others models, for example), you can define this model, overwrite
-the function ``render_html`` and pass objects in the ``docargs`` dictionary:
+the function ``_get_report_values`` and pass objects in the ``docargs`` dictionary:
 
 .. code-block:: python
 
@@ -290,16 +295,17 @@ the function ``render_html`` and pass objects in the ``docargs`` dictionary:
 
     class ParticularReport(models.AbstractModel):
         _name = 'report.module.report_name'
+
         @api.model
-        def render_html(self, docids, data=None):
-            report_obj = self.env['report']
+        def _get_report_values(self, docids, data=None):
+            report_obj = self.env['ir.actions.report']
             report = report_obj._get_report_from_name('module.report_name')
             docargs = {
                 'doc_ids': docids,
                 'doc_model': report.model,
                 'docs': self,
             }
-            return report_obj.render('module.report_name', docargs)
+            return docargs
 
 .. _reference/reports/custom_fonts:
 

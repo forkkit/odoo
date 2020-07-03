@@ -22,6 +22,11 @@ QUnit.module('web_editor', {}, function () {
                             string: "Displayed name",
                             type: "char"
                         },
+                        header: {
+                            string: "Header",
+                            type: "html",
+                            required: true,
+                        },
                         body: {
                             string: "Message",
                             type: "html"
@@ -30,6 +35,7 @@ QUnit.module('web_editor', {}, function () {
                     records: [{
                         id: 1,
                         display_name: "first record",
+                        header: "<p>  &nbsp;&nbsp;  <br>   </p>",
                         body: "<p>toto toto toto</p><p>tata</p>",
                     }],
                 },
@@ -126,6 +132,38 @@ QUnit.module('web_editor', {}, function () {
             form.destroy();
         });
 
+        QUnit.test('check if required field is set', async function (assert) {
+            assert.expect(1);
+
+            var form = await testUtils.createView({
+                View: FormView,
+                model: 'note.note',
+                data: this.data,
+                arch: '<form>' +
+                        '<field name="header" widget="html" style="height: 100px" />' +
+                      '</form>',
+                res_id: 1,
+            });
+
+            testUtils.mock.intercept(form, 'call_service', function (ev) {
+                if (ev.data.service === 'notification') {
+                    assert.deepEqual(ev.data.args[0], {
+                        "className": undefined,
+                        "message": "<ul><li>Header</li></ul>",
+                        "sticky": undefined,
+                        "title": "Invalid fields:",
+                        "type": "danger"
+                      });
+                }
+            }, true);
+
+            await testUtils.form.clickEdit(form);
+            await testUtils.nextTick();
+            await testUtils.dom.click(form.$('.o_form_button_save'));
+
+            form.destroy();
+        });
+
         QUnit.test('colorpicker', async function (assert) {
             assert.expect(6);
 
@@ -150,12 +188,20 @@ QUnit.module('web_editor', {}, function () {
             assert.strictEqual(range.sc, pText,
                 "should select the text");
 
-            await testUtils.dom.click($field.find('.note-toolbar .note-back-color-preview button:first'));
+            async function openColorpicker(selector) {
+                const $colorpicker = $field.find(selector);
+                const openingProm = new Promise(resolve => {
+                    $colorpicker.one('shown.bs.dropdown', () => resolve());
+                });
+                await testUtils.dom.click($colorpicker.find('button:first'));
+                return openingProm;
+            }
 
+            await openColorpicker('.note-toolbar .note-back-color-preview');
             assert.ok($field.find('.note-back-color-preview').hasClass('show'),
                 "should display the color picker");
 
-            await testUtils.dom.click($field.find('.note-toolbar .note-back-color-preview button[data-value="#00FFFF"]'));
+            await testUtils.dom.click($field.find('.note-toolbar .note-back-color-preview .o_we_color_btn[style="background-color:#00FFFF;"]'));
 
             assert.ok(!$field.find('.note-back-color-preview').hasClass('show'),
                 "should close the color picker");
@@ -180,11 +226,11 @@ QUnit.module('web_editor', {}, function () {
             Wysiwyg.setRange(fontContent, 5, pText, 2);
             // text is selected
 
-            await testUtils.dom.click($field.find('.note-toolbar .note-back-color-preview button:first'));
-            await testUtils.dom.click($field.find('.note-toolbar .note-back-color-preview button[data-value="bg-gamma"]'));
+            await openColorpicker('.note-toolbar .note-back-color-preview');
+            await testUtils.dom.click($field.find('.note-toolbar .note-back-color-preview .o_we_color_btn.bg-o-color-3'));
 
             assert.strictEqual($field.find('.note-editable').html(),
-                '<p>t<font style="background-color: rgb(0, 255, 255);">oto t</font><font style="" class="bg-gamma">oto&nbsp;</font><font class="bg-gamma" style="">to</font>to</p><p>tata</p>',
+                '<p>t<font style="background-color: rgb(0, 255, 255);">oto t</font><font style="" class="bg-o-color-3">oto&nbsp;</font><font class="bg-o-color-3" style="">to</font>to</p><p>tata</p>',
                 "should have rendered the field correctly in edit");
 
             form.destroy();
@@ -210,6 +256,9 @@ QUnit.module('web_editor', {}, function () {
                     if (route.indexOf('/web_editor/static/src/img/') === 0) {
                         return Promise.resolve();
                     }
+                    if (route.indexOf('/web_unsplash/fetch_images') === 0) {
+                        return Promise.resolve();
+                    }
                     return this._super(route, args);
                 },
             });
@@ -232,13 +281,10 @@ QUnit.module('web_editor', {}, function () {
 
             // load static xml file (dialog, media dialog, unsplash image widget)
             await defMediaDialog;
-            await testUtils.dom.click($('.modal #editor-media-image .o_existing_attachment_cell:first'));
-            await testUtils.dom.click($('.modal .modal-footer button.btn-primary'));
+            await testUtils.dom.click($('.modal #editor-media-image .o_existing_attachment_cell:first').removeClass('d-none'));
 
             var $editable = form.$('.oe_form_field[name="body"] .note-editable');
-
-            assert.strictEqual($editable.data('wysiwyg').getValue(),
-                '<p>t<img class="img-fluid o_we_custom_image" data-src="/web_editor/static/src/img/transparent.png">oto toto toto</p><p>tata</p>',
+            assert.ok($editable.find('img')[0].dataset.src.includes('/web_editor/static/src/img/transparent.png'),
                 "should have the image in the dom");
 
             testUtils.mock.unpatch(MediaDialog);
@@ -260,6 +306,9 @@ QUnit.module('web_editor', {}, function () {
                 mockRPC: function (route, args) {
                     if (args.model === 'ir.attachment') {
                         return Promise.resolve([]);
+                    }
+                    if (route.indexOf('/web_unsplash/fetch_images') === 0) {
+                        return Promise.resolve();
                     }
                     return this._super(route, args);
                 },
@@ -286,7 +335,6 @@ QUnit.module('web_editor', {}, function () {
             $('.modal .tab-content .tab-pane').removeClass('fade'); // to be sync in test
             await testUtils.dom.click($('.modal a[aria-controls="editor-media-icon"]'));
             await testUtils.dom.click($('.modal #editor-media-icon .font-icons-icon.fa-glass'));
-            await testUtils.dom.click($('.modal .modal-footer button.btn-primary'));
 
             var $editable = form.$('.oe_form_field[name="body"] .note-editable');
 
@@ -313,7 +361,7 @@ QUnit.module('web_editor', {}, function () {
                 mockRPC: function (route, args) {
                     if (args.method === "write") {
                         assert.strictEqual(args.args[1].body,
-                            '<p>t<font class="bg-gamma">oto toto&nbsp;</font>toto</p><p>tata</p>',
+                            '<p>t<font class="bg-o-color-3">oto toto&nbsp;</font>toto</p><p>tata</p>',
                             "should save the content");
 
                     }
@@ -328,8 +376,17 @@ QUnit.module('web_editor', {}, function () {
             Wysiwyg.setRange(pText, 1, pText, 10);
             // text is selected
 
-            await testUtils.dom.click($field.find('.note-toolbar .note-back-color-preview button:first'));
-            await testUtils.dom.click($field.find('.note-toolbar .note-back-color-preview button[data-value="bg-gamma"]'));
+            async function openColorpicker(selector) {
+                const $colorpicker = $field.find(selector);
+                const openingProm = new Promise(resolve => {
+                    $colorpicker.one('shown.bs.dropdown', () => resolve());
+                });
+                await testUtils.dom.click($colorpicker.find('button:first'));
+                return openingProm;
+            }
+
+            await openColorpicker('.note-toolbar .note-back-color-preview');
+            await testUtils.dom.click($field.find('.note-toolbar .note-back-color-preview .o_we_color_btn.bg-o-color-3'));
 
             await testUtils.form.clickSave(form);
 
@@ -369,26 +426,6 @@ QUnit.module('web_editor', {}, function () {
                 '<p>toto toto toto</p><p>tata</p>',
                 "should have rendered the field correctly in edit");
 
-            form.destroy();
-        });
-
-        QUnit.test('save immediately before iframe is rendered in edit mode', async function (assert) {
-            assert.expect(1);
-
-            var form = await testUtils.createAsyncView({
-                View: FormView,
-                model: 'note.note',
-                data: this.data,
-                arch: '<form>' +
-                    '<field name="body" widget="html" style="height: 100px" options="{\'cssEdit\': \'template.assets\'}"/>' +
-                    '</form>',
-                res_id: 1,
-            });
-            await testUtils.form.clickEdit(form);
-            await testUtils.nextTick();
-            await testUtils.form.clickSave(form);
-            await testUtils.nextTick();
-            assert.ok(true, "No traceback encountered. The wysiwyg was cut while not loaded.");
             form.destroy();
         });
 

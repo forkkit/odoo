@@ -1,5 +1,6 @@
 .o_list_view {
     position: relative;
+    height: 100%;
 
     .o_list_table {
         position: relative;
@@ -41,6 +42,12 @@
             &.o_list_char.o_color_cell .o_field_color {
                 width: 17px;
                 height: 17px;
+            }
+            &.o_list_button > button {
+                padding: 0 5px;
+                &:not(:last-child) {
+                    margin-right: 3px;
+                }
             }
         }
 
@@ -98,6 +105,9 @@
         .o_list_record_selector {
             width: 40px;
             padding-left: $o-horizontal-padding;
+            .custom-control-label {
+                cursor: pointer;
+            }
         }
         .o_list_record_remove, .o_handle_cell {
             width: 1px;  // to prevent the column to expand
@@ -125,7 +135,7 @@
                 padding-bottom: ($table-cell-padding-sm*2);
             }
             .o_group_name {
-                white-space: nowrap;
+                @include o-text-overflow(table-cell);
             }
             .o_group_buttons {
                 display: inline-block;
@@ -206,12 +216,22 @@
             width: 32px;
         }
 
-        // checkboxes in editable lists should be clickable and activate the row
         .o_data_row:not(.o_selected_row) .o_data_cell {
-            &.o_toggle_button_cell:not(.o_readonly_modifier) button, // registry: toggle_button
-            &.o_boolean_favorite_cell:not(.o_readonly_modifier) .o_favorite, // registry: boolean_favorite
-            .custom-checkbox:not(.o_readonly_modifier) {
+
+            // Boolean fields in non-selected rows completely disabled.
+            .custom-checkbox {
                 pointer-events: none;
+            }
+
+            // These widgets enable the checkbox if there is no readonly modifier.
+            &.o_boolean_button_cell,
+            &.o_boolean_favorite_cell,
+            &.o_boolean_toggle_cell,
+            &.o_toggle_button_cell {
+
+                &:not(.o_readonly_modifier) .custom-checkbox {
+                    pointer-events: auto;
+                }
             }
         }
 
@@ -277,6 +297,9 @@
             > .o_row_handle {
                 visibility: hidden; // hide sequence when editing
             }
+            > .o_field_badge {
+                width: auto; // override width: 100% to keep the optimal badge width
+            }
         }
 
         .o_field_x2many_list_row_add, .o_group_field_row_add {
@@ -300,7 +323,7 @@
 
     .o_optional_columns_dropdown_toggle {
         cursor: pointer;
-        width: 10px;
+        padding: 0 5px;
         text-align: center;
         line-height: 30px;
         z-index: 1; // must be over the resize handle
@@ -336,5 +359,19 @@
         .o_list_button_save, .o_list_button_discard {
             display: inline-block
         }
+    }
+}
+
+// Selection box (next to the buttons, in ControlPanel)
+$selected-box-color: #e7f2f6;
+.o_list_selection_box {
+    display: inline-block;
+    padding: $btn-padding-y $btn-padding-x;
+    vertical-align: middle; // align with the buttons
+    border: 1px solid $selected-box-color;
+    background-color: $selected-box-color;
+    .o_list_select_domain {
+        font-weight: bold;
+        margin-left: 4px;
     }
 }

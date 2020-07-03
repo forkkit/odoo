@@ -85,11 +85,15 @@ $canceled-color: gray;
             color: white;
             cursor: pointer;
         }
+        .progress {
+            border-radius: 3px;
+        }
 
         >.o_timesheet_plan_badge {
             margin-bottom: 10px;
             > .badge {
                 border: none;
+                font-size: unset;
                     a {
                     color: white;
                 }

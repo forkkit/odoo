@@ -14,7 +14,7 @@ class PurchaseOrder(models.Model):
 
     NOTE: The matrix functionality was done in python, server side, to avoid js
         restriction.  Indeed, the js framework only loads the x first lines displayed
-        in the client, which means in case of big matrices and lots of so_lines,
+        in the client, which means in case of big matrices and lots of po_lines,
         the js doesn't have access to the 41st and following lines.
 
         To force the loading, a 'hack' of the js framework would have been needed...
@@ -22,7 +22,7 @@ class PurchaseOrder(models.Model):
 
     grid_product_tmpl_id = fields.Many2one('product.template', store=False, help="Technical field for product_matrix functionalities.")
     grid_update = fields.Boolean(default=False, store=False, help="Whether the grid field contains a new matrix to apply or not.")
-    grid = fields.Char(store=False, help="Technical storage of grid. \nIf grid_update, will be loaded on the SO. \nIf not, represents the matrix to open.")
+    grid = fields.Char(store=False, help="Technical storage of grid. \nIf grid_update, will be loaded on the PO. \nIf not, represents the matrix to open.")
 
     @api.onchange('grid_product_tmpl_id')
     def _set_grid_up(self):
@@ -47,7 +47,7 @@ class PurchaseOrder(models.Model):
                 product = product_template._create_product_variant(combination)
                 # TODO replace the check on product_id by a first check on the ptavs and pnavs?
                 # and only create/require variant after no line has been found ???
-                order_lines = self.order_line.filtered(lambda line: line.product_id == product and line.product_no_variant_attribute_value_ids == no_variant_attribute_values)
+                order_lines = self.order_line.filtered(lambda line: (line._origin or line).product_id == product and (line._origin or line).product_no_variant_attribute_value_ids == no_variant_attribute_values)
 
                 # if product variant already exist in order lines
                 old_qty = sum(order_lines.mapped('product_qty'))
@@ -57,7 +57,7 @@ class PurchaseOrder(models.Model):
                     if qty == 0:
                         if self.state in ['draft', 'sent']:
                             # Remove lines if qty was set to 0 in matrix
-                            # only if SO state = draft/sent
+                            # only if PO state = draft/sent
                             self.order_line -= order_lines
                         else:
                             order_lines.update({'product_qty': 0.0})
@@ -88,6 +88,9 @@ class PurchaseOrder(models.Model):
                     if not default_po_line_vals:
                         OrderLine = self.env['purchase.order.line']
                         default_po_line_vals = OrderLine.default_get(OrderLine._fields.keys())
+                    last_sequence = self.order_line[-1:].sequence
+                    if last_sequence:
+                        default_po_line_vals['sequence'] = last_sequence + 1
                     new_lines.append((0, 0, dict(
                         default_po_line_vals,
                         product_id=product.id,

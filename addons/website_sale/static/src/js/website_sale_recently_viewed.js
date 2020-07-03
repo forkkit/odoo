@@ -13,7 +13,7 @@ publicWidget.registry.productsRecentlyViewedSnippet = publicWidget.Widget.extend
     selector: '.s_wsale_products_recently_viewed',
     xmlDependencies: ['/website_sale/static/src/xml/website_sale_recently_viewed.xml'],
     disabledInEditableMode: false,
-    events: {
+    read_events: {
         'click .js_add_cart': '_onAddToCart',
         'click .js_remove': '_onRemove',
     },
@@ -150,7 +150,7 @@ publicWidget.registry.productsRecentlyViewedSnippet = publicWidget.Widget.extend
             },
         }).then(function (data) {
             wSaleUtils.updateCartNavBar(data);
-            var $navButton = wSaleUtils.getNavBarButton('.o_wsale_my_cart');
+            var $navButton = $('header .o_wsale_my_cart').first();
             var fetch = self._fetch();
             var animation = wSaleUtils.animateClone($navButton, $(ev.currentTarget).parents('.o_carousel_product_card'), 25, 40);
             Promise.all([fetch, animation]).then(function (values) {

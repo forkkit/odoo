@@ -22,6 +22,9 @@ var PagePropertiesDialog = weWidgets.Dialog.extend({
         'keyup input#page_name': '_onNameChanged',
         'keyup input#page_url': '_onUrlChanged',
         'change input#create_redirect': '_onCreateRedirectChanged',
+        'click input#visibility_password': '_onPasswordClicked',
+        'change input#visibility_password': '_onPasswordChanged',
+        'change select#visibility': '_onVisibilityChanged',
     }),
 
     /**
@@ -43,22 +46,32 @@ var PagePropertiesDialog = weWidgets.Dialog.extend({
 
         var buttons = [
             {text: _t("Save"), classes: 'btn-primary', click: this.save},
-            {text: _t("Discard"), close: true},
+            {text: _t("Discard"), classes: 'mr-auto', close: true},
         ];
         if (options.fromPageManagement) {
             buttons.push({
                 text: _t("Go To Page"),
                 icon: 'fa-globe',
-                classes: 'btn-link float-right',
+                classes: 'btn-link',
                 click: function (e) {
                     window.location.href = '/' + self.page.url;
                 },
             });
         }
         buttons.push({
+            text: _t("Duplicate Page"),
+            icon: 'fa-clone',
+            classes: 'btn-link',
+            click: function (e) {
+                // modal('hide') will break the rpc, so hide manually
+                this.$el.closest('.modal').addClass('d-none');
+                _clonePage.call(this, self.page_id);
+            },
+        });
+        buttons.push({
             text: _t("Delete Page"),
             icon: 'fa-trash',
-            classes: 'btn-link float-right',
+            classes: 'btn-link',
             click: function (e) {
                 _deletePage.call(this, self.page_id, options.fromPageManagement);
             },
@@ -78,18 +91,12 @@ var PagePropertiesDialog = weWidgets.Dialog.extend({
 
         defs.push(this._rpc({
             model: 'website.page',
-            method: 'get_page_info',
+            method: 'get_page_properties',
             args: [this.page_id],
         }).then(function (page) {
-            page[0].url = _.str.startsWith(page[0].url, '/') ? page[0].url.substring(1) : page[0].url;
-            self.page = page[0];
-        }));
-
-        defs.push(this._rpc({
-            model: 'website.rewrite',
-            method: 'fields_get',
-        }).then(function (fields) {
-            self.fields = fields;
+            page.url = _.str.startsWith(page.url, '/') ? page.url.substring(1) : page.url;
+            page.hasSingleGroup = page.group_id !== undefined;
+            self.page = page;
         }));
 
         return Promise.all(defs);
@@ -105,6 +112,13 @@ var PagePropertiesDialog = weWidgets.Dialog.extend({
         this.$('.ask_for_redirect').addClass('d-none');
         this.$('.redirect_type').addClass('d-none');
         this.$('.warn_about_call').addClass('d-none');
+        if (this.page.visibility !== 'password') {
+            this.$('.show_visibility_password').addClass('d-none');
+        }
+        if (this.page.visibility !== 'restricted_group') {
+            this.$('.show_group_id').addClass('d-none');
+        }
+        this.autocompleteWithGroups(this.$('#group_id'));
 
         defs.push(this._getPageDependencies(this.page_id)
         .then(function (dependencies) {
@@ -174,7 +188,6 @@ var PagePropertiesDialog = weWidgets.Dialog.extend({
             datepickersOptions.defaultDate = time.str_to_datetime(this.page.date_publish);
         }
         this.$('#date_publish_container').datetimepicker(datepickersOptions);
-
         return Promise.all(defs);
     },
     /**
@@ -202,13 +215,13 @@ var PagePropertiesDialog = weWidgets.Dialog.extend({
         });
         var url = this.$('#page_url').val();
 
-        var $date_publish = this.$("#date_publish");
-        $date_publish.closest(".form-group").removeClass('o_has_error').find('.form-control, .custom-select').removeClass('is-invalid');
-        var date_publish = $date_publish.val();
-        if (date_publish !== "") {
-            date_publish = this._parse_date(date_publish);
-            if (!date_publish) {
-                $date_publish.closest(".form-group").addClass('o_has_error').find('.form-control, .custom-select').addClass('is-invalid');
+        var $datePublish = this.$("#date_publish");
+        $datePublish.closest(".form-group").removeClass('o_has_error').find('.form-control, .custom-select').removeClass('is-invalid');
+        var datePublish = $datePublish.val();
+        if (datePublish !== "") {
+            datePublish = this._parse_date(datePublish);
+            if (!datePublish) {
+                $datePublish.closest(".form-group").addClass('o_has_error').find('.form-control, .custom-select').addClass('is-invalid');
                 return;
             }
         }
@@ -223,8 +236,22 @@ var PagePropertiesDialog = weWidgets.Dialog.extend({
             create_redirect: this.$('#create_redirect').prop('checked'),
             redirect_type: this.$('#redirect_type').val(),
             website_indexed: this.$('#is_indexed').prop('checked'),
-            date_publish: date_publish,
+            visibility: this.$('#visibility').val(),
+            date_publish: datePublish,
         };
+        if (this.page.hasSingleGroup && this.$('#visibility').val() === 'restricted_group') {
+            params['group_id'] = this.$('#group_id').data('group-id');
+        }
+        if (this.$('#visibility').val() === 'password') {
+            var field_pwd = $('#visibility_password');
+            if (!field_pwd.get(0).reportValidity()) {
+                return;
+            }
+            if (field_pwd.data('dirty')) {
+                params['visibility_pwd'] = field_pwd.val();
+            }
+        }
+
         this._rpc({
             model: 'website.page',
             method: 'save_page_info',
@@ -326,6 +353,37 @@ var PagePropertiesDialog = weWidgets.Dialog.extend({
             return false;
         }
     },
+    /**
+     * Allows the given input to propose existing groups.
+     *
+     * @param {jQuery} $input
+     */
+    autocompleteWithGroups: function ($input) {
+        $input.autocomplete({
+            source: (request, response) => {
+                return this._rpc({
+                    model: 'res.groups',
+                    method: 'search_read',
+                    args: [[['name', 'ilike', request.term]], ['display_name']],
+                    kwargs: {
+                        limit: 15,
+                    },
+                }).then(founds => {
+                    founds = founds.map(g => ({'id': g['id'], 'label': g['display_name']}));
+                    response(founds);
+                });
+            },
+            change: (ev, ui) => {
+                var $target = $(ev.target);
+                if (!ui.item) {
+                    $target.val("");
+                    $target.removeData('group-id');
+                } else {
+                    $target.data('group-id', ui.item.id);
+                }
+            },
+        });
+    },
 
     //--------------------------------------------------------------------------
     // Handlers
@@ -358,6 +416,27 @@ var PagePropertiesDialog = weWidgets.Dialog.extend({
         var createRedirect = this.$('input#create_redirect').prop('checked');
         this.$('.redirect_type').toggleClass('d-none', !createRedirect);
     },
+    /**
+     * @private
+     */
+    _onVisibilityChanged: function (ev) {
+        this.$('.show_visibility_password').toggleClass('d-none', ev.target.value !== 'password');
+        this.$('.show_group_id').toggleClass('d-none', ev.target.value !== 'restricted_group');
+        this.$('#visibility_password').attr('required', ev.target.value === 'password');
+    },
+    /**
+     * @private
+     */
+    _onPasswordClicked: function (ev) {
+        ev.target.value = '';
+        this._onPasswordChanged();
+    },
+    /**
+     * @private
+     */
+    _onPasswordChanged: function () {
+        this.$('#visibility_password').data('dirty', 1);
+    },
 });
 
 var MenuEntryDialog = weWidgets.LinkDialog.extend({
@@ -368,10 +447,10 @@ var MenuEntryDialog = weWidgets.LinkDialog.extend({
     /**
      * @constructor
      */
-    init: function (parent, options, data) {
+    init: function (parent, options, editable, data) {
         this._super(parent, _.extend({
             title: _t("Add a menu item"),
-        }, options || {}), _.extend({
+        }, options || {}), editable, _.extend({
             needLabel: true,
             text: data.name || '',
             isNewWindow: data.new_window,
@@ -434,7 +513,8 @@ var SelectEditMenuDialog = weWidgets.Dialog.extend({
         var self = this;
         self.roots = [{id: null, name: _t("Top Menu")}];
         $('[data-content_menu_id]').each(function () {
-            self.roots.push({id: $(this).data('content_menu_id'), name: $(this).attr('name')});
+            // Remove name fallback in master
+            self.roots.push({id: $(this).data('content_menu_id'), name: $(this).attr('name') || $(this).data('menu_name')});
         });
         this._super(parent, _.extend({}, {
             title: _t("Select a Menu"),
@@ -598,7 +678,7 @@ var EditMenuDialog = weWidgets.Dialog.extend({
      */
     _onAddMenuButtonClick: function (ev) {
         var menuType = ev.currentTarget.dataset.type;
-        var dialog = new MenuEntryDialog(this, {}, {
+        var dialog = new MenuEntryDialog(this, {}, null, {
             menuType: menuType,
         });
         dialog.on('save', this, link => {
@@ -646,7 +726,7 @@ var EditMenuDialog = weWidgets.Dialog.extend({
         var menuID = $menu.data('menu-id');
         var menu = this.flat[menuID];
         if (menu) {
-            var dialog = new MenuEntryDialog(this, {}, _.extend({
+            var dialog = new MenuEntryDialog(this, {}, null, _.extend({
                 menuType: menu.fields['is_mega_menu'] ? 'mega' : undefined,
             }, menu.fields));
             dialog.on('save', this, link => {
@@ -717,6 +797,12 @@ var ContentMenu = websiteNavbarData.WebsiteNavbarActionWidget.extend({
         header_color: function (value) {
             $('#wrapwrap > header').removeClass(this.value)
                                    .addClass(value);
+        },
+        header_visible: function (value) {
+            $('#wrapwrap > header').toggleClass('d-none o_snippet_invisible', !value);
+        },
+        footer_visible: function (value) {
+            $('#wrapwrap > footer').toggleClass('d-none o_snippet_invisible', !value);
         },
     },
 
@@ -944,13 +1030,7 @@ var PageManagement = Widget.extend({
     },
     _onClonePageButtonClick: function (ev) {
         var pageId = $(ev.currentTarget).data('id');
-        this._rpc({
-            model: 'website.page',
-            method: 'clone_page',
-            args: [pageId],
-        }).then(function (path) {
-            window.location.href = path;
-        });
+        _clonePage.call(this, pageId);
     },
     _onDeletePageButtonClick: function (ev) {
         var pageId = $(ev.currentTarget).data('id');
@@ -997,6 +1077,33 @@ function _deletePage(pageId, fromPageManagement) {
                 window.location.href = '/';
             }
         }, reject);
+    });
+}
+/**
+ * Duplicate the page after showing the wizard to enter new page name.
+ *
+ * @private
+ * @param {integer} pageId - The ID of the page to be duplicate
+ *
+ */
+function _clonePage(pageId) {
+    var self = this;
+    new Promise(function (resolve, reject) {
+        Dialog.confirm(this, undefined, {
+            title: _t("Duplicate Page"),
+            $content: $(qweb.render('website.duplicate_page_action_dialog')),
+            confirm_callback: function () {
+                var new_page_name =  this.$('#page_name').val();
+                return self._rpc({
+                    model: 'website.page',
+                    method: 'clone_page',
+                    args: [pageId, new_page_name],
+                }).then(function (path) {
+                    window.location.href = path;
+                }).guardedCatch(reject);
+            },
+            cancel_callback: reject,
+        }).on('closed', null, reject);
     });
 }
 

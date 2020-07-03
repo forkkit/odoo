@@ -12,21 +12,23 @@ class AccountJournal(models.Model):
         selection='_get_l10n_ar_afip_pos_types_selection', string='AFIP POS System')
     l10n_ar_afip_pos_number = fields.Integer(
         'AFIP POS Number', help='This is the point of sale number assigned by AFIP in order to generate invoices')
+    company_partner = fields.Many2one('res.partner', related='company_id.partner_id')
     l10n_ar_afip_pos_partner_id = fields.Many2one(
-        'res.partner', 'AFIP POS Address', help='This is the address used for invoice reports of this POS')
-    l10n_ar_sequence_ids = fields.One2many('ir.sequence', 'l10n_latam_journal_id', string="Sequences")
+        'res.partner', 'AFIP POS Address', help='This is the address used for invoice reports of this POS',
+        domain="['|', ('id', '=', company_partner), '&', ('id', 'child_of', company_partner), ('type', '!=', 'contact')]"
+    )
     l10n_ar_share_sequences = fields.Boolean(
         'Unified Book', help='Use same sequence for documents with the same letter')
 
     def _get_l10n_ar_afip_pos_types_selection(self):
         """ Return the list of values of the selection field. """
         return [
-            ('II_IM', 'Pre-printed Invoice'),
-            ('RLI_RLM', 'Online Invoice'),
-            ('BFERCEL', 'Electronic Fiscal Bond - Online Invoice'),
-            ('FEERCELP', 'Export Voucher - Billing Plus'),
-            ('FEERCEL', 'Export Voucher - Online Invoice'),
-            ('CPERCEL', 'Product Coding - Online Voucher'),
+            ('II_IM', _('Pre-printed Invoice')),
+            ('RLI_RLM', _('Online Invoice')),
+            ('BFERCEL', _('Electronic Fiscal Bond - Online Invoice')),
+            ('FEERCELP', _('Export Voucher - Billing Plus')),
+            ('FEERCEL', _('Export Voucher - Online Invoice')),
+            ('CPERCEL', _('Product Coding - Online Voucher')),
         ]
 
     def _get_journal_letter(self, counterpart_partner=False):
@@ -48,7 +50,7 @@ class AccountJournal(models.Model):
                 '13': ['C', 'E'],
             },
             'received': {
-                '1': ['A', 'C', 'M', 'I'],
+                '1': ['A', 'B', 'C', 'M', 'I'],
                 '3': ['B', 'C', 'I'],
                 '4': ['B', 'C', 'I'],
                 '5': ['B', 'C', 'I'],
@@ -101,86 +103,34 @@ class AccountJournal(models.Model):
         elif self.l10n_ar_afip_pos_system in ['FEERCEL', 'FEEWS', 'FEERCELP']:
             return expo_codes
 
-    @api.model
-    def create(self, values):
-        """ Create Document sequences after create the journal """
-        res = super().create(values)
-        res._l10n_ar_create_document_sequences()
-        return res
-
-    def write(self, values):
-        """ Update Document sequences after update journal """
-        to_check = set(['type', 'l10n_ar_afip_pos_system', 'l10n_ar_afip_pos_number', 'l10n_ar_share_sequences',
-                        'l10n_latam_use_documents'])
-        res = super().write(values)
-        if to_check.intersection(set(values.keys())):
-            for rec in self:
-                rec._l10n_ar_create_document_sequences()
-        return res
-
     @api.constrains('type', 'l10n_ar_afip_pos_system', 'l10n_ar_afip_pos_number', 'l10n_ar_share_sequences',
                     'l10n_latam_use_documents')
     def _check_afip_configurations(self):
         """ Do not let to update journal if already have confirmed invoices """
-        self.ensure_one()
-        if self.company_id.country_id != self.env.ref('base.ar'):
-            return True
-        if self.type != 'sale' and self._origin.type != 'sale':
-            return True
-        invoices = self.env['account.move'].search([('journal_id', '=', self.id), ('state', '!=', 'draft')])
+        arg_sale_journals = self.filtered(lambda x: x.company_id.country_id == self.env.ref('base.ar') and
+                                          x.type == 'sale' and x._origin.type == 'sale')
+        invoices = self.env['account.move'].search([('journal_id', 'in', arg_sale_journals.ids), ('state', '!=', 'draft')])
         if invoices:
-            raise ValidationError(_(
-                'You can not change the journal configuration for a journal that already have validate invoices') +
-                ':<br/><br/> - %s' % ('<br/>- '.join(invoices.mapped('display_name'))))
-
-    def _l10n_ar_create_document_sequences(self):
-        """ IF AFIP Configuration change try to review if this can be done and then create / update the document
-        sequences """
-        self.ensure_one()
-        if self.company_id.country_id != self.env.ref('base.ar'):
-            return True
-        if not self.type == 'sale' or not self.l10n_latam_use_documents:
-            return False
-
-        sequences = self.l10n_ar_sequence_ids
-        sequences.unlink()
-
-        # Create Sequences
-        letters = self._get_journal_letter()
-        internal_types = ['invoice', 'debit_note', 'credit_note']
-        domain = [('country_id.code', '=', 'AR'), ('internal_type', 'in', internal_types),
-                  '|', ('l10n_ar_letter', '=', False), ('l10n_ar_letter', 'in', letters)]
-        codes = self._get_journal_codes()
-        if codes:
-            domain.append(('code', 'in', codes))
-        documents = self.env['l10n_latam.document.type'].search(domain)
-        for document in documents:
-            if self.l10n_ar_share_sequences and self.l10n_ar_sequence_ids.filtered(
-               lambda x: x.l10n_ar_letter == document.l10n_ar_letter):
-                continue
-
-            sequences |= self.env['ir.sequence'].create(document._get_document_sequence_vals(self))
-        return sequences
+            raise ValidationError(
+                _("You can not change the journal's configuration if journal already have validated invoices") + ' ('
+                + ', '.join(invoices.mapped('journal_id').mapped('name')) + ')')
 
     @api.constrains('l10n_ar_afip_pos_number')
     def _check_afip_pos_number(self):
-        missing_pos_number = self.filtered(
-            lambda x: x.type == 'sale' and x.l10n_latam_use_documents and x.company_id.country_id == self.env.ref('base.ar')
-                      and x.l10n_ar_afip_pos_number == 0)
-        if missing_pos_number:
-            raise ValidationError(_('Please define a valid AFIP POS number'))
+        to_review = self.filtered(
+            lambda x: x.type == 'sale' and x.l10n_latam_use_documents and
+            x.company_id.country_id == self.env.ref('base.ar'))
+
+        if to_review.filtered(lambda x: x.l10n_ar_afip_pos_number == 0):
+            raise ValidationError(_('Please define an AFIP POS number'))
+
+        if to_review.filtered(lambda x: x.l10n_ar_afip_pos_number > 99999):
+            raise ValidationError(_('Please define a valid AFIP POS number (5 digits max)'))
 
     @api.onchange('l10n_ar_afip_pos_system')
     def _onchange_l10n_ar_afip_pos_system(self):
         """ On 'Pre-printed Invoice' the usual is to share sequences. On other types, do not share """
         self.l10n_ar_share_sequences = bool(self.l10n_ar_afip_pos_system == 'II_IM')
-
-    @api.onchange('company_id')
-    def _onchange_company_set_domain(self):
-        """ Will define the AFIP POS Address field domain taking into account the company configured in the journal """
-        company_partner = self.company_id.partner_id.id
-        return {'domain': {'l10n_ar_afip_pos_partner_id': [
-            '|', ('id', '=', company_partner), '&', ('id', 'child_of', company_partner), ('type', '!=', 'contact')]}}
 
     @api.onchange('l10n_ar_afip_pos_number', 'type')
     def _onchange_set_short_name(self):
@@ -189,5 +139,4 @@ class AccountJournal(models.Model):
         we add or not a prefix to identify sales journal.
         """
         if self.type == 'sale' and self.l10n_ar_afip_pos_number:
-            pos_num = str(self.l10n_ar_afip_pos_number)
-            self.code = pos_num if len(pos_num) > 4 else _('S') + "%04d" % self.l10n_ar_afip_pos_number
+            self.code = "%05i" % self.l10n_ar_afip_pos_number

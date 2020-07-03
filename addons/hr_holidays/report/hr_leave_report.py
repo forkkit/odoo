@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import api, fields, models, tools, _
+from odoo import api, fields, models, tools, exceptions, _
 from odoo.osv import expression
 
 
@@ -51,7 +51,7 @@ class LeaveReport(models.Model):
                 leaves.date_to as date_to, leaves.payslip_status as payslip_status
                 from (select
                     allocation.employee_id as employee_id,
-                    allocation.name as name,
+                    allocation.private_name as name,
                     allocation.number_of_days as number_of_days,
                     allocation.category_id as category_id,
                     allocation.department_id as department_id,
@@ -65,7 +65,7 @@ class LeaveReport(models.Model):
                 from hr_leave_allocation as allocation
                 union all select
                     request.employee_id as employee_id,
-                    request.name as name,
+                    request.private_name as name,
                     (request.number_of_days * -1) as number_of_days,
                     request.category_id as category_id,
                     request.department_id as department_id,
@@ -87,7 +87,7 @@ class LeaveReport(models.Model):
         if 'name' in field_names:
             if self.user_has_groups('hr_holidays.group_hr_holidays_user'):
                 return
-            current_employee = self.env['hr.employee'].sudo().search([('user_id', '=', self.env.uid)], limit=1)
+            current_employee = self.env.user.employee_id
             for record in self:
                 emp_id = record._cache.get('employee_id', [False])[0]
                 if emp_id != current_employee.id:
@@ -97,7 +97,6 @@ class LeaveReport(models.Model):
                     except Exception:
                         # skip SpecialValue (e.g. for missing record or access right)
                         pass
-
 
     @api.model
     def action_time_off_analysis(self):
@@ -121,3 +120,9 @@ class LeaveReport(models.Model):
                 'search_default_year': True
             }
         }
+
+    @api.model
+    def read_group(self, domain, fields, groupby, offset=0, limit=None, orderby=False, lazy=True):
+        if not self.user_has_groups('hr_holidays.group_hr_holidays_user') and 'private_name' in groupby:
+            raise exceptions.UserError(_('Such grouping is not allowed.'))
+        return super(LeaveReport, self).read_group(domain, fields, groupby, offset=offset, limit=limit, orderby=orderby, lazy=lazy)

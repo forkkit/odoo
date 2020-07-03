@@ -14,8 +14,8 @@
     <t t-name="website.editorbar">
         <div id="web_editor-top-edit">
             <form class="navbar-form text-muted">
-                <button type="button" class="btn btn-secondary" data-action="cancel"><i class="fa fa-times"/> Discard</button>
-                <button type="button" class="btn btn-primary" data-action="save"><i class="fa fa-floppy-o"/> Save</button>
+                <button type="button" class="btn btn-secondary" data-action="cancel" accesskey="j"><i class="fa fa-times"/> Discard</button>
+                <button type="button" class="btn btn-primary" data-action="save" accesskey="s"><i class="fa fa-floppy-o"/> Save</button>
             </form>
         </div>
     </t>
@@ -26,72 +26,6 @@
             <span/>
             <div t-if="label"><t t-esc="label"/></div>
         </label>
-    </t>
-
-    <div t-name="website.theme_customize_modal_layout" class="d-flex align-items-start">
-        <ul class="nav flex-column flex-shrink-0 w-25"/>
-        <div class="tab-content pl-3 pb-2 flex-grow-1"/>
-    </div>
-    <div t-name="website.theme_customize_modal_content" t-att-id="id" class="tab-pane">
-        <h5 class="mt-0"><t t-esc="title"/></h5>
-        <div class="form-row justify-content-between o_options_container"/>
-    </div>
-    <t t-name="website.theme_customize_modal_option">
-        <div t-attf-class="o_theme_customize_option my-1 flex-grow-0 #{font ? 'o_theme_customize_option_font_' + font : ''} #{widget and widget != 'auto' ? 'o_theme_customize_with_widget' : ''}">
-            <img t-if="icon" t-att-src="icon"/>
-
-            <t t-set="label" t-value="font ? '' : string"/>
-            <t t-if="alone and (!widget or widget == 'auto')" t-call="website.components.switch"/>
-            <label t-else="">
-                <input t-att-id="id" t-att-name="name" type="radio" t-att-checked="checked ? 'checked' : undefined"/>
-                <span><t t-esc="label"/></span>
-            </label>
-        </div>
-    </t>
-    <t t-name="website.theme_customize_delete_font">
-        <t t-set="delete_font_title">Delete this font</t>
-        <button type="button"
-            class="btn btn-link d-flex align-items-center text-danger fa fa-trash-o o_theme_customize_delete_google_font"
-            t-att-aria-label="delete_font_title"
-            t-att-title="delete_font_title"
-            t-att-data-font-index="index"/>
-    </t>
-    <t t-name="website.theme_customize_add_google_font_option">
-        <a class="dropdown-item p-2 o_theme_customize_add_google_font" t-att-data-variable="variable" href="#">
-            <i class="fa fa-plus"/> Add a Google Font
-        </a>
-    </t>
-    <t t-name="website.theme_customize_dropdown_option">
-        <div t-attf-class="dropdown o_theme_customize_dropdown">
-            <div class="dropdown-menu rounded-0 o_theme_customize_selection" role="menu"/>
-        </div>
-    </t>
-    <t t-name="website.theme_customize_widget_color">
-        <div t-attf-class="o_theme_customize_color o_theme_customize_color_#{color}"
-            t-att-data-color="color"
-            t-att-data-color-type="colorType"/>
-    </t>
-    <t t-name="website.theme_customize_widget_input">
-        <div class="o_theme_customize_input"
-            t-att-data-variable="variable"
-            t-att-data-unit="unit">
-            <i class="fa fa-edit"/>
-            <span/>
-        </div>
-    </t>
-    <t t-name="website.theme_customize_widget_auto">
-        <div class="o_theme_customize_auto"
-            t-att-data-variable="variable"
-            t-att-data-value="value"/>
-    </t>
-    <t t-name="website.theme_customize_active_input">
-        <div class="input-group input-group-sm align-items-center o_theme_customize_active_input">
-            <input type="text" class="form-control" t-att-value="widget.value"/>
-            <div class="input-group-append">
-                <div t-if="widget.unit" class="input-group-text"><t t-esc="widget.unit"/></div>
-                <button type="button" class="btn btn-secondary fa fa-undo" title="Reset"/>
-            </div>
-        </div>
     </t>
 
     <t t-extend="wysiwyg.widgets.link">
@@ -115,12 +49,12 @@
             <div class="col-md-9">
                 <input type="text" class="form-control o_input_anchor_name" id="anchorName" t-attf-value="#{currentAnchor}" placeholder="Anchor name"/>
                 <div class="invalid-feedback">
-                    <p class="d-none o_anchor_not_valid">The chosen name is not valid (use only a-Z A-Z 0-9 - _)</p>
                     <p class="d-none o_anchor_already_exists">The chosen name already exists</p>
                 </div>
             </div>
         </div>
     </div>
+
     <!-- Add a Google Font option dialog -->
     <div t-name="website.dialog.addGoogleFont">
         <div class="form-group row">
@@ -133,5 +67,50 @@
                 </span>
             </div>
         </div>
+        <p>Adding a font requires a reload of the page. This will save all your changes.</p>
+    </div>
+    <t t-name="website.delete_google_font_btn">
+        <t t-set="delete_font_title">Delete this font</t>
+        <i role="button"
+           class="text-danger ml-2 fa fa-trash-o o_we_delete_google_font_btn"
+           t-att-aria-label="delete_font_title"
+           t-att-title="delete_font_title"
+           t-att-data-font-index="index"/>
+    </t>
+    <t t-name="website.add_google_font_btn">
+        <we-button href="#" class="o_we_add_google_font_btn"
+                   t-att-data-variable="variable">
+            Add a Google Font
+        </we-button>
+    </t>
+
+    <t t-name="website.color_combination_edition">
+        <div>
+            <we-colorpicker string="Background" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-bg"/>
+            <we-colorpicker string="Text" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-text"/>
+            <we-colorpicker string="Headings" class="o_cc_subheadings_toggler" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-headings"/>
+            <we-row string="Sub-Headings" class="o_cc_subheadings_collapse">
+                <we-colorpicker title="Headings 2" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-h2"/>
+                <we-colorpicker title="Headings 3" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-h3"/>
+                <we-colorpicker title="Headings 4" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-h4"/>
+                <we-colorpicker title="Headings 5" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-h5"/>
+                <we-colorpicker title="Headings 6" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-h6"/>
+            </we-row>
+            <we-colorpicker string="Links" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-link"/>
+            <we-row string="Main Buttons">
+                <we-colorpicker title="Background" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-btn-primary"/>
+                <we-colorpicker title="Border" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-btn-primary-border"/>
+            </we-row>
+            <we-row string="Buttons">
+                <we-colorpicker title="Background" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-btn-secondary"/>
+                <we-colorpicker title="Border" data-customize-website-color="null" t-attf-data-color="o-cc#{number}-btn-secondary-border"/>
+            </we-row>
+        </div>
+    </t>
+
+    <!-- Theme - custom code -->
+    <div t-name="website.custom_code_dialog_content">
+        <div class="mb-2" t-esc="contentText"/>
+        <div class="o_ace_editor_container"/>
     </div>
 </templates>

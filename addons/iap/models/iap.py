@@ -68,7 +68,7 @@ def jsonrpc(url, method='call', params=None, timeout=15):
         return response.get('result')
     except (ValueError, requests.exceptions.ConnectionError, requests.exceptions.MissingSchema, requests.exceptions.Timeout, requests.exceptions.HTTPError) as e:
         raise exceptions.AccessError(
-            _('The url that this service requested returned an error. Please contact the author of the app. The url it tried to contact was %s') % url
+            _('The url that this service requested returned an error. Please contact the author of the app. The url it tried to contact was %s', url)
         )
 
 #----------------------------------------------------------
@@ -94,7 +94,7 @@ def authorize(env, key, account_token, credit, dbuuid=False, description=None, c
     except InsufficientCreditError as e:
         if credit_template:
             arguments = json.loads(e.args[0])
-            arguments['body'] = pycompat.to_text(env['ir.qweb'].render(credit_template))
+            arguments['body'] = pycompat.to_text(env['ir.qweb']._render(credit_template))
             e.args = (json.dumps(arguments),)
         raise e
     return transaction_token
@@ -163,21 +163,33 @@ class IapAccount(models.Model):
 
     @api.model
     def get(self, service_name, force_create=True):
-        accounts = self.search([
-            ('service_name', '=', service_name), 
+        domain = [
+            ('service_name', '=', service_name),
             '|',
                 ('company_ids', 'in', self.env.companies.ids),
-                ('company_ids','=',False)],
-            order='id desc')
+                ('company_ids', '=', False)
+        ]
+        accounts = self.search(domain, order='id desc')
         if not accounts:
-            if force_create:
-                account = self.create({'service_name': service_name})
+            with self.pool.cursor() as cr:
                 # Since the account did not exist yet, we will encounter a NoCreditError,
                 # which is going to rollback the database and undo the account creation,
                 # preventing the process to continue any further.
-                self.env.cr.commit()
-                return account
-            return accounts
+
+                # Flush the pending operations to avoid a deadlock.
+                self.flush()
+                IapAccount = self.with_env(self.env(cr=cr))
+                account = IapAccount.search(domain, order='id desc', limit=1)
+                if not account:
+                    if not force_create:
+                        return account
+                    account = IapAccount.create({'service_name': service_name})
+                # fetch 'account_token' into cache with this cursor,
+                # as self's cursor cannot see this account
+                account_token = account.account_token
+            account = self.browse(account.id)
+            self.env.cache.set(account, IapAccount._fields['account_token'], account_token)
+            return account
         accounts_with_company = accounts.filtered(lambda acc: acc.company_ids)
         if accounts_with_company:
             return accounts_with_company[0]
@@ -208,6 +220,18 @@ class IapAccount(models.Model):
         d = {'dbuuid': self.env['ir.config_parameter'].sudo().get_param('database.uuid')}
 
         return '%s?%s' % (endpoint + route, werkzeug.urls.url_encode(d))
+
+    @api.model
+    def get_config_account_url(self):
+        account = self.env['iap.account'].get('partner_autocomplete')
+        action = self.env.ref('iap.iap_account_action')
+        menu = self.env.ref('iap.iap_account_menu')
+        no_one = self.user_has_groups('base.group_no_one')
+        if account:
+            url = "/web#id=%s&action=%s&model=iap.account&view_type=form&menu_id=%s" % (account.id, action.id, menu.id)
+        else:
+            url = "/web#action=%s&model=iap.account&view_type=form&menu_id=%s" % (action.id, menu.id)
+        return no_one and url
 
     @api.model
     def get_credits(self, service_name):

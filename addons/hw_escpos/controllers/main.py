@@ -18,10 +18,7 @@ try:
 except ImportError:
     escpos = printer = None
 
-try:
-    from queue import Queue
-except ImportError:
-    from Queue import Queue # pylint: disable=deprecated-module
+from queue import Queue
 from threading import Thread, Lock
 
 try:
@@ -31,8 +28,6 @@ except ImportError:
 
 from odoo import http, _
 from odoo.addons.hw_proxy.controllers import main as hw_proxy
-
-from uuid import getnode as get_mac
 
 _logger = logging.getLogger(__name__)
 
@@ -83,7 +78,10 @@ class EscposDriver(Thread):
 
         for printer in printers:
             try:
-                description = usb.util.get_string(printer, 256, printer.iManufacturer) + " " + usb.util.get_string(printer, 256, printer.iProduct)
+                if usb.__version__ == '1.0.0b1':
+                    description = usb.util.get_string(printer, 256, printer.iManufacturer) + " " + usb.util.get_string(printer, 256, printer.iProduct)
+                else:
+                    description = usb.util.get_string(printer, printer.iManufacturer) + " " + usb.util.get_string(printer, printer.iProduct)
             except Exception as e:
                 _logger.error("Can not get printer description: %s" % e)
                 description = 'Unknown printer'

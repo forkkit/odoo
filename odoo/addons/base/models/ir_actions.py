@@ -12,6 +12,7 @@ from odoo.http import request
 import base64
 from collections import defaultdict
 import datetime
+import functools
 import logging
 import time
 
@@ -109,6 +110,7 @@ class IrActions(models.Model):
                     WHERE a.binding_model_id=m.id AND m.model=%s
                     ORDER BY a.id """
         cr.execute(query, [model_name])
+        IrModelAccess = self.env['ir.model.access']
 
         # discard unauthorized actions, and read action definitions
         result = defaultdict(list)
@@ -117,13 +119,20 @@ class IrActions(models.Model):
             try:
                 action = self.env[action_model].browse(action_id)
                 action_groups = getattr(action, 'groups_id', ())
+                action_model = getattr(action, 'res_model', False)
                 if action_groups and not action_groups & user_groups:
                     # the user may not perform this action
+                    continue
+                if action_model and not IrModelAccess.check(action_model, mode='read', raise_exception=False):
+                    # the user won't be able to read records
                     continue
                 result[binding_type].append(action.read()[0])
             except (AccessError, MissingError):
                 continue
 
+        # sort actions by their sequence if sequence available
+        if result.get('action'):
+            result['action'] = sorted(result['action'], key=lambda vals: vals.get('sequence', 0))
         return result
 
 
@@ -139,9 +148,9 @@ class IrActionsActWindow(models.Model):
     def _check_model(self):
         for action in self:
             if action.res_model not in self.env:
-                raise ValidationError(_('Invalid model name %r in action definition.') % action.res_model)
+                raise ValidationError(_('Invalid model name %r in action definition.', action.res_model))
             if action.binding_model_id and action.binding_model_id.model not in self.env:
-                raise ValidationError(_('Invalid model name %r in action definition.') % action.binding_model_id.model)
+                raise ValidationError(_('Invalid model name %r in action definition.', action.binding_model_id.model))
 
     @api.depends('view_ids.view_mode', 'view_mode', 'view_id.type')
     def _compute_views(self):
@@ -164,6 +173,15 @@ class IrActionsActWindow(models.Model):
                     missing_modes.remove(act.view_id.type)
                     act.views.append((act.view_id.id, act.view_id.type))
                 act.views.extend([(False, mode) for mode in missing_modes])
+
+    @api.constrains('view_mode')
+    def _check_view_mode(self):
+        for rec in self:
+            modes = rec.view_mode.split(',')
+            if len(modes) != len(set(modes)):
+                raise ValidationError(_('The modes in view_mode must not be duplicated: %s', modes))
+            if ' ' in modes:
+                raise ValidationError(_('No spaces allowed in view_mode: %r', modes))
 
     @api.depends('res_model', 'search_view_id')
     def _compute_search_view(self):
@@ -356,7 +374,7 @@ class IrActionsServer(models.Model):
         ('object_create', 'Create a new Record'),
         ('object_write', 'Update the Record'),
         ('multi', 'Execute several actions')], string='Action To Do',
-        default='object_write', required=True,
+        default='object_write', required=True, copy=True,
         help="Type of server action. The following values are available:\n"
              "- 'Execute Python Code': a block of python code that will be executed\n"
              "- 'Create': create a new record with new values\n"
@@ -381,12 +399,12 @@ class IrActionsServer(models.Model):
     child_ids = fields.Many2many('ir.actions.server', 'rel_server_actions', 'server_id', 'action_id',
                                  string='Child Actions', help='Child server actions that will be executed. Note that the last return returned action value will be used as global return value.')
     # Create
-    crud_model_id = fields.Many2one('ir.model', string='Create/Write Target Model',
+    crud_model_id = fields.Many2one('ir.model', string='Target Model',
                                     help="Model for record creation / update. Set this field only to specify a different model than the base model.")
-    crud_model_name = fields.Char(related='crud_model_id.model', string='Target Model', readonly=True)
-    link_field_id = fields.Many2one('ir.model.fields', string='Link using field',
+    crud_model_name = fields.Char(related='crud_model_id.model', string='Target Model Name', readonly=True)
+    link_field_id = fields.Many2one('ir.model.fields', string='Link Field',
                                     help="Provide the field used to link the newly created record "
-                                         "on the record on used by the server action.")
+                                         "on the record used by the server action.")
     fields_lines = fields.One2many('ir.server.object.lines', 'server_id', string='Value Mapping', copy=True)
     groups_id = fields.Many2many('res.groups', 'ir_act_server_group_rel',
                                  'act_id', 'gid', string='Groups')
@@ -403,14 +421,33 @@ class IrActionsServer(models.Model):
         if not self._check_m2m_recursion('child_ids'):
             raise ValidationError(_('Recursion found in child server actions'))
 
+    def _get_runner(self):
+        multi = True
+        t = type(self)
+        fn = getattr(t, f'_run_action_{self.state}_multi', None)\
+          or getattr(t, f'run_action_{self.state}_multi', None)
+        if not fn:
+            multi = False
+            fn = getattr(t, f'_run_action_{self.state}', None)\
+              or getattr(t, f'run_action_{self.state}', None)
+        if fn and fn.__name__.startswith('run_action_'):
+            fn = functools.partial(fn, self)
+        return fn, multi
+
+    def _register_hook(self):
+        super()._register_hook()
+
+        for cls in type(self).mro():
+            for symbol in vars(cls).keys():
+                if symbol.startswith('run_action_'):
+                    _logger.warning(
+                        "RPC-public action methods are deprecated, found %r (in class %s.%s)",
+                        symbol, cls.__module__, cls.__name__
+                    )
+
     @api.onchange('crud_model_id')
     def _onchange_crud_model_id(self):
         self.link_field_id = False
-        self.crud_model_name = self.crud_model_id.model
-
-    @api.onchange('model_id')
-    def _onchange_model_id(self):
-        self.model_name = self.model_id.model
 
     def create_action(self):
         """ Create a contextual action for each server action. """
@@ -425,55 +462,45 @@ class IrActionsServer(models.Model):
         self.filtered('binding_model_id').write({'binding_model_id': False})
         return True
 
-    @api.model
-    def run_action_code_multi(self, action, eval_context=None):
-        safe_eval(action.sudo().code.strip(), eval_context, mode="exec", nocopy=True)  # nocopy allows to return 'action'
-        if 'action' in eval_context:
-            return eval_context['action']
+    def _run_action_code_multi(self, eval_context):
+        safe_eval(self.sudo().code.strip(), eval_context, mode="exec", nocopy=True)  # nocopy allows to return 'action'
+        return eval_context.get('action')
 
-    @api.model
-    def run_action_multi(self, action, eval_context=None):
+    def _run_action_multi(self, eval_context=None):
         res = False
-        for act in action.child_ids.sorted():
-            result = act.run()
-            if result:
-                res = result
+        for act in self.child_ids.sorted():
+            res = act.run() or res
         return res
 
-    @api.model
-    def run_action_object_write(self, action, eval_context=None):
+    def _run_action_object_write(self, eval_context=None):
         """Apply specified write changes to active_id."""
-        res = {}
-        for exp in action.fields_lines:
-            res[exp.col1.name] = exp.eval_value(eval_context=eval_context)[exp.id]
+        vals = self.fields_lines.eval_value(eval_context=eval_context)
+        res = {line.col1.name: vals[line.id] for line in self.fields_lines}
 
         if self._context.get('onchange_self'):
             record_cached = self._context['onchange_self']
             for field, new_value in res.items():
                 record_cached[field] = new_value
         else:
-            self.env[action.model_id.model].browse(self._context.get('active_id')).write(res)
+            self.env[self.model_id.model].browse(self._context.get('active_id')).write(res)
 
-    @api.model
-    def run_action_object_create(self, action, eval_context=None):
+    def _run_action_object_create(self, eval_context=None):
         """Create specified model object with specified values.
 
         If applicable, link active_id.<self.link_field_id> to the new record.
         """
-        res = {}
-        for exp in action.fields_lines:
-            res[exp.col1.name] = exp.eval_value(eval_context=eval_context)[exp.id]
+        vals = self.fields_lines.eval_value(eval_context=eval_context)
+        res = {line.col1.name: vals[line.id] for line in self.fields_lines}
 
-        res = self.env[action.crud_model_id.model].create(res)
+        res = self.env[self.crud_model_id.model].create(res)
 
-        if action.link_field_id:
-            record = self.env[action.model_id.model].browse(self._context.get('active_id'))
-            if action.link_field_id.ttype in ['one2many', 'many2many']:
-                record.write({action.link_field_id.name: [(4, res.id)]})
+        if self.link_field_id:
+            record = self.env[self.model_id.model].browse(self._context.get('active_id'))
+            if self.link_field_id.ttype in ['one2many', 'many2many']:
+                record.write({self.link_field_id.name: [(4, res.id)]})
             else:
-                record.write({action.link_field_id.name: res.id})
+                record.write({self.link_field_id.name: res.id})
 
-    @api.model
     def _get_eval_context(self, action=None):
         """ Prepare the context used when evaluating python code, like the
         python formulas or code server actions.
@@ -505,6 +532,7 @@ class IrActionsServer(models.Model):
             'model': model,
             # Exceptions
             'Warning': odoo.exceptions.Warning,
+            'UserError': odoo.exceptions.UserError,
             # record
             'record': record,
             'records': records,
@@ -515,8 +543,12 @@ class IrActionsServer(models.Model):
 
     def run(self):
         """ Runs the server action. For each server action, the
-        run_action_<STATE> method is called. This allows easy overriding
-        of the server actions.
+        :samp:`_run_action_{TYPE}[_multi]` method is called. This allows easy
+        overriding of the server actions.
+
+        The `_multi` suffix means the runner can operate on multiple records,
+        otherwise if there are multiple records the runner will be called once
+        for each
 
         :param dict context: context should contain following keys
 
@@ -538,30 +570,33 @@ class IrActionsServer(models.Model):
                 raise AccessError(_("You don't have enough access rights to run this action."))
 
             eval_context = self._get_eval_context(action)
-            if hasattr(self, 'run_action_%s_multi' % action.state):
-                # call the multi method
-                run_self = self.with_context(eval_context['env'].context)
-                func = getattr(run_self, 'run_action_%s_multi' % action.state)
-                res = func(action, eval_context=eval_context)
 
-            elif hasattr(self, 'run_action_%s' % action.state):
+            runner, multi = action._get_runner()
+            if runner and multi:
+                # call the multi method
+                run_self = action.with_context(eval_context['env'].context)
+                res = runner(run_self, eval_context=eval_context)
+            elif runner:
                 active_id = self._context.get('active_id')
                 if not active_id and self._context.get('onchange_self'):
                     active_id = self._context['onchange_self']._origin.id
                     if not active_id:  # onchange on new record
-                        func = getattr(self, 'run_action_%s' % action.state)
-                        res = func(action, eval_context=eval_context)
+                        res = runner(action, eval_context=eval_context)
                 active_ids = self._context.get('active_ids', [active_id] if active_id else [])
                 for active_id in active_ids:
                     # run context dedicated to a particular active_id
-                    run_self = self.with_context(active_ids=[active_id], active_id=active_id)
+                    run_self = action.with_context(active_ids=[active_id], active_id=active_id)
                     eval_context["env"].context = run_self._context
-                    # call the single method related to the action: run_action_<STATE>
-                    func = getattr(run_self, 'run_action_%s' % action.state)
-                    res = func(action, eval_context=eval_context)
-        return res
+                    res = runner(run_self, eval_context=eval_context)
+            else:
+                _logger.warning(
+                    "Found no way to execute server action %r of type %r, ignoring it. "
+                    "Verify that the type is correct or add a method called "
+                    "`_run_action_<type>` or `_run_action_<type>_multi`.",
+                    action.name, action.state
+                )
+        return res or False
 
-    @api.model
     def _run_actions(self, ids):
         """
             Run server actions with given ids.
@@ -576,7 +611,7 @@ class IrServerObjectLines(models.Model):
     _sequence = 'ir_actions_id_seq'
 
     server_id = fields.Many2one('ir.actions.server', string='Related Server Action', ondelete='cascade')
-    col1 = fields.Many2one('ir.model.fields', string='Field', required=True)
+    col1 = fields.Many2one('ir.model.fields', string='Field', required=True, ondelete='cascade')
     value = fields.Text(required=True, help="Expression containing a value specification. \n"
                                             "When Formula type is selected, this field may be a Python expression "
                                             " that can use the same values as for the code field on the server action.\n"
@@ -619,7 +654,7 @@ class IrServerObjectLines(models.Model):
                 line.value = str(line.resource_ref.id)
 
     def eval_value(self, eval_context=None):
-        result = dict.fromkeys(self.ids, False)
+        result = {}
         for line in self:
             expr = line.value
             if line.evaluation_type == 'equation':

@@ -12,7 +12,9 @@ class HrEmployeeBase(models.AbstractModel):
 
     leave_manager_id = fields.Many2one(
         'res.users', string='Time Off',
-        help="User responsible of leaves approval.")
+        compute='_compute_leave_manager', store=True, readonly=False,
+        help='Select the user responsible for approving "Time Off" of this employee.\n'
+             'If empty, the approval is done by an Administrator or Approver (determined in settings/users).')
     remaining_leaves = fields.Float(
         compute='_compute_remaining_leaves', string='Remaining Paid Time Off',
         help='Total number of paid time off allocated to this employee, change this value to create allocation/time off request. '
@@ -79,9 +81,6 @@ class HrEmployeeBase(models.AbstractModel):
                 ('employee_id', '=', employee.id),
                 ('holiday_status_id.active', '=', True),
                 ('state', '=', 'validate'),
-                '|',
-                    ('date_to', '=', False),
-                    ('date_to', '>=', datetime.date.today()),
             ])
             employee.allocation_count = sum(allocations.mapped('number_of_days'))
             employee.allocation_display = "%g" % employee.allocation_count
@@ -119,13 +118,15 @@ class HrEmployeeBase(models.AbstractModel):
             employee.current_leave_id = leave_data.get(employee.id, {}).get('current_leave_id')
             employee.is_absent = leave_data.get(employee.id) and leave_data.get(employee.id, {}).get('current_leave_state') not in ['cancel', 'refuse', 'draft']
 
-    @api.onchange('parent_id')
-    def _onchange_parent_id(self):
-        super(HrEmployeeBase, self)._onchange_parent_id()
-        previous_manager = self._origin.parent_id.user_id
-        manager = self.parent_id.user_id
-        if manager and self.leave_manager_id == previous_manager or not self.leave_manager_id:
-            self.leave_manager_id = manager
+    @api.depends('parent_id')
+    def _compute_leave_manager(self):
+        for employee in self:
+            previous_manager = employee._origin.parent_id.user_id
+            manager = employee.parent_id.user_id
+            if manager and employee.leave_manager_id == previous_manager or not employee.leave_manager_id:
+                employee.leave_manager_id = manager
+            elif not employee.leave_manager_id:
+                employee.leave_manager_id = False
 
     def _compute_show_leaves(self):
         show_leaves = self.env['res.users'].has_group('hr_holidays.group_hr_holidays_user')
@@ -149,6 +150,10 @@ class HrEmployeeBase(models.AbstractModel):
         if 'parent_id' in values:
             manager = self.env['hr.employee'].browse(values['parent_id']).user_id
             values['leave_manager_id'] = values.get('leave_manager_id', manager.id)
+        if values.get('leave_manager_id', False):
+            approver_group = self.env.ref('hr_holidays.group_hr_holidays_responsible', raise_if_not_found=False)
+            if approver_group:
+                approver_group.sudo().write({'users': [(4, values['leave_manager_id'])]})
         return super(HrEmployeeBase, self).create(values)
 
     def write(self, values):
@@ -158,7 +163,19 @@ class HrEmployeeBase(models.AbstractModel):
                 to_change = self.filtered(lambda e: e.leave_manager_id == e.parent_id.user_id or not e.leave_manager_id)
                 to_change.write({'leave_manager_id': values.get('leave_manager_id', manager.id)})
 
+        old_managers = self.env['res.users']
+        if 'leave_manager_id' in values:
+            old_managers = self.mapped('leave_manager_id')
+            if values['leave_manager_id']:
+                old_managers -= self.env['res.users'].browse(values['leave_manager_id'])
+                approver_group = self.env.ref('hr_holidays.group_hr_holidays_responsible', raise_if_not_found=False)
+                if approver_group:
+                    approver_group.sudo().write({'users': [(4, values['leave_manager_id'])]})
+
         res = super(HrEmployeeBase, self).write(values)
+        # remove users from the Responsible group if they are no longer leave managers
+        old_managers._clean_leave_responsible_users()
+
         if 'parent_id' in values or 'department_id' in values:
             today_date = fields.Datetime.now()
             hr_vals = {}

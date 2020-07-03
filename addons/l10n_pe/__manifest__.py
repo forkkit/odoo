@@ -3,7 +3,7 @@
     'name': 'Peru - Accounting',
     "version": "2.0",
     'summary': "PCGE Simplified",
-    'category': 'Localization',
+    'category': 'Accounting/Localizations',
     'author': 'Vauxoo, Odoo',
     'license': 'LGPL-3',
     'depends': [
@@ -16,7 +16,7 @@
         'security/ir.model.access.csv',
         'views/account_tax_view.xml',
         'data/l10n_pe_chart_data.xml',
-        'data/account.group.csv',
+        'data/account.group.template.csv',
         'data/account.account.template.csv',
         'data/l10n_pe_chart_post_data.xml',
         'data/account_tax_data.xml',
@@ -25,5 +25,8 @@
         'data/l10n_pe.res.city.district.csv',
         'data/res_country_data.xml',
         'data/l10n_latam_identification_type_data.xml',
+    ],
+    'demo': [
+        'demo/demo_company.xml',
     ],
 }

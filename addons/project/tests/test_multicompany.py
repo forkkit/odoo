@@ -233,15 +233,6 @@ class TestMultiCompanyProject(TestMultiCompanyCommon):
 
             self.assertEqual(task.company_id, self.project_company_a.company_id, "The company of the task should be the one from its project.")
 
-            # create task in a different company than the project should raise
-            with self.allow_companies([self.company_a.id, self.company_b.id]):
-                with self.assertRaises(UserError):
-                    with Form(self.env['project.task'].with_context({'tracking_disable': True})) as task_form:
-                        task_form.name = 'Test Task with company inconsistency'
-                        task_form.project_id = self.project_company_a
-                        task_form.company_id = self.company_b
-                    task = task_form.save()
-
     def test_move_task(self):
         with self.sudo('employee-a'):
             with self.allow_companies([self.company_a.id, self.company_b.id]):
@@ -252,10 +243,10 @@ class TestMultiCompanyProject(TestMultiCompanyCommon):
                 self.assertEqual(task.company_id, self.company_b, "The company of the task should be the one from its project.")
 
                 with Form(self.task_1) as task_form:
-                    task_form.project_id = self.env['project.project']  # False is not accepted by the form
+                    task_form.project_id = self.project_company_a
                 task = task_form.save()
 
-                self.assertEqual(task.company_id, self.company_b, "Making a task orphan does not change its company.")
+                self.assertEqual(task.company_id, self.company_a, "Moving a task should change its company.")
 
     def test_create_subtask(self):
         with self.sudo('employee-a'):
@@ -281,11 +272,10 @@ class TestMultiCompanyProject(TestMultiCompanyCommon):
 
     def test_cross_subtask_project(self):
         # set up default subtask project
-        self.project_company_a.write({'subtask_project_id': self.project_company_b.id})
+        self.project_company_a.write({'allow_subtasks': True, 'subtask_project_id': self.project_company_b.id})
 
         with self.sudo('employee-a'):
             with self.allow_companies([self.company_a.id, self.company_b.id]):
-
                 with Form(self.env['project.task'].with_context({'tracking_disable': True})) as task_form:
                     task_form.name = 'Test Subtask in company B'
                     task_form.parent_id = self.task_1
@@ -294,6 +284,7 @@ class TestMultiCompanyProject(TestMultiCompanyCommon):
 
                 self.assertEqual(task.project_id, self.task_1.project_id.subtask_project_id, "The default project of a subtask should be the default subtask project of the project from the mother task")
                 self.assertEqual(task.company_id, task.project_id.subtask_project_id.company_id, "The company of the orphan subtask should be the one from its project.")
+                self.assertEqual(self.task_1.child_ids.ids, [task.id])
 
         with self.sudo('employee-a'):
             with self.assertRaises(AccessError):

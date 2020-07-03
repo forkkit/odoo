@@ -26,7 +26,7 @@ import werkzeug.utils
 import werkzeug.wrappers
 import werkzeug.wsgi
 from collections import OrderedDict, defaultdict, Counter
-from werkzeug.urls import url_decode, iri_to_uri
+from werkzeug.urls import url_encode, url_decode, iri_to_uri
 from lxml import etree
 import unicodedata
 
@@ -35,7 +35,7 @@ import odoo
 import odoo.modules.registry
 from odoo.api import call_kw, Environment
 from odoo.modules import get_module_path, get_resource_path
-from odoo.tools import image_process, topological_sort, html_escape, pycompat, ustr, apply_inheritance_specs
+from odoo.tools import image_process, topological_sort, html_escape, pycompat, ustr, apply_inheritance_specs, lazy_property
 from odoo.tools.mimetypes import guess_mimetype
 from odoo.tools.translate import _
 from odoo.tools.misc import str2bool, xlsxwriter, file_open
@@ -63,6 +63,37 @@ CONTENT_MAXAGE = http.STATIC_CACHE_LONG  # menus, translations, static qweb
 DBNAME_PATTERN = '^[a-zA-Z0-9][a-zA-Z0-9_.-]+$'
 
 COMMENT_PATTERN = r'Modified by [\s\w\-.]+ from [\s\w\-.]+'
+
+
+def none_values_filtered(func):
+    @functools.wraps(func)
+    def wrap(iterable):
+        return func(v for v in iterable if v is not None)
+    return wrap
+
+def allow_empty_iterable(func):
+    """
+    Some functions do not accept empty iterables (e.g. max, min with no default value)
+    This returns the function `func` such that it returns None if the iterable
+    is empty instead of raising a ValueError.
+    """
+    @functools.wraps(func)
+    def wrap(iterable):
+        iterator = iter(iterable)
+        try:
+            value = next(iterator)
+            return func(itertools.chain([value], iterator))
+        except StopIteration:
+            return None
+    return wrap
+
+OPERATOR_MAPPING = {
+    'max': none_values_filtered(allow_empty_iterable(max)),
+    'min': none_values_filtered(allow_empty_iterable(min)),
+    'sum': sum,
+    'bool_and': all,
+    'bool_or': any,
+}
 
 #----------------------------------------------------------
 # Odoo Web helpers
@@ -465,6 +496,9 @@ class HomeStaticTemplateHelpers(object):
         for template_tree in list(all_templates_tree):
             if self.NAME_TEMPLATE_DIRECTIVE in template_tree.attrib:
                 template_name = template_tree.attrib[self.NAME_TEMPLATE_DIRECTIVE]
+                dotted_names = template_name.split('.', 1)
+                if len(dotted_names) > 1 and dotted_names[0] == addon:
+                    template_name = dotted_names[1]
             else:
                 # self.template_dict[addon] grows after processing each template
                 template_name = 'anonymous_template_%s' % len(self.template_dict[addon])
@@ -478,19 +512,19 @@ class HomeStaticTemplateHelpers(object):
                 # After several performance tests, we found out that deepcopy is the most efficient
                 # solution in this case (compared with copy, xpath with '.' and stringifying).
                 parent_tree = copy.deepcopy(self.template_dict[parent_addon][parent_name])
-                parent_tag = parent_tree.tag
-                # replace temporarily the parent tag so it is never the target of the inheritance
-                parent_tree.tag = 't'
+
                 xpaths = list(template_tree)
                 if self.debug and inherit_mode == self.EXTENSION_MODE:
                     for xpath in xpaths:
                         xpath.insert(0, etree.Comment(" Modified by %s from %s " % (template_name, addon)))
+                elif inherit_mode == self.PRIMARY_MODE:
+                    parent_tree.tag = template_tree.tag
                 inherited_template = apply_inheritance_specs(parent_tree, xpaths)
-                inherited_template.tag = parent_tag
 
                 if inherit_mode == self.PRIMARY_MODE:  # New template_tree: A' = B(A)
-                    inherited_template.set(self.NAME_TEMPLATE_DIRECTIVE, template_name)
-                    inherited_template.set(self.STATIC_INHERIT_DIRECTIVE, template_tree.attrib[self.STATIC_INHERIT_DIRECTIVE])
+                    for attr_name, attr_val in template_tree.attrib.items():
+                        if attr_name not in ('t-inherit', 't-inherit-mode'):
+                            inherited_template.set(attr_name, attr_val)
                     if self.debug:
                         self._remove_inheritance_comments(inherited_template)
                     self.template_dict[addon][template_name] = inherited_template
@@ -584,17 +618,75 @@ class GroupsTreeNode:
     build a leaf. The entire tree is built by inserting all leaves.
     """
 
-    def __init__(self, model, fields, groupby, root=None):
+    def __init__(self, model, fields, groupby, groupby_type, root=None):
         self._model = model
-        self._fields = fields
+        self._export_field_names = fields  # exported field names (e.g. 'journal_id', 'account_id/name', ...)
         self._groupby = groupby
+        self._groupby_type = groupby_type
 
         self.count = 0  # Total number of records in the subtree
-        self.aggregated_values = Counter()  # Fields aggregated values {field_name: aggregated value}
         self.children = OrderedDict()
         self.data = []  # Only leaf nodes have data
+
         if root:
             self.insert_leaf(root)
+
+    def _get_aggregate(self, field_name, data, group_operator):
+        # When exporting one2many fields, multiple data lines might be exported for one record.
+        # Blank cells of additionnal lines are filled with an empty string. This could lead to '' being
+        # aggregated with an integer or float.
+        data = (value for value in data if value != '')
+
+        if group_operator == 'avg':
+            return self._get_avg_aggregate(field_name, data)
+
+        aggregate_func = OPERATOR_MAPPING.get(group_operator)
+        if not aggregate_func:
+            _logger.warning("Unsupported export of group_operator '%s' for field %s on model %s" % (group_operator, field_name, self._model._name))
+            return
+
+        if self.data:
+            return aggregate_func(data)
+        return aggregate_func((child.aggregated_values.get(field_name) for child in self.children.values()))
+
+    def _get_avg_aggregate(self, field_name, data):
+        aggregate_func = OPERATOR_MAPPING.get('sum')
+        if self.data:
+            return aggregate_func(data) / self.count
+        children_sums = (child.aggregated_values.get(field_name) * child.count for child in self.children.values())
+        return aggregate_func(children_sums) / self.count
+
+    def _get_aggregated_field_names(self):
+        """ Return field names of exported field having a group operator """
+        aggregated_field_names = []
+        for field_name in self._export_field_names:
+            if field_name == '.id':
+                field_name = 'id'
+            if '/' in field_name:
+                # Currently no support of aggregated value for nested record fields
+                # e.g. line_ids/analytic_line_ids/amount
+                continue
+            field = self._model._fields[field_name]
+            if field.group_operator:
+                aggregated_field_names.append(field_name)
+        return aggregated_field_names
+
+    # Lazy property to memoize aggregated values of children nodes to avoid useless recomputations
+    @lazy_property
+    def aggregated_values(self):
+
+        aggregated_values = {}
+
+        # Transpose the data matrix to group all values of each field in one iterable
+        field_values = zip(*self.data)
+        for field_name in self._export_field_names:
+            field_data = self.data and next(field_values) or []
+
+            if field_name in self._get_aggregated_field_names():
+                field = self._model._fields[field_name]
+                aggregated_values[field_name] = self._get_aggregate(field_name, field_data, field.group_operator)
+
+        return aggregated_values
 
     def child(self, key):
         """
@@ -605,7 +697,7 @@ class GroupsTreeNode:
         :return: the child node
         """
         if key not in self.children:
-            self.children[key] = GroupsTreeNode(self._model, self._fields, self._groupby)
+            self.children[key] = GroupsTreeNode(self._model, self._export_field_names, self._groupby, self._groupby_type)
         return self.children[key]
 
     def insert_leaf(self, group):
@@ -613,17 +705,9 @@ class GroupsTreeNode:
         Build a leaf from `group` and insert it in the tree.
         :param group: dict as returned by `read_group(lazy=False)`
         """
-        # Pop every known key in the group dict (__domain, __count and grouped values)
-        # Remaining keys are aggregated fields.
-        leaf_path = [group.pop(groupby_field) for groupby_field in self._groupby]
+        leaf_path = [group.get(groupby_field) for groupby_field in self._groupby]
         domain = group.pop('__domain')
         count = group.pop('__count')
-        aggregated_values = group
-
-        keys = list(aggregated_values)
-        for key in keys:
-            if not isinstance(aggregated_values[key], (int, float)):
-                del aggregated_values[key]
 
         records = self._model.search(domain, offset=0, limit=False, order=False)
 
@@ -636,9 +720,8 @@ class GroupsTreeNode:
             node = node.child(node_key)
             # Update count value and aggregated value.
             node.count += count
-            node.aggregated_values += Counter(aggregated_values)
 
-        node.data = records.export_data(self._fields).get('datas',[])
+        node.data = records.export_data(self._export_field_names).get('datas',[])
 
 
 class ExportXlsxWriter:
@@ -690,11 +773,11 @@ class ExportXlsxWriter:
                 # fails note that you can't export
                 cell_value = pycompat.to_text(cell_value)
             except UnicodeDecodeError:
-                raise UserError(_("Binary fields can not be exported to Excel unless their content is base64-encoded. That does not seem to be the case for %s.") % self.field_names[column])
+                raise UserError(_("Binary fields can not be exported to Excel unless their content is base64-encoded. That does not seem to be the case for %s.", self.field_names)[column])
 
         if isinstance(cell_value, str):
             if len(cell_value) > self.worksheet.xls_strmax:
-                cell_value = _("The content of this cell is too long for an XLSX file (more than %s characters). Please use the CSV format for this export.") % self.worksheet.xls_strmax
+                cell_value = _("The content of this cell is too long for an XLSX file (more than %s characters). Please use the CSV format for this export.", self.worksheet.xls_strmax)
             else:
                 cell_value = cell_value.replace("\r", " ")
         elif isinstance(cell_value, datetime.datetime):
@@ -710,7 +793,9 @@ class GroupExportXlsxWriter(ExportXlsxWriter):
         self.fields = fields
 
     def write_group(self, row, column, group_name, group, group_depth=0):
-        group_name = group_name[1] if isinstance(group_name, tuple) and len(group_name) > 1 else group_name or _("Undefined")
+        group_name = group_name[1] if isinstance(group_name, tuple) and len(group_name) > 1 else group_name
+        if group._groupby_type[group_depth] != 'boolean':
+            group_name = group_name or _("Undefined")
         row, column = self._write_group_header(row, column, group_name, group, group_depth)
 
         # Recursively write sub-groups
@@ -734,7 +819,8 @@ class GroupExportXlsxWriter(ExportXlsxWriter):
         self.write(row, column, label, self.header_bold_style)
         for field in self.fields[1:]: # No aggregates allowed in the first column because of the group title
             column += 1
-            self.write(row, column, aggregates.get(field['name'], ''), self.header_bold_style)
+            aggregated_value = aggregates.get(field['name'])
+            self.write(row, column, str(aggregated_value if aggregated_value is not None else ''), self.header_bold_style)
         return row + 1, 0
 
 
@@ -782,15 +868,10 @@ class Home(http.Controller):
         ])
         return response
 
-    @http.route('/web/dbredirect', type='http', auth="none")
-    def web_db_redirect(self, redirect='/', **kw):
-        ensure_db()
-        return werkzeug.utils.redirect(redirect, 303)
-
     def _login_redirect(self, uid, redirect=None):
         return redirect if redirect else '/web'
 
-    @http.route('/web/login', type='http', auth="none", sitemap=False)
+    @http.route('/web/login', type='http', auth="none")
     def web_login(self, redirect=None, **kw):
         ensure_db()
         request.params['login_success'] = False
@@ -820,7 +901,7 @@ class Home(http.Controller):
                     values['error'] = e.args[0]
         else:
             if 'error' in request.params and request.params.get('error') == 'access':
-                values['error'] = _('Only employee can access this database. Please contact the administrator.')
+                values['error'] = _('Only employees can access this database. Please contact the administrator.')
 
         if 'login' not in values and request.session.get('auth_login'):
             values['login'] = request.session.get('auth_login')
@@ -1004,6 +1085,9 @@ class Database(http.Controller):
 
     @http.route('/web/database/create', type='http', auth="none", methods=['POST'], csrf=False)
     def create(self, master_pwd, name, lang, password, **post):
+        insecure = odoo.tools.config.verify_admin_password('admin')
+        if insecure and master_pwd:
+            dispatch_rpc('db', 'change_admin_password', ["admin", master_pwd])
         try:
             if not re.match(DBNAME_PATTERN, name):
                 raise Exception(_('Invalid database name. Only alphanumerical characters, underscore, hyphen and dot are allowed.'))
@@ -1018,10 +1102,14 @@ class Database(http.Controller):
 
     @http.route('/web/database/duplicate', type='http', auth="none", methods=['POST'], csrf=False)
     def duplicate(self, master_pwd, name, new_name):
+        insecure = odoo.tools.config.verify_admin_password('admin')
+        if insecure and master_pwd:
+            dispatch_rpc('db', 'change_admin_password', ["admin", master_pwd])
         try:
             if not re.match(DBNAME_PATTERN, new_name):
                 raise Exception(_('Invalid database name. Only alphanumerical characters, underscore, hyphen and dot are allowed.'))
             dispatch_rpc('db', 'duplicate_database', [master_pwd, name, new_name])
+            request._cr = None  # duplicating a database leads to an unusable cursor
             return http.local_redirect('/web/database/manager')
         except Exception as e:
             error = "Database duplication error: %s" % (str(e) or repr(e))
@@ -1029,6 +1117,9 @@ class Database(http.Controller):
 
     @http.route('/web/database/drop', type='http', auth="none", methods=['POST'], csrf=False)
     def drop(self, master_pwd, name):
+        insecure = odoo.tools.config.verify_admin_password('admin')
+        if insecure and master_pwd:
+            dispatch_rpc('db', 'change_admin_password', ["admin", master_pwd])
         try:
             dispatch_rpc('db','drop', [master_pwd, name])
             request._cr = None  # dropping a database leads to an unusable cursor
@@ -1039,6 +1130,9 @@ class Database(http.Controller):
 
     @http.route('/web/database/backup', type='http', auth="none", methods=['POST'], csrf=False)
     def backup(self, master_pwd, name, backup_format = 'zip'):
+        insecure = odoo.tools.config.verify_admin_password('admin')
+        if insecure and master_pwd:
+            dispatch_rpc('db', 'change_admin_password', ["admin", master_pwd])
         try:
             odoo.service.db.check_super(master_pwd)
             ts = datetime.datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
@@ -1057,6 +1151,9 @@ class Database(http.Controller):
 
     @http.route('/web/database/restore', type='http', auth="none", methods=['POST'], csrf=False)
     def restore(self, master_pwd, backup_file, name, copy=False):
+        insecure = odoo.tools.config.verify_admin_password('admin')
+        if insecure and master_pwd:
+            dispatch_rpc('db', 'change_admin_password', ["admin", master_pwd])
         try:
             data_file = None
             db.check_super(master_pwd)
@@ -1116,12 +1213,12 @@ class Session(http.Controller):
         try:
             if request.env['res.users'].change_password(old_password, new_password):
                 return {'new_password':new_password}
-        except UserError as e:
-            msg = e.name
         except AccessDenied as e:
             msg = e.args[0]
             if msg == AccessDenied().args[0]:
                 msg = _('The old password you provided is incorrect, your password was not changed.')
+        except UserError as e:
+            msg = e.args[0]
         return {'title': _('Change Password'), 'error': msg}
 
     @http.route('/web/session/get_lang_list', type='json', auth="none")
@@ -1177,7 +1274,7 @@ class Session(http.Controller):
             'state': json.dumps({'d': request.db, 'u': ICP.get_param('web.base.url')}),
             'scope': 'userinfo',
         }
-        return 'https://accounts.odoo.com/oauth2/auth?' + werkzeug.url_encode(params)
+        return 'https://accounts.odoo.com/oauth2/auth?' + url_encode(params)
 
     @http.route('/web/session/destroy', type='json', auth="user")
     def destroy(self):
@@ -1284,8 +1381,10 @@ class View(http.Controller):
 
 class Binary(http.Controller):
 
-    def placeholder(self, image='placeholder.png'):
-        with tools.file_open(get_resource_path('web', 'static/src/img', image), 'rb') as fd:
+    @staticmethod
+    def placeholder(image='placeholder.png'):
+        image_path = image.lstrip('/').split('/') if '/' in image else ['web', 'static', 'src', 'img', image]
+        with tools.file_open(get_resource_path(*image_path), 'rb') as fd:
             return fd.read()
 
     @http.route(['/web/content',
@@ -1355,16 +1454,39 @@ class Binary(http.Controller):
     def _content_image(self, xmlid=None, model='ir.attachment', id=None, field='datas',
                        filename_field='name', unique=None, filename=None, mimetype=None,
                        download=None, width=0, height=0, crop=False, quality=0, access_token=None,
-                       placeholder='placeholder.png', **kwargs):
+                       placeholder=None, **kwargs):
         status, headers, image_base64 = request.env['ir.http'].binary_content(
             xmlid=xmlid, model=model, id=id, field=field, unique=unique, filename=filename,
             filename_field=filename_field, download=download, mimetype=mimetype,
             default_mimetype='image/png', access_token=access_token)
 
+        return Binary._content_image_get_response(
+            status, headers, image_base64, model=model, id=id, field=field, download=download,
+            width=width, height=height, crop=crop, quality=quality,
+            placeholder=placeholder)
+
+    @staticmethod
+    def _content_image_get_response(
+            status, headers, image_base64, model='ir.attachment', id=None,
+            field='datas', download=None, width=0, height=0, crop=False,
+            quality=0, placeholder='placeholder.png'):
         if status in [301, 304] or (status != 200 and download):
             return request.env['ir.http']._response_by_status(status, headers, image_base64)
         if not image_base64:
-            image_base64 = base64.b64encode(self.placeholder(image=placeholder))
+            if placeholder is None and model in request.env:
+                # Try to browse the record in case a specific placeholder
+                # is supposed to be used. (eg: Unassigned users on a task)
+                record = request.env[model].browse(int(id)) if id else request.env[model]
+                placeholder_filename = record._get_placeholder_filename(field=field)
+                placeholder_content = Binary.placeholder(image=placeholder_filename)
+            else:
+                placeholder_content = Binary.placeholder()
+            # Since we set a placeholder for any missing image, the status must be 200. In case one
+            # wants to configure a specific 404 page (e.g. though nginx), a 404 status will cause
+            # troubles.
+            status = 200
+            image_base64 = base64.b64encode(placeholder_content)
+
             if not (width or height):
                 width, height = odoo.tools.image_guess_size_from_field_name(field)
 
@@ -1388,7 +1510,7 @@ class Binary(http.Controller):
 
     @http.route('/web/binary/upload', type='http', auth="user")
     @serialize_exception
-    def upload(self, callback, ufile):
+    def upload(self, ufile, callback=None):
         # TODO: might be useful to have a configuration flag for max-length file uploads
         out = """<script language="javascript" type="text/javascript">
                     var win = window.top.window;
@@ -1400,11 +1522,11 @@ class Binary(http.Controller):
                     ufile.content_type, base64.b64encode(data)]
         except Exception as e:
             args = [False, str(e)]
-        return out % (json.dumps(callback), json.dumps(args))
+        return out % (json.dumps(callback), json.dumps(args)) if callback else json.dumps(args)
 
     @http.route('/web/binary/upload_attachment', type='http', auth="user")
     @serialize_exception
-    def upload_attachment(self, callback, model, id, ufile):
+    def upload_attachment(self, model, id, ufile, callback=None):
         files = request.httprequest.files.getlist('ufile')
         Model = request.env['ir.attachment']
         out = """<script language="javascript" type="text/javascript">
@@ -1438,7 +1560,7 @@ class Binary(http.Controller):
                     'id': attachment.id,
                     'size': attachment.file_size
                 })
-        return out % (json.dumps(callback), json.dumps(args))
+        return out % (json.dumps(callback), json.dumps(args)) if callback else json.dumps(args)
 
     @http.route([
         '/web/binary/company_logo',
@@ -1592,7 +1714,8 @@ class Export(http.Controller):
         fields = self.fields_get(model)
         if import_compat:
             if parent_field_type in ['many2one', 'many2many']:
-                fields = {'id': fields['id'], 'name': fields['name']}
+                rec_name = request.env[model]._rec_name
+                fields = {'id': fields['id'], rec_name: fields[rec_name]}
         else:
             fields['.id'] = {**fields['id']}
 
@@ -1749,12 +1872,13 @@ class ExportFormat(object):
         Model = request.env[model].with_context(**params.get('context', {}))
         groupby = params.get('groupby')
         if not import_compat and groupby:
+            groupby_type = [Model._fields[x.split(':')[0]].type for x in groupby]
             domain = [('id', 'in', ids)] if ids else domain
-            groups_data = Model.read_group(domain, field_names, groupby, lazy=False)
+            groups_data = Model.read_group(domain, [x if x != '.id' else 'id' for x in field_names], groupby, lazy=False)
 
             # read_group(lazy=False) returns a dict only for final groups (with actual data),
             # not for intermediary groups. The full group tree must be re-constructed.
-            tree = GroupsTreeNode(Model, field_names, groupby)
+            tree = GroupsTreeNode(Model, field_names, groupby, groupby_type)
             for leaf in groups_data:
                 tree.insert_leaf(leaf)
 
@@ -1835,6 +1959,8 @@ class ExcelExport(ExportFormat, http.Controller):
         with ExportXlsxWriter(fields, len(rows)) as xlsx_writer:
             for row_index, row in enumerate(rows):
                 for cell_index, cell_value in enumerate(row):
+                    if isinstance(cell_value, (list, tuple)):
+                        cell_value = pycompat.to_text(cell_value)
                     xlsx_writer.write_cell(row_index + 1, cell_index, cell_value)
 
         return xlsx_writer.value
@@ -1865,14 +1991,14 @@ class ReportController(http.Controller):
                 del data['context']['lang']
             context.update(data['context'])
         if converter == 'html':
-            html = report.with_context(context).render_qweb_html(docids, data=data)[0]
+            html = report.with_context(context)._render_qweb_html(docids, data=data)[0]
             return request.make_response(html)
         elif converter == 'pdf':
-            pdf = report.with_context(context).render_qweb_pdf(docids, data=data)[0]
+            pdf = report.with_context(context)._render_qweb_pdf(docids, data=data)[0]
             pdfhttpheaders = [('Content-Type', 'application/pdf'), ('Content-Length', len(pdf))]
             return request.make_response(pdf, headers=pdfhttpheaders)
         elif converter == 'text':
-            text = report.with_context(context).render_qweb_text(docids, data=data)[0]
+            text = report.with_context(context)._render_qweb_text(docids, data=data)[0]
             texthttpheaders = [('Content-Type', 'text/plain'), ('Content-Length', len(text))]
             return request.make_response(text, headers=texthttpheaders)
         else:
@@ -1882,7 +2008,7 @@ class ReportController(http.Controller):
     # Misc. route utils
     #------------------------------------------------------
     @http.route(['/report/barcode', '/report/barcode/<type>/<path:value>'], type='http', auth="public")
-    def report_barcode(self, type, value, width=600, height=100, humanreadable=0, quiet=1):
+    def report_barcode(self, type, value, width=600, height=100, humanreadable=0, quiet=1, mask=None):
         """Contoller able to render barcode images thanks to reportlab.
         Samples:
             <img t-att-src="'/report/barcode/QR/%s' % o.name"/>
@@ -1896,10 +2022,13 @@ class ReportController(http.Controller):
         at the bottom of the output image
         :param quiet: Accepted values: 0 (default) or 1. 1 will display white
         margins on left and right.
+        :param mask: The mask code to be used when rendering this QR-code.
+                     Masks allow adding elements on top of the generated image,
+                     such as the Swiss cross in the center of QR-bill codes.
         """
         try:
             barcode = request.env['ir.actions.report'].barcode(type, value, width=width,
-                height=height, humanreadable=humanreadable, quiet=quiet)
+                height=height, humanreadable=humanreadable, quiet=quiet, mask=mask)
         except (ValueError, AttributeError):
             raise werkzeug.exceptions.HTTPException(description='Cannot convert into barcode.')
 

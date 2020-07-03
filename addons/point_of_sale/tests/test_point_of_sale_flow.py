@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
+
 import time
 
 import odoo
-from odoo import fields
+from odoo import fields, tools
 from odoo.tools import float_compare, mute_logger, test_reports
 from odoo.tests.common import Form
 from odoo.addons.point_of_sale.tests.common import TestPointOfSaleCommon
@@ -13,7 +15,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
 
 
     def test_order_refund(self):
-        self.pos_config.open_session_cb()
+        self.pos_config.open_session_cb(check_coa=False)
         current_session = self.pos_config.current_session_id
         # I create a new PoS order with 2 lines
         order = self.PosOrder.create({
@@ -76,6 +78,116 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
         current_session.action_pos_session_closing_control()
         self.assertEqual(current_session.state, 'closed', msg='State of current session should be closed.')
 
+    def test_order_refund_lots(self):
+        # open pos session
+        self.pos_config.open_session_cb()
+        current_session = self.pos_config.current_session_id
+
+        # set up product iwith SN tracing and create two lots (1001, 1002)
+        self.stock_location = self.env.ref('stock.stock_location_stock')
+        self.product2 = self.env['product.product'].create({
+            'name': 'Product A',
+            'type': 'product',
+            'tracking': 'serial',
+            'categ_id': self.env.ref('product.product_category_all').id,
+        })
+
+        inventory = self.env['stock.inventory'].create({
+            'name': 'add product2',
+            'location_ids': [(4, self.stock_location.id)],
+            'product_ids': [(4, self.product2.id)],
+        })
+        inventory.action_start()
+
+        lot1 = self.env['stock.production.lot'].create({
+            'name': '1001',
+            'product_id': self.product2.id,
+            'company_id': self.env.company.id,
+        })
+        lot2 = self.env['stock.production.lot'].create({
+            'name': '1002',
+            'product_id': self.product2.id,
+            'company_id': self.env.company.id,
+        })
+
+        self.env['stock.inventory.line'].create([
+            {
+            'inventory_id': inventory.id,
+            'location_id': self.stock_location.id,
+            'product_id': self.product2.id,
+            'prod_lot_id': lot1.id,
+            'product_qty': 1
+            },
+            {
+            'inventory_id': inventory.id,
+            'location_id': self.stock_location.id,
+            'product_id': self.product2.id,
+            'prod_lot_id': lot2.id,
+            'product_qty': 1
+            },
+        ])
+
+        inventory.action_validate()
+
+        # create pos order with the two SN created before
+
+        order = self.PosOrder.create({
+            'company_id': self.company_id,
+            'session_id': current_session.id,
+            'partner_id': self.partner1.id,
+            'lines': [(0, 0, {
+                'name': "OL/0001",
+                'id': 1,
+                'product_id': self.product2.id,
+                'price_unit': 6,
+                'discount': 0,
+                'qty': 2,
+                'tax_ids': [[6, False, []]],
+                'price_subtotal': 12,
+                'price_subtotal_incl': 12,
+                'pack_lot_ids': [
+                    [0, 0, {'lot_name': '1001'}],
+                    [0, 0, {'lot_name': '1002'}],
+                ]
+            })],
+            'pricelist_id': 1,
+            'amount_paid': 12.0,
+            'amount_total': 12.0,
+            'amount_tax': 0.0,
+            'amount_return': 0.0,
+            'to_invoice': False,
+            })
+
+        payment_context = {"active_ids": order.ids, "active_id": order.id}
+        order_payment = self.PosMakePayment.with_context(**payment_context).create({
+            'amount': order.amount_total,
+            'payment_method_id': self.cash_payment_method.id
+        })
+        order_payment.with_context(**payment_context).check()
+
+        # I create a refund
+        refund_action = order.refund()
+        refund = self.PosOrder.browse(refund_action['res_id'])
+
+        order_lot_id = [lot_id.lot_name for lot_id in order.lines.pack_lot_ids]
+        refund_lot_id = [lot_id.lot_name for lot_id in refund.lines.pack_lot_ids]
+        self.assertEqual(
+            order_lot_id,
+            refund_lot_id,
+            "In the refund we should find the same lot as in the original order")
+
+        payment_context = {"active_ids": refund.ids, "active_id": refund.id}
+        refund_payment = self.PosMakePayment.with_context(**payment_context).create({
+            'amount': refund.amount_total,
+            'payment_method_id': self.cash_payment_method.id,
+        })
+
+        # I click on the validate button to register the payment.
+        refund_payment.with_context(**payment_context).check()
+
+        self.assertEqual(refund.state, 'paid', "The refund is not marked as paid")
+        current_session.action_pos_session_closing_control()
+
     def test_order_to_picking(self):
         """
             In order to test the Point of Sale in module, I will do three orders from the sale to the payment,
@@ -94,7 +206,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
             return untax, sum(tax.get('amount', 0.0) for tax in res['taxes'])
 
         # I click on create a new session button
-        self.pos_config.open_session_cb()
+        self.pos_config.open_session_cb(check_coa=False)
         current_session = self.pos_config.current_session_id
 
         # I create a PoS order with 2 units of PCSC234 at 450 EUR
@@ -153,12 +265,12 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
         # I test that the pickings are created as expected during payment
         # One picking attached and having all the positive move lines in the correct state
         self.assertEqual(
-            self.pos_order_pos1.picking_id.state,
+            self.pos_order_pos1.picking_ids[0].state,
             'done',
             'Picking should be in done state.'
         )
         self.assertEqual(
-            self.pos_order_pos1.picking_id.move_lines.mapped('state'),
+            self.pos_order_pos1.picking_ids[0].move_lines.mapped('state'),
             ['done', 'done'],
             'Move Lines should be in done state.'
         )
@@ -217,14 +329,13 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
 
         # I test that the pickings are created as expected
         # One picking attached and having all the positive move lines in the correct state
-        self.pos_order_pos2.create_picking()
         self.assertEqual(
-            self.pos_order_pos2.picking_id.state,
+            self.pos_order_pos2.picking_ids[0].state,
             'done',
             'Picking should be in done state.'
         )
         self.assertEqual(
-            self.pos_order_pos2.picking_id.move_lines.mapped('state'),
+            self.pos_order_pos2.picking_ids[0].move_lines.mapped('state'),
             ['done', 'done'],
             'Move Lines should be in done state.'
         )
@@ -283,12 +394,12 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
         # I test that the pickings are created as expected
         # One picking attached and having all the positive move lines in the correct state
         self.assertEqual(
-            self.pos_order_pos3.picking_id.state,
+            self.pos_order_pos3.picking_ids[0].state,
             'done',
             'Picking should be in done state.'
         )
         self.assertEqual(
-            self.pos_order_pos3.picking_id.move_lines.mapped('state'),
+            self.pos_order_pos3.picking_ids[0].move_lines.mapped('state'),
             ['done'],
             'Move Lines should be in done state.'
         )
@@ -305,7 +416,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
             untax = res['total_excluded']
             return untax, sum(tax.get('amount', 0.0) for tax in res['taxes'])
 
-        self.pos_config.open_session_cb()
+        self.pos_config.open_session_cb(check_coa=False)
         current_session = self.pos_config.current_session_id
 
         untax1, atax1 = compute_tax(self.product3, 450*0.95, 2)
@@ -361,6 +472,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
 
         # I test that the total of the attached invoice is correct
         invoice = self.env['account.move'].browse(res['res_id'])
+        invoice.post()
         self.assertAlmostEqual(
             invoice.amount_total, self.pos_order_pos1.amount_total, places=2, msg="Invoice not correct")
 
@@ -394,7 +506,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
             'amount': 1000,
             'partner_id': self.partner4.id,
             'statement_id': account_statement.id,
-            'name': 'EXT001'
+            'payment_ref': 'EXT001'
         })
         # I modify the bank statement and set the Closing Balance.
         account_statement.write({
@@ -409,11 +521,9 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
             'debit': 0.0,
         }]
 
-        self.env['account.reconciliation.widget'].process_bank_statement_line(account_statement_line.ids, [{'new_aml_dicts': new_aml_dicts}])
-
         # I confirm the bank statement using Confirm button
 
-        self.AccountBankStatement.button_confirm_bank()
+        self.AccountBankStatement.button_validate()
 
     def test_create_from_ui(self):
         """
@@ -429,7 +539,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
             return untax, sum(tax.get('amount', 0.0) for tax in res['taxes'])
 
         # I click on create a new session button
-        self.pos_config.open_session_cb()
+        self.pos_config.open_session_cb(check_coa=False)
 
         current_session = self.pos_config.current_session_id
         num_starting_orders = len(current_session.order_ids)
@@ -609,7 +719,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
         })
 
         # I click on create a new session button
-        eur_config.open_session_cb()
+        eur_config.open_session_cb(check_coa=False)
         current_session = eur_config.current_session_id
 
         # I create a PoS order with 2 units of PCSC234 at 450 EUR (Tax Incl)
@@ -708,8 +818,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
             self.assertAlmostEqual(a, b)
 
     def test_order_to_invoice_no_tax(self):
-
-        self.pos_config.open_session_cb()
+        self.pos_config.open_session_cb(check_coa=False)
         current_session = self.pos_config.current_session_id
 
         # I create a new PoS order with 2 units of PC1 at 450 EUR (Tax Incl) and 3 units of PCSC349 at 300 EUR. (Tax Excl)
@@ -761,6 +870,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
 
         # I test that the total of the attached invoice is correct
         invoice = self.env['account.move'].browse(res['res_id'])
+        invoice.post()
         self.assertAlmostEqual(
             invoice.amount_total, self.pos_order_pos1.amount_total, places=2, msg="Invoice not correct")
 

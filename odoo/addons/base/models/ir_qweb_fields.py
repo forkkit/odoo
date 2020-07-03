@@ -3,13 +3,14 @@ import base64
 import re
 from collections import OrderedDict
 from io import BytesIO
-from odoo import api, fields, models, _
+from odoo import api, fields, models, _, _lt
 from PIL import Image
 import babel
+import babel.dates
 from lxml import etree
 import math
 
-from odoo.tools import html_escape as escape, posix_to_ldml, safe_eval, float_utils, format_date, format_duration, pycompat
+from odoo.tools import html_escape as escape, posix_to_ldml, float_utils, format_date, format_duration, pycompat
 from odoo.tools.misc import get_lang
 
 import logging
@@ -464,13 +465,13 @@ class MonetaryConverter(models.AbstractModel):
 
 
 TIMEDELTA_UNITS = (
-    ('year',   3600 * 24 * 365),
-    ('month',  3600 * 24 * 30),
-    ('week',   3600 * 24 * 7),
-    ('day',    3600 * 24),
-    ('hour',   3600),
-    ('minute', 60),
-    ('second', 1)
+    ('year',   _lt('year'),   3600 * 24 * 365),
+    ('month',  _lt('month'),  3600 * 24 * 30),
+    ('week',   _lt('week'),   3600 * 24 * 7),
+    ('day',    _lt('day'),    3600 * 24),
+    ('hour',   _lt('hour'),   3600),
+    ('minute', _lt('minute'), 60),
+    ('second', _lt('second'), 1)
 )
 
 
@@ -512,7 +513,7 @@ class DurationConverter(models.AbstractModel):
     @api.model
     def get_available_options(self):
         options = super(DurationConverter, self).get_available_options()
-        unit = [[u[0], _(u[0])] for u in TIMEDELTA_UNITS]
+        unit = [(value, str(label)) for value, label, ratio in TIMEDELTA_UNITS]
         options.update(
             digital=dict(type="boolean", string=_('Digital formatting')),
             unit=dict(type="selection", params=unit, string=_('Date unit'), description=_('Date unit used for comparison and formatting'), default_value='second', required=True),
@@ -522,7 +523,7 @@ class DurationConverter(models.AbstractModel):
 
     @api.model
     def value_to_html(self, value, options):
-        units = dict(TIMEDELTA_UNITS)
+        units = {unit: duration for unit, label, duration in TIMEDELTA_UNITS}
 
         locale = babel.Locale.parse(self.user_lang().code)
         factor = units[options.get('unit', 'second')]
@@ -536,7 +537,7 @@ class DurationConverter(models.AbstractModel):
         sections = []
 
         if options.get('digital'):
-            for unit, secs_per_unit in TIMEDELTA_UNITS:
+            for unit, label, secs_per_unit in TIMEDELTA_UNITS:
                 if secs_per_unit > 3600:
                     continue
                 v, r = divmod(r, secs_per_unit)
@@ -550,7 +551,7 @@ class DurationConverter(models.AbstractModel):
         if value < 0:
             r = -r
             sections.append(u'-')
-        for unit, secs_per_unit in TIMEDELTA_UNITS:
+        for unit, label, secs_per_unit in TIMEDELTA_UNITS:
             v, r = divmod(r, secs_per_unit)
             if not v:
                 continue
@@ -632,9 +633,22 @@ class Contact(models.AbstractModel):
     @api.model
     def get_available_options(self):
         options = super(Contact, self).get_available_options()
+        contact_fields = [
+            {'field_name': 'name', 'label': _('Name'), 'default': True},
+            {'field_name': 'address', 'label': _('Address'), 'default': True},
+            {'field_name': 'phone', 'label': _('Phone'), 'default': True},
+            {'field_name': 'mobile', 'label': _('Mobile'), 'default': True},
+            {'field_name': 'email', 'label': _('Email'), 'default': True},
+            {'field_name': 'vat', 'label': _('VAT')},
+        ]
+        separator_params = dict(
+            type='selection',
+            selection=[[" ", _("Space")], [",", _("Comma")], ["-", _("Dash")], ["|", _("Vertical bar")], ["/", _("Slash")]],
+            placeholder=_('Linebreak'),
+        )
         options.update(
-            fields=dict(type='array', params=dict(type='selection', params=["name", "address", "city", "country_id", "phone", "mobile", "email", "fax", "karma", "website"]), string=_('Displayed fields'), description=_('List of contact fields to display in the widget'), default_value=["name", "address", "phone", "mobile", "email"]),
-            separator=dict(type='string', string=_('Address separator'), description=_('Separator use to split the address from the display_name.'), default_value="\\n"),
+            fields=dict(type='array', params=dict(type='selection', params=contact_fields), string=_('Displayed fields'), description=_('List of contact fields to display in the widget'), default_value=[param.get('field_name') for param in contact_fields if param.get('default')]),
+            separator=dict(type='selection', params=separator_params, string=_('Address separator'), description=_('Separator use to split the address from the display_name.'), default_value=False),
             no_marker=dict(type='boolean', string=_('Hide badges'), description=_("Don't display the font awesome marker")),
             no_tag_br=dict(type='boolean', string=_('Use comma'), description=_("Use comma instead of the <br> tag to display the address")),
             phone_icons=dict(type='boolean', string=_('Display phone icons'), description=_("Display the phone icons even if no_marker is True")),
@@ -661,11 +675,13 @@ class Contact(models.AbstractModel):
             'country_id': value.country_id.display_name,
             'website': value.website,
             'email': value.email,
+            'vat': value.vat,
+            'vat_label': value.country_id.vat_label or _('VAT'),
             'fields': opf,
             'object': value,
             'options': options
         }
-        return self.env['ir.qweb'].render('base.contact', val, **options.get('template_options', dict()))
+        return self.env['ir.qweb']._render('base.contact', val, **options.get('template_options', dict()))
 
 
 class QwebView(models.AbstractModel):
@@ -684,4 +700,4 @@ class QwebView(models.AbstractModel):
             _logger.warning("%s.%s must be a 'ir.ui.view' model." % (record, field_name))
             return None
 
-        return pycompat.to_text(view.render(options.get('values', {}), engine='ir.qweb'))
+        return pycompat.to_text(view._render(options.get('values', {}), engine='ir.qweb'))

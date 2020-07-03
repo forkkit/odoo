@@ -14,10 +14,10 @@ from functools import partial
 
 import odoo
 from odoo import api, models
-from odoo import SUPERUSER_ID
+from odoo import registry, SUPERUSER_ID
 from odoo.http import request
 from odoo.tools.safe_eval import safe_eval
-from odoo.osv.expression import FALSE_DOMAIN, OR
+from odoo.osv.expression import FALSE_DOMAIN
 
 from odoo.addons.http_routing.models.ir_http import ModelConverter, _guess_mimetype
 from odoo.addons.portal.controllers.portal import _build_url_w_params
@@ -132,8 +132,8 @@ class Http(models.AbstractModel):
         if not request.session.uid:
             env = api.Environment(request.cr, SUPERUSER_ID, request.context)
             website = env['website'].get_current_website()
-            if website and website.user_id:
-                request.uid = website.user_id.id
+            request.uid = website and website._get_cached('user_id')
+
         if not request.uid:
             super(Http, cls)._auth_method_public()
 
@@ -163,7 +163,11 @@ class Http(models.AbstractModel):
         """
         is_rerouting = hasattr(request, 'routing_iteration')
 
-        request.website_routing = request.env['website'].get_current_website().id
+        if request.session.db:
+            reg = registry(request.session.db)
+            with reg.cursor() as cr:
+                env = api.Environment(cr, SUPERUSER_ID, {})
+                request.website_routing = env['website'].get_current_website().id
 
         response = super(Http, cls)._dispatch()
 
@@ -193,7 +197,13 @@ class Http(models.AbstractModel):
         context['website_id'] = request.website.id
         # This is mainly to avoid access errors in website controllers where there is no
         # context (eg: /shop), and it's not going to propagate to the global context of the tab
-        context['allowed_company_ids'] = [request.website.company_id.id]
+        # If the company of the website is not in the allowed companies of the user, set the main
+        # company of the user.
+        website_company_id = request.website._get_cached('company_id')
+        if website_company_id in request.env.user.company_ids.ids:
+            context['allowed_company_ids'] = [website_company_id]
+        else:
+            context['allowed_company_ids'] = request.env.user.company_id.ids
 
         # modify bound context
         request.context = dict(request.context, **context)
@@ -204,15 +214,23 @@ class Http(models.AbstractModel):
             request.website = request.website.with_context(request.context)
 
     @classmethod
+    def _get_frontend_langs(cls):
+        if get_request_website():
+            return [code for code, _, _ in request.env['res.lang'].get_available()]
+        else:
+            return super()._get_frontend_langs()
+
+    @classmethod
     def _get_default_lang(cls):
         if getattr(request, 'website', False):
-            return request.website.default_lang_id
+            return request.env['res.lang'].browse(request.website._get_cached('default_lang_id'))
         return super(Http, cls)._get_default_lang()
 
     @classmethod
-    def _get_translation_frontend_modules_domain(cls):
-        domain = super(Http, cls)._get_translation_frontend_modules_domain()
-        return OR([domain, [('name', 'ilike', 'website')]])
+    def _get_translation_frontend_modules_name(cls):
+        mods = super(Http, cls)._get_translation_frontend_modules_name()
+        installed = request.registry._init_modules | set(odoo.conf.server_wide_modules)
+        return mods + [mod for mod in installed if mod.startswith('website')]
 
     @classmethod
     def _serve_page(cls):
@@ -220,22 +238,18 @@ class Http(models.AbstractModel):
         page_domain = [('url', '=', req_page)] + request.website.website_domain()
 
         published_domain = page_domain
-        # need to bypass website_published, to apply is_most_specific
-        # filter later if not publisher
-        pages = request.env['website.page'].sudo().search(published_domain, order='website_id')
-        pages = pages.filtered(pages._is_most_specific_page)
-
-        if not request.website.is_publisher():
-            pages = pages.filtered('is_visible')
-
-        mypage = pages[0] if pages else False
-        _, ext = os.path.splitext(req_page)
-        if mypage:
-            return request.render(mypage.get_view_identifier(), {
-                # 'path': req_page[1:],
+        # specific page first
+        page = request.env['website.page'].sudo().search(published_domain, order='website_id asc', limit=1)
+        if page:
+            # prefetch all menus (it will prefetch website.page too)
+            request.website.menu_id
+        if page and (request.website.is_publisher() or page.is_visible):
+            _, ext = os.path.splitext(req_page)
+            return request.render(page.view_id.id, {
                 'deletable': True,
-                'main_object': mypage,
+                'main_object': page,
             }, mimetype=_guess_mimetype(ext))
+        return False
 
     @classmethod
     def _serve_redirect(cls):
@@ -253,7 +267,8 @@ class Http(models.AbstractModel):
         parent = super(Http, cls)._serve_fallback(exception)
         if parent:  # attachment
             return parent
-
+        if not request.is_frontend:
+            return False
         website_page = cls._serve_page()
         if website_page:
             return website_page
@@ -270,6 +285,10 @@ class Http(models.AbstractModel):
         if request.website.is_publisher() and isinstance(exception, werkzeug.exceptions.NotFound):
             code = 'page_404'
             values['path'] = request.httprequest.path[1:]
+        if isinstance(exception, werkzeug.exceptions.Forbidden) and \
+           exception.description == "website_visibility_password_required":
+            code = 'protected_403'
+            values['path'] = request.httprequest.path
         return (code, values)
 
     @classmethod
@@ -280,7 +299,7 @@ class Http(models.AbstractModel):
             try:
                 # exception.name might be int, string
                 exception_template = int(exception.name)
-            except:
+            except ValueError:
                 exception_template = exception.name
             view = View._view_obj(exception_template)
             if exception.html and exception.html in view.arch:
@@ -303,8 +322,8 @@ class Http(models.AbstractModel):
 
     @classmethod
     def _get_error_html(cls, env, code, values):
-        if code == 'page_404':
-            return env['ir.ui.view'].render_template('website.%s' % code, values)
+        if code in ('page_404', 'protected_403'):
+            return code.split('_')[1], env['ir.ui.view']._render_template('website.%s' % code, values)
         return super(Http, cls)._get_error_html(env, code, values)
 
     def binary_content(self, xmlid=None, model='ir.attachment', id=None, field='datas',
@@ -328,7 +347,12 @@ class Http(models.AbstractModel):
     def _xmlid_to_obj(cls, env, xmlid):
         website_id = env['website'].get_current_website()
         if website_id and website_id.theme_id:
-            obj = env['ir.attachment'].search([('key', '=', xmlid), ('website_id', '=', website_id.id)])
+            domain = [('key', '=', xmlid), ('website_id', '=', website_id.id)]
+            Attachment = env['ir.attachment']
+            if request.env.user.share:
+                domain.append(('public', '=', True))
+                Attachment = Attachment.sudo()
+            obj = Attachment.search(domain)
             if obj:
                 return obj[0]
 
@@ -343,7 +367,7 @@ class Http(models.AbstractModel):
         if request.env.user.has_group('website.group_website_publisher'):
             session_info.update({
                 'website_id': request.website.id,
-                'website_company_id': request.website.company_id.id,
+                'website_company_id': request.website._get_cached('company_id'),
             })
         return session_info
 
@@ -357,6 +381,7 @@ class ModelConverter(ModelConverter):
         domain = safe_eval(self.domain, (args or {}).copy())
         if dom:
             domain += dom
-        for record in Model.search_read(domain=domain, fields=['write_date', Model._rec_name]):
-            if record.get(Model._rec_name, False):
-                yield {'loc': (record['id'], record[Model._rec_name])}
+        for record in Model.search(domain):
+            # return record so URL will be the real endpoint URL as the record will go through `slug()`
+            # the same way as endpoint URL is retrieved during dispatch (301 redirect), see `to_url()` from ModelConverter
+            yield record

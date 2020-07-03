@@ -82,6 +82,9 @@ var DataImport = AbstractAction.extend({
         {name: 'separator', label: _lt("Separator:"), value: ''},
         {name: 'quoting', label: _lt("Text Delimiter:"), value: '"'}
     ],
+    spreadsheet_opts: [
+        {name: 'sheet', label: _lt("Selected Sheet:"), value: ''},
+    ],
     parse_opts_formats: [
         {name: 'date_format', label: _lt("Date Format:"), value: ''},
         {name: 'datetime_format', label: _lt("Datetime Format:"), value: ''},
@@ -146,6 +149,7 @@ var DataImport = AbstractAction.extend({
         this.session = session;
         this._title = _t('Import a File'); // Displayed in the breadcrumbs
         this.do_not_change_match = false;
+        this.sheets = [];
     },
     /**
      * @override
@@ -168,6 +172,7 @@ var DataImport = AbstractAction.extend({
         this.setup_separator_picker();
         this.setup_float_format_picker();
         this.setup_date_format_picker();
+        this.setup_sheets_picker();
 
         return Promise.all([
             this._super(),
@@ -196,7 +201,6 @@ var DataImport = AbstractAction.extend({
         this.$buttons = $(QWeb.render("ImportView.buttons", this));
         this.$buttons.filter('.o_import_validate').on('click', this.validate.bind(this));
         this.$buttons.filter('.o_import_import').on('click', this.import.bind(this));
-        this.$buttons.filter('.o_import_file_reload').on('click', this.loaded_file.bind(this, null));
         this.$buttons.filter('.oe_import_file').on('click', function () {
             self.$('.o_content .oe_import_file').click();
         });
@@ -285,6 +289,18 @@ var DataImport = AbstractAction.extend({
             }
         })
     },
+    setup_sheets_picker: function () {
+        var data = this.sheets.map(_make_option);
+        this.$('input.oe_import_sheet').select2({
+            width: '50%',
+            data: data,
+            query: dataFilteredQuery,
+            initSelection: function ($e, c) {
+                c(_from_data(data, $e.val()) || _make_option($e.val()))
+            },
+            minimumResultsForSearch: 10,
+        });
+    },
 
     import_options: function () {
         var self = this;
@@ -297,7 +313,7 @@ var DataImport = AbstractAction.extend({
             skip: Number(this.$('#oe_import_row_start').val()) - 1 || 0,
             limit: Number(this.$('#oe_import_batch_limit').val()) || null,
         };
-        _(this.opts).each(function (opt) {
+        _.each(_.union(this.opts, this.spreadsheet_opts), function (opt) {
             options[opt.name] =
                 self.$('input.oe_import_' + opt.name).val();
         });
@@ -330,10 +346,11 @@ var DataImport = AbstractAction.extend({
             this.toggle_partial(null);
         }
 
-        this.$buttons.filter('.o_import_import, .o_import_validate, .o_import_file_reload').addClass('d-none');
+        this.$buttons.filter('.o_import_import, .o_import_validate').addClass('d-none');
         if (!this.$('input.oe_import_file').val()) { return this['settings_changed'](); }
         this.$('.oe_import_date_format').select2('val', '');
         this.$('.oe_import_datetime_format').val('');
+        this.$('.oe_import_sheet').val('');
 
         this.$form.removeClass('oe_import_preview oe_import_error');
         var import_toggle = false;
@@ -349,7 +366,7 @@ var DataImport = AbstractAction.extend({
     },
     onpreviewing: function () {
         var self = this;
-        this.$buttons.filter('.o_import_import, .o_import_validate, .o_import_file_reload').addClass('d-none');
+        this.$buttons.filter('.o_import_import, .o_import_validate').addClass('d-none');
         this.$form.addClass('oe_import_with_file');
         // TODO: test that write // succeeded?
         this.$form.removeClass('oe_import_preview_error oe_import_error');
@@ -368,7 +385,6 @@ var DataImport = AbstractAction.extend({
     },
     onpreview_error: function (event, from, to, result) {
         this.$('.oe_import_options').show();
-        this.$buttons.filter('.o_import_file_reload').removeClass('d-none');
         this.$form.addClass('oe_import_preview_error oe_import_error');
         this.$form.find('.oe_import_box, .oe_import_with_file').removeClass('d-none');
         this.$form.find('.o_view_nocontent').addClass('d-none');
@@ -381,7 +397,7 @@ var DataImport = AbstractAction.extend({
             .text(_t('Load New File'))
             .removeClass('btn-primary').addClass('btn-secondary')
             .blur();
-        this.$buttons.filter('.o_import_import, .o_import_validate, .o_import_file_reload').removeClass('d-none');
+        this.$buttons.filter('.o_import_import, .o_import_validate').removeClass('d-none');
         this.$form.find('.oe_import_box, .oe_import_with_file').removeClass('d-none');
         this.$form.find('.o_view_nocontent').addClass('d-none');
         this.$form.addClass('oe_import_preview');
@@ -400,8 +416,16 @@ var DataImport = AbstractAction.extend({
             this.onresults(null, null, null, {'messages': messages});
         }
 
+        if (!_.isEqual(this.sheets, result.options.sheets)) {
+            this.sheets = result.options.sheets || [];
+            this.setup_sheets_picker();
+        }
+        this.$('div.oe_import_has_multiple_sheets').toggle(
+            this.sheets.length > 1
+        );
+
         // merge option values back in case they were updated/guessed
-        _.each(['encoding', 'separator', 'float_thousand_separator', 'float_decimal_separator'], function (id) {
+        _.each(['encoding', 'separator', 'float_thousand_separator', 'float_decimal_separator', 'sheet'], function (id) {
             self.$('.oe_import_' + id).select2('val', result.options[id])
         });
         this.$('.oe_import_date_format').select2('val', time.strftime_to_moment_format(result.options.date_format));
@@ -714,7 +738,10 @@ var DataImport = AbstractAction.extend({
         return prom;
     },
     onimported: function (event, from, to, results) {
-        this.do_notify(_t("Import completed"), _.str.sprintf(_t("%d records were successfully imported"), results.ids.length));
+        this.do_notify(false, _.str.sprintf(
+            _t("%d records successfully imported"),
+            results.ids.length
+        ));
         this.exit();
     },
     exit: function () {

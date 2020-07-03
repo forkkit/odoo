@@ -78,7 +78,7 @@ class WebsiteCustomer(http.Controller):
 
         industries.insert(0, {
             'industry_id_count': partners_count,
-            'industry_id': (0, _("All Sectors of Activity"))
+            'industry_id': (0, _("All Industries"))
         })
 
         # group by country, based on customers found with the search(domain)
@@ -132,7 +132,7 @@ class WebsiteCustomer(http.Controller):
             'google_map_partner_ids': google_map_partner_ids,
             'pager': pager,
             'post': post,
-            'search_path': "?%s" % werkzeug.url_encode(post),
+            'search_path': "?%s" % werkzeug.urls.url_encode(post),
             'tag': tag,
             'tags': tags,
             'google_maps_api_key': google_maps_api_key,

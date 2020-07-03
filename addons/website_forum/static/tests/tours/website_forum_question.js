@@ -26,12 +26,22 @@ odoo.define('website_forum.tour_forum_question', function (require) {
     }, {
         content: "Click to post your question.",
         extra_trigger: "#wrap:not(:has(input[id=s2id_autogen2]:propValue('')))",
-        trigger: 'button:contains("Post Your Question")',
+        trigger: 'button:contains("Post")',
     }, {
         content: "This page contain new created question.",
-        extra_trigger: '#wrap:has(".fa-star")',
-        trigger: 'button[data-dismiss="modal"]',
+        trigger: '#wrap:has(".fa-star")',
+        run: function() {}, //it's a check that page has been reloaded,
     }, {
+        content: "Close modal once modal animation is done.",
+        extra_trigger: 'div.modal.modal_shown',
+        trigger: ".modal-header button.close",
+    },
+    {
+        trigger: "a:contains(\"Answer\").collapsed",
+        content: "Click to answer.",
+        position: "bottom",
+    },
+    {
         content: "Put your answer here.",
         trigger: '.note-editable p',
         run: 'text First Answer',
@@ -40,11 +50,12 @@ odoo.define('website_forum.tour_forum_question', function (require) {
         extra_trigger: '.note-editable:not(:has(br))',
         trigger: 'button:contains("Post Answer")',
     }, {
-        content: "This page contain new created question and its answer.",
-        extra_trigger: '#wrap:has(".o_wforum_validate_toggler")',
-        trigger: 'button[data-dismiss="modal"]',
+        content: "Close modal once modal animation is done.",
+        extra_trigger: 'div.modal.modal_shown',
+        trigger: ".modal-header button.close",
     }, {
         content: "Click here to accept this answer.",
+        extra_trigger: '#wrap:has(".o_wforum_validate_toggler")',
         trigger: '.o_wforum_validate_toggler[data-karma="20"]:first',
     }, {
         content: "Congratulations! You just created and post your first question and answer.",

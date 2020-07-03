@@ -42,7 +42,6 @@ class TestAccountEntry(TestExpenseCommon):
             'sheet_id': expense.id,
             'analytic_account_id': self.analytic_account.id,
         })
-        expense_line._onchange_product_id()
         # State should default to draft
         self.assertEqual(expense.state, 'draft', 'Expense should be created in Draft state')
         # Submitted to Manager
@@ -106,7 +105,6 @@ class TestAccountEntry(TestExpenseCommon):
             'analytic_account_id': self.analytic_account.id,
             'currency_id': self.env.ref('base.EUR').id,
         })
-        expense_line._onchange_product_id()
         # State should default to draft
         self.assertEqual(expense.state, 'draft', 'Expense should be created in Draft state')
         # Submitted to Manager
@@ -146,13 +144,28 @@ class TestAccountEntry(TestExpenseCommon):
         self.assertEqual(self.analytic_account.line_ids[0].product_id, self.product_expense, "Product of AAL should be the one from the expense")
 
     def test_expense_from_email(self):
-        user_demo = self.env.ref('base.user_demo')
+        user_marc = self.env['res.users'].create({
+            'name': 'Marc User',
+            'login': 'Marc',
+            'email': 'marc.user@example.com',
+        })
+        self.env['hr.employee'].create({
+            'name': 'Marc Demo',
+            'user_id': user_marc.id,
+        })
+        air_ticket = self.env['product.product'].create({
+            'name': 'Air Flight',
+            'type': 'service',
+            'default_code': 'TESTREF',
+            'can_be_expensed': True,
+        })
+
         self.tax.price_include = False
 
         message_parsed = {
             'message_id': 'the-world-is-a-ghetto',
-            'subject': 'EXP_AF 9876',
-            'email_from': 'mark.brown23@example.com',
+            'subject': 'TESTREF 9876',
+            'email_from': 'marc.user@example.com',
             'to': 'catchall@yourcompany.com',
             'body': "Don't you know, that for me, and for you",
             'attachments': [],
@@ -160,20 +173,28 @@ class TestAccountEntry(TestExpenseCommon):
 
         expense = self.env['hr.expense'].message_new(message_parsed)
 
-        air_ticket = self.env.ref("hr_expense.air_ticket")
         self.assertEqual(expense.product_id, air_ticket)
         self.assertEqual(expense.tax_ids.ids, [])
         self.assertEqual(expense.total_amount, 9876.0)
-        self.assertTrue(expense.employee_id in user_demo.employee_ids)
+        self.assertTrue(expense.employee_id in user_marc.employee_ids)
 
     def test_expense_from_email_without_product(self):
-        user_demo = self.env.ref('base.user_demo')
+        user_marc = self.env['res.users'].create({
+            'name': 'Marc User',
+            'login': 'Marc',
+            'email': 'marc.user@example.com',
+        })
+        self.env['hr.employee'].create({
+            'name': 'Marc Demo',
+            'user_id': user_marc.id,
+        })
+
         self.tax.price_include = False
 
         message_parsed = {
             'message_id': 'the-world-is-a-ghetto',
             'subject': 'no product code 9876',
-            'email_from': 'mark.brown23@example.com',
+            'email_from': 'marc.user@example.com',
             'to': 'catchall@yourcompany.com',
             'body': "Don't you know, that for me, and for you",
             'attachments': [],
@@ -181,11 +202,10 @@ class TestAccountEntry(TestExpenseCommon):
 
         expense = self.env['hr.expense'].message_new(message_parsed)
 
-        air_ticket = self.env.ref("hr_expense.air_ticket")
         self.assertFalse(expense.product_id, "No product should be linked")
         self.assertEqual(expense.tax_ids.ids, [])
         self.assertEqual(expense.total_amount, 9876.0)
-        self.assertTrue(expense.employee_id in user_demo.employee_ids)
+        self.assertTrue(expense.employee_id in user_marc.employee_ids)
 
     def test_partial_payment_multiexpense(self):
         bank_journal = self.env['account.journal'].create({
@@ -346,3 +366,104 @@ class TestExpenseRights(TestExpenseCommon):
         with self.assertRaises(AccessError):
             sheet_3.with_user(self.user_officer).refuse_sheet('')
         sheet_3.with_user(self.user_manager).refuse_sheet('')
+
+
+class TestExpenseLinesRights(TestExpenseCommon):
+
+    def setUp(self):
+        super(TestExpenseLinesRights, self).setUp()
+
+        self.setUpAdditionalAccounts()
+
+        self.product_expense = self.env['product.product'].create({
+            'name': "Delivered at cost",
+            'standard_price': 700,
+            'list_price': 700,
+            'type': 'consu',
+            'supplier_taxes_id': [(6, 0, [self.tax.id])],
+            'default_code': 'CONSU-DELI-COST',
+            'taxes_id': False,
+            'property_account_expense_id': self.account_expense.id,
+        })
+
+        self.user_manager.write({
+            'groups_id': [(4, self.env.ref('account.group_account_user').id)],
+        })
+
+    def test_expense_lines_rights(self):
+        expense = self.env['hr.expense.sheet'].with_user(self.user_employee).create({
+            'name': 'Expense for John Smith',
+            'employee_id': self.employee.id,
+        })
+        expense_line = self.env['hr.expense'].with_user(self.user_employee).create({
+            'name': 'Car Travel Expenses',
+            'employee_id': self.employee.id,
+            'product_id': self.product_expense.id,
+            'unit_amount': 700.00,
+            'tax_ids': [(6, 0, [self.tax.id])],
+            'sheet_id': expense.id,
+            'analytic_account_id': self.analytic_account.id,
+        })
+        expense.with_user(self.user_employee).action_submit_sheet()
+
+        # STATE APPROVE
+
+        expense.with_user(self.user_manager).approve_expense_sheets()
+        # Test User without Accountant Rights
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'reference': 'Test Reference'})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'tax_ids': [(6, 0, [self.tax.id])]})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'account_id': self.account_expense.id})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'analytic_account_id': self.analytic_account.id})
+        # Test User with Accountant Rights
+        expense_line.with_user(self.user_manager).write({'reference': 'Test Reference'})
+        expense_line.with_user(self.user_manager).write({'tax_ids': [(6, 0, [self.tax.id])]})
+        expense_line.with_user(self.user_manager).write({'account_id': self.account_expense.id})
+        expense_line.with_user(self.user_manager).write({'analytic_account_id': self.analytic_account.id})
+        expense_line.invalidate_cache()
+
+        # STATE POST
+
+        expense.with_user(self.env.user).action_sheet_move_create()
+        # Test User without Accountant Rights
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'reference': 'Test Reference'})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'tax_ids': [(6, 0, [self.tax.id])]})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'account_id': self.account_expense.id})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'analytic_account_id': self.analytic_account.id})
+        # Test User with Accountant Rights
+        expense_line.with_user(self.user_manager).write({'reference': 'Test Reference'})
+        expense_line.invalidate_cache()
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_manager).write({'tax_ids': [(6, 0, [self.tax.id])]})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_manager).write({'account_id': self.account_expense.id})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_manager).write({'analytic_account_id': self.analytic_account.id})
+
+        # STATE DONE
+
+        expense.set_to_paid()
+        # Test User without Accountant Rights
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'reference': 'Test Reference'})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'tax_ids': [(6, 0, [self.tax.id])]})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'account_id': self.account_expense.id})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_employee).write({'analytic_account_id': self.analytic_account.id})
+        # Test User with Accountant Rights
+        expense_line.with_user(self.user_manager).write({'reference': 'Test Reference'})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_manager).write({'tax_ids': [(6, 0, [self.tax.id])]})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_manager).write({'account_id': self.account_expense.id})
+        with self.assertRaises(UserError):
+            expense_line.with_user(self.user_manager).write({'analytic_account_id': self.analytic_account.id})

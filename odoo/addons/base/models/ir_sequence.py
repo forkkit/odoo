@@ -100,27 +100,27 @@ class IrSequence(models.Model):
             seq.write({'number_next': seq.number_next_actual or 1})
 
     @api.model
-    def _get_current_sequence(self):
+    def _get_current_sequence(self, sequence_date=None):
         '''Returns the object on which we can find the number_next to consider for the sequence.
         It could be an ir.sequence or an ir.sequence.date_range depending if use_date_range is checked
         or not. This function will also create the ir.sequence.date_range if none exists yet for today
         '''
         if not self.use_date_range:
             return self
-        now = fields.Date.today()
+        sequence_date = sequence_date or fields.Date.today()
         seq_date = self.env['ir.sequence.date_range'].search(
-            [('sequence_id', '=', self.id), ('date_from', '<=', now), ('date_to', '>=', now)], limit=1)
+            [('sequence_id', '=', self.id), ('date_from', '<=', sequence_date), ('date_to', '>=', sequence_date)], limit=1)
         if seq_date:
             return seq_date[0]
         #no date_range sequence was found, we create a new one
-        return self._create_date_range_seq(now)
+        return self._create_date_range_seq(sequence_date)
 
     name = fields.Char(required=True)
     code = fields.Char(string='Sequence Code')
     implementation = fields.Selection([('standard', 'Standard'), ('no_gap', 'No gap')],
                                       string='Implementation', required=True, default='standard',
                                       help="While assigning a sequence number to a record, the 'no gap' sequence implementation ensures that each previous sequence number has been assigned already. "
-                                      "While this sequence implementation will not skip any sequence number upon assignation, there can still be gaps in the sequence if records are deleted. "
+                                      "While this sequence implementation will not skip any sequence number upon assignment, there can still be gaps in the sequence if records are deleted. "
                                       "The 'no gap' implementation is slower than the standard one.")
     active = fields.Boolean(default=True)
     prefix = fields.Char(help="Prefix value of the record for the sequence", trim=False)
@@ -265,18 +265,10 @@ class IrSequence(models.Model):
             If several sequences with the correct code are available to the user
             (multi-company cases), the one from the user's current company will
             be used.
-
-            :param dict context: context dictionary may contain a
-                ``force_company`` key with the ID of the company to
-                use instead of the user's current company for the
-                sequence selection. A matching sequence for that
-                specific company will get higher priority.
         """
         self.check_access_rights('read')
-        force_company = self._context.get('force_company')
-        if not force_company:
-            force_company = self.env.company.id
-        seq_ids = self.search([('code', '=', sequence_code), ('company_id', 'in', [force_company, False])], order='company_id')
+        company_id = self.env.company.id
+        seq_ids = self.search([('code', '=', sequence_code), ('company_id', 'in', [company_id, False])], order='company_id')
         if not seq_ids:
             _logger.debug("No ir.sequence has been found for code '%s'. Please make sure a sequence is set for current company." % sequence_code)
             return False

@@ -6,7 +6,7 @@ odoo.define('web.config', function () {
  * This is often necessary to allow the rest of the web client to properly
  * render itself.
  *
- * Note that many informations currently stored in session should be moved to
+ * Note that many information currently stored in session should be moved to
  * this file someday.
  */
 
@@ -34,6 +34,20 @@ var config = {
          * @type Boolean
          */
         isMobile: null,
+        /**
+         * Mobile device detection using userAgent.
+         * This flag doesn't depend on the size/resolution of the screen.
+         * It targets mobile devices which suggests that there is a virtual keyboard.
+         *
+         * @return {boolean}
+         */
+        isMobileDevice: navigator.userAgent.match(/Android/i) ||
+            navigator.userAgent.match(/webOS/i) ||
+            navigator.userAgent.match(/iPhone/i) ||
+            navigator.userAgent.match(/iPad/i) ||
+            navigator.userAgent.match(/iPod/i) ||
+            navigator.userAgent.match(/BlackBerry/i) ||
+            navigator.userAgent.match(/Windows Phone/i),
         /**
          * Mapping between the numbers 0,1,2,3,4,5,6 and some descriptions
          */

@@ -28,14 +28,8 @@ class Company(models.Model):
     def _get_logo(self):
         return base64.b64encode(open(os.path.join(tools.config['root_path'], 'addons', 'base', 'static', 'img', 'res_company_logo.png'), 'rb') .read())
 
-    @api.model
-    def _get_euro(self):
-        return self.env['res.currency.rate'].search([('rate', '=', 1)], limit=1).currency_id
-
-    @api.model
-    def _get_user_currency(self):
-        currency_id = self.env['res.users'].browse(self._uid).company_id.currency_id
-        return currency_id or self._get_euro()
+    def _default_currency_id(self):
+        return self.env.user.company_id.currency_id
 
     def _get_default_favicon(self, original=False):
         img_path = get_resource_path('web', 'static/src/img/favicon.ico')
@@ -74,14 +68,16 @@ class Company(models.Model):
     # logo_web: do not store in attachments, since the image is retrieved in SQL for
     # performance reasons (see addons/web/controllers/main.py, Binary.company_logo)
     logo_web = fields.Binary(compute='_compute_logo_web', store=True, attachment=False)
-    currency_id = fields.Many2one('res.currency', string='Currency', required=True, default=lambda self: self._get_user_currency())
+    currency_id = fields.Many2one('res.currency', string='Currency', required=True, default=lambda self: self._default_currency_id())
     user_ids = fields.Many2many('res.users', 'res_company_users_rel', 'cid', 'user_id', string='Accepted Users')
-    account_no = fields.Char(string='Account No.')
     street = fields.Char(compute='_compute_address', inverse='_inverse_street')
     street2 = fields.Char(compute='_compute_address', inverse='_inverse_street2')
     zip = fields.Char(compute='_compute_address', inverse='_inverse_zip')
     city = fields.Char(compute='_compute_address', inverse='_inverse_city')
-    state_id = fields.Many2one('res.country.state', compute='_compute_address', inverse='_inverse_state', string="Fed. State")
+    state_id = fields.Many2one(
+        'res.country.state', compute='_compute_address', inverse='_inverse_state',
+        string="Fed. State", domain="[('country_id', '=?', country_id)]"
+    )
     bank_ids = fields.One2many('res.partner.bank', 'company_id', string='Bank Accounts', help='Bank accounts related to this company')
     country_id = fields.Many2one('res.country', compute='_compute_address', inverse='_inverse_country', string="Country")
     email = fields.Char(related='partner_id.email', store=True, readonly=False)
@@ -101,7 +97,6 @@ class Company(models.Model):
         ('name_uniq', 'unique (name)', 'The company name must be unique !')
     ]
 
-
     def init(self):
         for company in self.search([('paperformat_id', '=', False)]):
             paperformat_euro = self.env.ref('base.paperformat_euro', False)
@@ -111,15 +106,14 @@ class Company(models.Model):
         if hasattr(sup, 'init'):
             sup.init()
 
-    def _get_company_address_fields(self, partner):
-        return {
-            'street'     : partner.street,
-            'street2'    : partner.street2,
-            'city'       : partner.city,
-            'zip'        : partner.zip,
-            'state_id'   : partner.state_id,
-            'country_id' : partner.country_id,
-        }
+    def _get_company_address_field_names(self):
+        """ Return a list of fields coming from the address partner to match
+        on company address fields. Fields are labeled same on both models. """
+        return ['street', 'street2', 'city', 'zip', 'state_id', 'country_id']
+
+    def _get_company_address_update(self, partner):
+        return dict((fname, partner[fname])
+                    for fname in self._get_company_address_field_names())
 
     # TODO @api.depends(): currently now way to formulate the dependency on the
     # partner's contact address
@@ -128,7 +122,7 @@ class Company(models.Model):
             address_data = company.partner_id.sudo().address_get(adr_pref=['contact'])
             if address_data['contact']:
                 partner = company.partner_id.browse(address_data['contact']).sudo()
-                company.update(company._get_company_address_fields(partner))
+                company.update(company._get_company_address_update(partner))
 
     def _inverse_street(self):
         for company in self:
@@ -161,25 +155,13 @@ class Company(models.Model):
 
     @api.onchange('state_id')
     def _onchange_state(self):
-        self.country_id = self.state_id.country_id
-
-    def on_change_country(self, country_id):
-        # This function is called from account/models/chart_template.py, hence decorated with `multi`.
-        self.ensure_one()
-        currency_id = self._get_user_currency()
-        if country_id:
-            currency_id = self.env['res.country'].browse(country_id).currency_id
-        return {'value': {'currency_id': currency_id.id}}
+        if self.state_id.country_id:
+            self.country_id = self.state_id.country_id
 
     @api.onchange('country_id')
-    def _onchange_country_id_wrapper(self):
-        res = {'domain': {'state_id': []}}
+    def _onchange_country_id(self):
         if self.country_id:
-            res['domain']['state_id'] = [('country_id', '=', self.country_id.id)]
-        values = self.on_change_country(self.country_id.id)['value']
-        for fname, value in values.items():
-            setattr(self, fname, value)
-        return res
+            self.currency_id = self.country_id.currency_id
 
     @api.model
     def _name_search(self, name, args=None, operator='ilike', limit=100, name_get_uid=None):
@@ -201,7 +183,7 @@ class Company(models.Model):
         """ Returns the user's company
             - Deprecated
         """
-        _logger.warning(_("The method '_company_default_get' on res.company is deprecated and shouldn't be used anymore"))
+        _logger.warning("The method '_company_default_get' on res.company is deprecated and shouldn't be used anymore")
         return self.env.company
 
     # deprecated, use clear_caches() instead
@@ -224,6 +206,8 @@ class Company(models.Model):
             'website': vals.get('website'),
             'vat': vals.get('vat'),
         })
+        # compute stored fields, for example address dependent fields
+        partner.flush()
         vals['partner_id'] = partner.id
         self.clear_caches()
         company = super(Company, self).create(vals)
@@ -245,7 +229,14 @@ class Company(models.Model):
             if not currency.active:
                 currency.write({'active': True})
 
-        return super(Company, self).write(values)
+        res = super(Company, self).write(values)
+
+        # invalidate company cache to recompute address based on updated partner
+        company_address_fields = self._get_company_address_field_names()
+        company_address_fields_upd = set(company_address_fields) & set(values.keys())
+        if company_address_fields_upd:
+            self.invalidate_cache(fnames=company_address_fields)
+        return res
 
     @api.constrains('parent_id')
     def _check_parent_id(self):
@@ -308,24 +299,3 @@ class Company(models.Model):
             main_company = self.env['res.company'].sudo().search([], limit=1, order="id")
 
         return main_company
-
-    def update_scss(self):
-        """ update the company scss stylesheet """
-        scss_properties = []
-        if self.primary_color:
-            scss_properties.append('$o-company-primary-color:%s;' % self.primary_color)
-        if self.secondary_color:
-            scss_properties.append('$o-company-secondary-color:%s;' % self.secondary_color)
-        if self.font:
-            scss_properties.append('$o-company-font:%s;' % self.font)
-        scss_string = '\n'.join(scss_properties)
-
-        if not len(scss_string):
-            scss_string = ""
-
-        scss_data = base64.b64encode((scss_string).encode('utf-8'))
-
-        attachment = self.env['ir.attachment'].search([('name', '=', 'res.company.scss')])
-        attachment.write({'datas': scss_data})
-
-        return ''

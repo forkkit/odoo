@@ -7,6 +7,7 @@ import werkzeug
 from odoo import _, exceptions, http, tools
 from odoo.http import request
 from odoo.tools import consteq
+from werkzeug.exceptions import BadRequest
 
 
 class MassMailController(http.Controller):
@@ -91,9 +92,12 @@ class MassMailController(http.Controller):
             return True
         return 'error'
 
-    @http.route('/mail/track/<int:mail_id>/blank.gif', type='http', auth='public')
-    def track_mail_open(self, mail_id, **post):
+    @http.route('/mail/track/<int:mail_id>/<string:token>/blank.gif', type='http', auth='public')
+    def track_mail_open(self, mail_id, token, **post):
         """ Email tracking. """
+        if not consteq(token, tools.hmac(request.env(su=True), 'mass_mailing-mail_mail-open', mail_id)):
+            raise BadRequest()
+
         request.env['mailing.trace'].sudo().set_opened(mail_mail_ids=[mail_id])
         response = werkzeug.wrappers.Response()
         response.mimetype = 'image/gif'
@@ -159,6 +163,6 @@ class MassMailController(http.Controller):
             model = request.env[mailing.mailing_model_real]
             records = model.sudo().search([('email_normalized', '=', tools.email_normalize(email))])
             for record in records:
-                record.sudo().message_post(body=_("Feedback from %s: %s" % (email, feedback)))
+                record.sudo().message_post(body=_("Feedback from %(email)s: %(feedback)s", email=email, feedback=feedback))
             return bool(records)
         return 'error'

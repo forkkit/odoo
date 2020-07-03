@@ -4,10 +4,12 @@
     <!-- Add batch picking -->
     <record id="stock_picking_batch_dry_1" model="stock.picking.batch">
         <field name="state">in_progress</field>
+        <field name="picking_type_id" ref="stock.picking_type_internal"/>
         <field name="company_id" ref="base.main_company"/>
     </record>
     <record id="stock_picking_batch_freeze_1" model="stock.picking.batch">
         <field name="state">in_progress</field>
+        <field name="picking_type_id" ref="stock.picking_type_internal"/>
         <field name="company_id" ref="base.main_company"/>
     </record>
 
@@ -54,6 +56,7 @@
     <record id="Picking_A" model="stock.picking">
         <field name="move_type">one</field>
         <field name="priority">2</field>
+        <field name="user_id" eval="False"/>
         <field name="picking_type_id" ref="stock.picking_type_internal"/>
         <field name="batch_id" ref="stock_picking_batch_freeze_1"/>
         <field name="location_id" ref="stock.stock_location_stock"/>
@@ -64,6 +67,7 @@
         <field name="move_type">one</field>
         <field name="state">assigned</field>
         <field name="priority">1</field>
+        <field name="user_id" eval="False"/>
         <field name="picking_type_id" ref="stock.picking_type_internal"/>
         <field name="batch_id" ref="stock_picking_batch_freeze_1"/>
         <field name="location_id" ref="stock.stock_location_stock"/>
@@ -74,6 +78,7 @@
         <field name="move_type">one</field>
         <field name="state">assigned</field>
         <field name="priority">1</field>
+        <field name="user_id" eval="False"/>
         <field name="picking_type_id" ref="stock.picking_type_internal"/>
         <field name="batch_id" ref="stock_picking_batch_dry_1"/>
         <field name="location_id" ref="stock.stock_location_stock"/>

@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from datetime import timedelta
+from datetime import datetime, timedelta, time
+from unittest.mock import patch
 
 from odoo import fields
-from .common import TestPurchase
+from .common import PurchaseTestCommon
+from odoo.tests.common import Form
 
 
-class TestPurchaseLeadTime(TestPurchase):
+class TestPurchaseLeadTime(PurchaseTestCommon):
 
     def test_00_product_company_level_delays(self):
         """ To check dates, set product's Delivery Lead Time
@@ -22,7 +24,6 @@ class TestPurchaseLeadTime(TestPurchase):
         date_planned = fields.Datetime.to_string(fields.datetime.now() + timedelta(days=10))
         self._create_make_procurement(self.product_1, 15.00, date_planned=date_planned)
         purchase = self.env['purchase.order.line'].search([('product_id', '=', self.product_1.id)], limit=1).order_id
-        
 
         # Confirm purchase order
         purchase.button_confirm()
@@ -32,7 +33,7 @@ class TestPurchaseLeadTime(TestPurchase):
         self.assertEqual(purchase.date_order, order_date, 'Order date should be equal to: Date of the procurement order - Purchase Lead Time - Delivery Lead Time.')
 
         # Check scheduled date of purchase order
-        schedule_date = order_date + timedelta(days=self.product_1.seller_ids.delay)
+        schedule_date = datetime.combine(order_date + timedelta(days=self.product_1.seller_ids.delay), time.max).replace(microsecond=0, second=0)
         self.assertEqual(purchase.order_line.date_planned, schedule_date, 'Schedule date should be equal to: Order date of Purchase order + Delivery Lead Time.')
 
         # check the picking created or not
@@ -69,11 +70,11 @@ class TestPurchaseLeadTime(TestPurchase):
         self.assertEqual(purchase2.date_order, order_date, 'Order date should be equal to: Date of the procurement order - Delivery Lead Time.')
 
         # Check scheduled date of purchase order line for product_1
-        schedule_date_1 = order_date + timedelta(days=self.product_1.seller_ids.delay)
+        schedule_date_1 = datetime.combine(order_date + timedelta(days=self.product_1.seller_ids.delay), time.max).replace(microsecond=0, second=0)
         self.assertEqual(order_line_pro_1.date_planned, schedule_date_1, 'Schedule date of purchase order line for product_1 should be equal to: Order date of purchase order + Delivery Lead Time of product_1.')
 
         # Check scheduled date of purchase order line for product_2
-        schedule_date_2 = order_date + timedelta(days=self.product_2.seller_ids.delay)
+        schedule_date_2 = datetime.combine(order_date + timedelta(days=self.product_2.seller_ids.delay), time.max).replace(microsecond=0, second=0)
         self.assertEqual(order_line_pro_2.date_planned, schedule_date_2, 'Schedule date of purchase order line for product_2 should be equal to: Order date of purchase order + Delivery Lead Time of product_2.')
 
         # Check scheduled date of purchase order
@@ -236,6 +237,109 @@ class TestPurchaseLeadTime(TestPurchase):
         po_line = self.env['purchase.order.line'].search([
             ('product_id', '=', product_1.id),
         ])
-        self.assertEqual(len(po_line), 2, 'the purchase order lines are not merged')
+        self.assertEqual(len(po_line), 2, 'the purchase order lines are merged')
         self.assertEqual(po_line[0].product_qty, 10, 'the purchase order line has a wrong quantity')
         self.assertEqual(po_line[1].product_qty, 5, 'the purchase order line has a wrong quantity')
+
+    def test_merge_po_line_3(self):
+        """Chage merging po line if same procurement is done depending on
+        propagate_date, propagate_date_minimum_delta and custom values.
+        """
+        # Create procurement order of product_1
+        ProcurementGroup = self.env['procurement.group']
+        procurement_values = {
+            'warehouse_id': self.warehouse_1,
+            'rule_id': self.warehouse_1.buy_pull_id,
+            'date_planned': fields.Datetime.to_string(fields.datetime.now() + timedelta(days=10)),
+            'group_id': False,
+            'route_ids': [],
+        }
+
+        procurement_values['product_description_variants'] = 'Color (Red)'
+        order_1_values = procurement_values
+        ProcurementGroup.run([self.env['procurement.group'].Procurement(
+            self.t_shirt, 5, self.uom_unit, self.warehouse_1.lot_stock_id,
+            self.t_shirt.name, '/', self.env.company, order_1_values)
+        ])
+        purchase_order = self.env['purchase.order.line'].search([('product_id', '=', self.t_shirt.id)], limit=1).order_id
+        order_line_description = purchase_order.order_line.product_id._get_description(purchase_order.picking_type_id)
+        self.assertEqual(len(purchase_order.order_line), 1, 'wrong number of order line is created')
+        self.assertEqual(purchase_order.order_line.name, order_line_description + "Color (Red)", 'wrong description in po lines')
+
+        procurement_values['product_description_variants'] = 'Color (Red)'
+        order_2_values = procurement_values
+        ProcurementGroup.run([self.env['procurement.group'].Procurement(
+            self.t_shirt, 10, self.uom_unit, self.warehouse_1.lot_stock_id,
+            self.t_shirt.name, '/', self.env.company, order_2_values)
+        ])
+        self.env['procurement.group'].run_scheduler()
+        self.assertEqual(len(purchase_order.order_line), 1, 'line with same custom value should be merged')
+        self.assertEqual(purchase_order.order_line[0].product_qty, 15, 'line with same custom value should be merged and qty should be update')
+
+        procurement_values['product_description_variants'] = 'Color (Green)'
+
+        order_3_values = procurement_values
+        ProcurementGroup.run([self.env['procurement.group'].Procurement(
+            self.t_shirt, 10, self.uom_unit, self.warehouse_1.lot_stock_id,
+            self.t_shirt.name, '/', self.env.company, order_3_values)
+        ])
+        self.assertEqual(len(purchase_order.order_line), 2, 'line with different custom value should not be merged')
+        self.assertEqual(purchase_order.order_line.filtered(lambda x: x.product_qty == 15).name, order_line_description + "Color (Red)", 'wrong description in po lines')
+        self.assertEqual(purchase_order.order_line.filtered(lambda x: x.product_qty == 10).name, order_line_description + "Color (Green)", 'wrong description in po lines')
+
+        purchase_order.button_confirm()
+        self.assertEqual(purchase_order.picking_ids[0].move_ids_without_package.filtered(lambda x: x.product_uom_qty == 15).description_picking, order_line_description + "Color (Red)", 'wrong description in picking')
+        self.assertEqual(purchase_order.picking_ids[0].move_ids_without_package.filtered(lambda x: x.product_uom_qty == 10).description_picking, order_line_description + "Color (Green)", 'wrong description in picking')
+
+    def test_reordering_days_to_purchase(self):
+        self.patcher = patch('odoo.addons.stock.models.stock_orderpoint.fields.Date', wraps=fields.Date)
+        self.mock_date = self.patcher.start()
+
+        vendor = self.env['res.partner'].create({
+            'name': 'Colruyt'
+        })
+
+        self.env.company.days_to_purchase = 2.0
+
+        product = self.env['product.product'].create({
+            'name': 'Chicory',
+            'type': 'product',
+            'seller_ids': [(0, 0, {'name': vendor.id, 'delay': 1.0})]
+        })
+        orderpoint_form = Form(self.env['stock.warehouse.orderpoint'])
+        orderpoint_form.product_id = product
+        orderpoint_form.product_min_qty = 0.0
+        orderpoint = orderpoint_form.save()
+
+        warehouse = self.env['stock.warehouse'].search([], limit=1)
+        delivery_moves = self.env['stock.move']
+        for i in range(0, 6):
+            delivery_moves |= self.env['stock.move'].create({
+                'name': 'Delivery',
+                'date_expected': datetime.today() + timedelta(days=i),
+                'product_id': product.id,
+                'product_uom': product.uom_id.id,
+                'product_uom_qty': 5.0,
+                'location_id': warehouse.lot_stock_id.id,
+                'location_dest_id': self.ref('stock.stock_location_customers'),
+            })
+        delivery_moves._action_confirm()
+        self.env['procurement.group'].run_scheduler()
+        po_line = self.env['purchase.order.line'].search([('product_id', '=', product.id)])
+        self.assertEqual(fields.Date.to_date(po_line.order_id.date_order), fields.Date.today() + timedelta(days=2))
+        self.assertEqual(len(po_line), 1)
+        self.assertEqual(po_line.product_uom_qty, 20.0)
+        self.assertEqual(len(po_line.order_id), 1)
+        orderpoint_form = Form(orderpoint)
+        orderpoint_form.save()
+
+        self.mock_date.today.return_value = fields.Date.today() + timedelta(days=1)
+        orderpoint._compute_qty()
+        self.env['procurement.group'].run_scheduler()
+        po_line = self.env['purchase.order.line'].search([('product_id', '=', product.id)])
+        self.assertEqual(len(po_line), 2)
+        self.assertEqual(len(po_line.order_id), 2)
+        new_order = po_line.order_id.sorted('date_order')[-1]
+        self.assertEqual(fields.Date.to_date(new_order.date_order), fields.Date.today() + timedelta(days=2))
+        self.assertEqual(new_order.order_line.product_uom_qty, 5.0)
+        self.patcher.stop()

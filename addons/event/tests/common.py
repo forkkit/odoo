@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from datetime import datetime, timedelta
 
 from odoo import fields
+from odoo.addons.mail.tests.common import mail_new_test_user
 from odoo.tests import common
 
 
@@ -12,39 +14,85 @@ class TestEventCommon(common.SavepointCase):
     def setUpClass(cls):
         super(TestEventCommon, cls).setUpClass()
 
-        # User groups
-        cls.group_employee_id = cls.env.ref('base.group_user').id
-        cls.group_event_user_id = cls.env.ref('event.group_event_user').id
-        cls.group_event_manager_id = cls.env.ref('event.group_event_manager').id
-        cls.group_system_id = cls.env.ref('base.group_system').id
-
         # Test users to use through the various tests
-        cls.user_eventuser = cls.env['res.users'].with_context({'no_reset_password': True}).create({
-            'name': 'Armande EventUser',
-            'login': 'Armande',
-            'email': 'armande.eventuser@example.com',
-            'tz': 'Europe/Brussels',
-            'groups_id': [(6, 0, [cls.group_employee_id, cls.group_event_user_id])]
+        cls.user_portal = mail_new_test_user(
+            cls.env, login='portal_test',
+            name='Patrick Portal', email='patrick.portal@test.example.com',
+            notification_type='email', company_id=cls.env.ref("base.main_company").id,
+            groups='base.group_portal')
+        cls.user_employee = mail_new_test_user(
+            cls.env, login='user_employee',
+            name='Eglantine Employee', email='eglantine.employee@test.example.com',
+            tz='Europe/Brussels', notification_type='inbox',
+            company_id=cls.env.ref("base.main_company").id,
+            groups='base.group_user',
+        )
+        cls.user_eventuser = mail_new_test_user(
+            cls.env, login='user_eventuser',
+            name='Ursule EventUser', email='ursule.eventuser@test.example.com',
+            tz='Europe/Brussels', notification_type='inbox',
+            company_id=cls.env.ref("base.main_company").id,
+            groups='base.group_user,event.group_event_user',
+        )
+        cls.user_eventmanager = mail_new_test_user(
+            cls.env, login='user_eventmanager',
+            name='Martine EventManager', email='martine.eventmanager@test.example.com',
+            tz='Europe/Brussels', notification_type='inbox',
+            company_id=cls.env.ref("base.main_company").id,
+            groups='base.group_user,event.group_event_manager',
+        )
+
+        cls.event_customer = cls.env['res.partner'].create({
+            'name': 'Constantin Customer',
+            'email': 'constantin@test.example.com',
+            'country_id': cls.env.ref('base.be').id,
+            'phone': '0485112233',
+            'mobile': False,
         })
-        cls.user_eventmanager = cls.env['res.users'].with_context({'no_reset_password': True}).create({
-            'name': 'Bastien EventManager',
-            'login': 'bastien',
-            'email': 'bastien.eventmanager@example.com',
-            'tz': 'Europe/Brussels',
-            'groups_id': [(6, 0, [
-                cls.group_employee_id,
-                cls.group_event_manager_id,
-                cls.group_system_id])]
+        cls.event_customer2 = cls.env['res.partner'].create({
+            'name': 'Constantin Customer 2',
+            'email': 'constantin2@test.example.com',
+            'country_id': cls.env.ref('base.be').id,
+            'phone': '0456987654',
+            'mobile': '0456654321',
         })
 
+        cls.event_type_complex = cls.env['event.type'].create({
+            'name': 'Update Type',
+            'auto_confirm': True,
+            'has_seats_limitation': True,
+            'seats_max': 30,
+            'use_timezone': True,
+            'default_timezone': 'Europe/Paris',
+            'use_ticket': True,
+            'event_type_ticket_ids': [(0, 0, {
+                    'name': 'First Ticket',
+                }), (0, 0, {
+                    'name': 'Second Ticket',
+                })
+            ],
+            'use_mail_schedule': True,
+            'event_type_mail_ids': [
+                (0, 0, {  # right at subscription
+                    'interval_unit': 'now',
+                    'interval_type': 'after_sub',
+                    'template_id': cls.env['ir.model.data'].xmlid_to_res_id('event.event_subscription')}),
+                (0, 0, {  # 1 days before event
+                    'interval_nbr': 1,
+                    'interval_unit': 'days',
+                    'interval_type': 'before_event',
+                    'template_id': cls.env['ir.model.data'].xmlid_to_res_id('event.event_reminder')}),
+            ],
+        })
         cls.event_0 = cls.env['event.event'].create({
             'name': 'TestEvent',
             'auto_confirm': True,
             'date_begin': fields.Datetime.to_string(datetime.today() + timedelta(days=1)),
             'date_end': fields.Datetime.to_string(datetime.today() + timedelta(days=15)),
+            'date_tz': 'Europe/Brussels',
         })
 
-        # set country in order to format belgium numbers
+        # set country in order to format Belgian numbers
         cls.event_0.company_id.write({'country_id': cls.env.ref('base.be').id})
 
     @classmethod

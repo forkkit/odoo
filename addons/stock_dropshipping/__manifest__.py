@@ -4,7 +4,7 @@
 {
     'name': 'Drop Shipping',
     'version': '1.0',
-    'category': 'Operations/Inventory',
+    'category': 'Inventory/Inventory',
     'summary': 'Drop Shipping',
     'description': """
 Manage drop shipping orders
@@ -20,7 +20,7 @@ going through the retailer's warehouse. In this case no
 internal transfer document is needed.
 
 """,
-    'depends': ['sale_purchase', 'sale_stock'],
+    'depends': ['sale_purchase_stock'],
     'data': ['data/stock_data.xml', 'views/sale_order_views.xml'],
     'installable': True,
     'auto_install': False,

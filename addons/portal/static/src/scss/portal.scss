@@ -5,6 +5,7 @@
 
 // ======  Variables =========
 $o-theme-navbar-logo-height: $nav-link-height !default;
+$o-theme-navbar-fixed-logo-height: $nav-link-height !default;
 
 // Portal toolbar (filters, search bar)
 $o-portal-mobile-toolbar: true; // Enable/Disable custom design
@@ -24,19 +25,10 @@ $o-portal-bg-color: desaturate($gray-200, 100%);
 $o-portal-use-default-colors: $body-bg == $o-portal-default-body-bg;
 
 // Frontend general
-#wrapwrap {
-    position: relative;
-    display: flex;
-    flex-flow: column nowrap;
-    width: 100%;
-    min-height: 100%;
-
-    > * {
-        flex: 0 0 auto;
-    }
-    > main {
-        flex: 1 0 auto;
-    }
+body {
+    // Set frontend direction that will be flipped with
+    // rtlcss for right-to-left text direction.
+    direction: ltr;
 }
 
 header {
@@ -56,7 +48,6 @@ header {
                 height: $o-theme-navbar-logo-height;
 
                 @include media-breakpoint-down(sm) {
-                    height: auto;
                     max-height: min($o-theme-navbar-logo-height, 5rem);
                 }
             }
@@ -72,7 +63,9 @@ header {
     ul.nav > li {
         &.divider {
             display: none;
-            border-right: 1px solid $nav-divider-color;
+            margin: $nav-link-padding-y ($nav-link-padding-x * 0.5);
+            border-right: 1px solid;
+            opacity: 0.25;
         }
 
         &.active + .divider {
@@ -349,11 +342,13 @@ img.o_we_custom_image {
         th {
             padding-top: $o-portal-table-th-pt;
             padding-bottom: $o-portal-table-th-pb;
+            max-width: 500px;
         }
 
         td {
             padding-top: $o-portal-table-td-pt;
             padding-bottom: $o-portal-table-td-pb;
+            max-width: 10rem;
 
         }
 
@@ -364,6 +359,8 @@ img.o_we_custom_image {
         td, th {
             vertical-align: middle;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
     }
 
@@ -384,7 +381,7 @@ img.o_we_custom_image {
                 @include o-position-absolute(0, $left: 0);
                 line-height: $line-height-base;
 
-                + span {
+                + span, + div {
                     display: block;
                     // FontAwesome '.fa-fw' fixed-with + margin
                     padding-left: 1.28571429em + 0.5em;
@@ -491,6 +488,12 @@ form label {
     .o_portal_chatter_messages {
         margin-bottom: 15px;
 
+        .o_portal_chatter_message {
+            div.media-body > p:not(.o_portal_chatter_puslished_date):last-of-type {
+                margin-bottom: 5px;
+            }
+        }
+
         .o_portal_chatter_message_title {
             p {
                 font-size:85%;
@@ -522,6 +525,18 @@ form label {
 
         &:hover .o_portal_chatter_attachment_delete {
             opacity: 1;
+        }
+    }
+
+    .o_portal_message_internal_off {
+        .btn-danger {
+            display: none;
+        }
+    }
+
+    .o_portal_message_internal_on {
+        .btn-success {
+            display: none;
         }
     }
 }

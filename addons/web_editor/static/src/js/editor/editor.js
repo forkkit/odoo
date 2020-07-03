@@ -18,6 +18,7 @@ var EditorMenuBar = Widget.extend({
         'click button[data-action=cancel]': '_onCancelClick',
     },
     custom_events: {
+        request_editable: '_onRequestEditable',
         request_history_undo_record: '_onHistoryUndoRecordRequest',
         request_save: '_onSaveRequest',
     },
@@ -106,9 +107,7 @@ var EditorMenuBar = Widget.extend({
 
         // Snippets menu
         if (self.snippetsMenu) {
-            // TODO improve this, the editor can be relocated so here,
-            // 'insertAfter(this.$el)' won't work.
-            defs.push(this.snippetsMenu.appendTo(this.$el.parent()));
+            defs.push(this.snippetsMenu.insertAfter(this.$el));
         }
         this.rte.editable().find('*').off('mousedown mouseup click');
 
@@ -144,7 +143,7 @@ var EditorMenuBar = Widget.extend({
             if (!rte.history.getEditableHasUndo().length) {
                 resolve();
             } else {
-                var confirm = Dialog.confirm(this, _t("If you discard the current edition, all unsaved changes will be lost. You can cancel to return to the edition mode."), {
+                var confirm = Dialog.confirm(this, _t("If you discard the current edits, all unsaved changes will be lost. You can cancel to return to edit mode."), {
                     confirm_callback: resolve,
                 });
                 confirm.on('closed', self, reject);
@@ -164,22 +163,20 @@ var EditorMenuBar = Widget.extend({
      *        true if the page has to be reloaded after the save
      * @returns {Promise}
      */
-    save: function (reload) {
-        var self = this;
+    save: async function (reload) {
         var defs = [];
         this.trigger_up('ready_to_save', {defs: defs});
-        return Promise.all(defs).then(function () {
-            if (self.snippetsMenu) {
-                self.snippetsMenu.cleanForSave();
-            }
-            return self._saveCroppedImages();
-        }).then(function () {
-            return self.rte.save();
-        }).then(function () {
-            if (reload !== false) {
-                return self._reload();
-            }
-        });
+        await Promise.all(defs);
+
+        if (this.snippetsMenu) {
+            await this.snippetsMenu.cleanForSave();
+        }
+        await this.getParent().saveModifiedImages(this.rte.editable());
+        await this.rte.save();
+
+        if (reload !== false) {
+            return this._reload();
+        }
     },
 
     //--------------------------------------------------------------------------
@@ -226,56 +223,6 @@ var EditorMenuBar = Widget.extend({
             window.location.reload(true);
         }
         return new Promise(function(){});
-    },
-    /**
-     * @private
-     */
-    _saveCroppedImages: function () {
-        var self = this;
-        var defs = _.map(this.rte.editable().find('.o_cropped_img_to_save'), function (croppedImg) {
-            var $croppedImg = $(croppedImg);
-            $croppedImg.removeClass('o_cropped_img_to_save');
-
-            var resModel = $croppedImg.data('crop:resModel');
-            var resID = $croppedImg.data('crop:resID');
-            var cropID = $croppedImg.data('crop:id');
-            var mimetype = $croppedImg.data('crop:mimetype');
-            var originalSrc = $croppedImg.data('crop:originalSrc');
-
-            var datas = $croppedImg.attr('src').split(',')[1];
-
-            if (!cropID) {
-                var name = originalSrc + '.crop';
-                return self._rpc({
-                    model: 'ir.attachment',
-                    method: 'create',
-                    args: [{
-                        res_model: resModel,
-                        res_id: resID,
-                        name: name,
-                        datas_fname: name,
-                        datas: datas,
-                        mimetype: mimetype,
-                        url: originalSrc, // To save the original image that was cropped
-                    }],
-                }).then(function (attachmentID) {
-                    return self._rpc({
-                        model: 'ir.attachment',
-                        method: 'generate_access_token',
-                        args: [[attachmentID]],
-                    }).then(function (access_token) {
-                        $croppedImg.attr('src', '/web/image/' + attachmentID + '?access_token=' + access_token[0]);
-                    });
-                });
-            } else {
-                return self._rpc({
-                    model: 'ir.attachment',
-                    method: 'write',
-                    args: [[cropID], {datas: datas}],
-                });
-            }
-        });
-        return Promise.all(defs);
     },
 
     //--------------------------------------------------------------------------
@@ -326,6 +273,13 @@ var EditorMenuBar = Widget.extend({
     _onSaveRequest: function (ev) {
         ev.stopPropagation();
         this.save(ev.data.reload).then(ev.data.onSuccess, ev.data.onFailure);
+    },
+    /**
+     * @private
+     * @param {OdooEvent} ev
+     */
+    _onRequestEditable: function (ev) {
+        ev.data.callback(this.rte.editable());
     },
 });
 

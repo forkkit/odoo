@@ -17,9 +17,6 @@
             padding: $o-kanban-inside-vgutter $o-kanban-inside-hgutter-mobile;
         }
         &:focus, &:focus-within {
-            -webkit-box-shadow: 1px 1px 1px 0px gray('600');
-            -moz-box-shadow: 1px 1px 1px 0px gray('600');
-            box-shadow: 1px 1px 1px 0px gray('600');
             z-index: 1; // show the shadow on top of the previous & next cards in grouped mode
             outline: none;
         }
@@ -41,6 +38,12 @@
             pointer-events: none;
             opacity: 0.7;
         }
+
+        &:focus, &:focus-within {
+            -webkit-box-shadow: 1px 1px 1px 0px gray('600');
+            -moz-box-shadow: 1px 1px 1px 0px gray('600');
+            box-shadow: 1px 1px 1px 0px gray('600');
+        }
     }
 
     .o_kanban_record {
@@ -56,6 +59,13 @@
             content: "";
             @include o-position-absolute(0, auto, 0, -1px);
             width: $o-kanban-color-border-width;
+        }
+
+        .o_kanban_record_details {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            width: 100%,
         }
 
         // Inner Sections
@@ -119,9 +129,12 @@
                 flex: 0 1 auto;
 
                 .oe_kanban_avatar {
+                    border-radius: 50%;
+                    object-fit: cover;
+                }
+                .oe_kanban_avatar, .o_field_many2one_avatar > .o_m2o_avatar {
                     width: 20px;
                     height: 20px;
-                    object-fit: cover;
                     margin-left: 6px;
                 }
             }
@@ -142,8 +155,14 @@
 
             .o_kanban_image_fill_left {
                 position: relative;
-                margin: $o-kanban-inside-vgutter*-1 $o-kanban-inside-hgutter*-1;
                 margin-right: $o-kanban-inside-hgutter*2;
+                @include media-breakpoint-up(sm) {
+                    margin: {
+                        top: $o-kanban-inside-vgutter*-1;
+                        bottom: $o-kanban-inside-vgutter*-1;
+                        left: $o-kanban-inside-hgutter*-1;
+                    }
+                }
                 flex: 1 0 $o-kanban-image-fill-width;
                 min-height: 95px;
                 background: {
@@ -165,7 +184,7 @@
                 margin-right: $o-kanban-inside-hgutter*2;
                 flex: 0 0 $o-kanban-image-width;
                 min-height: $o-kanban-image-width;
-                align-self: baseline;
+                align-self: center;
                 background: {
                     size: cover;
                     repeat: no-repeat;
@@ -176,7 +195,11 @@
                 @include media-breakpoint-up(md) {
                     $fill-notfill-gap: ($o-kanban-image-fill-width - $o-kanban-inside-hgutter*2) - $o-kanban-image-width;
                     margin: { left: $fill-notfill-gap*0.5; right: $fill-notfill-gap*2;}
-                    align-self: center;
+                }
+
+                @include media-breakpoint-down(sm) {
+                    flex-basis: $o-kanban-image-fill-width;
+                    min-height: $o-kanban-image-fill-width;
                 }
 
                 // Reset immedialy after div padding
@@ -241,6 +264,7 @@
             display: block;
             margin-bottom: $o-kanban-inner-hmargin;
             line-height: 1.2;
+            word-break: break-all;
 
             .o_tag {
                 display: inline-block;
@@ -259,6 +283,12 @@
                     margin-right: 4px;
                     border-radius: 100%;
                 }
+            }
+        }
+
+        .o_field_many2one_avatar {
+            img.o_m2o_avatar {
+                margin-right: 0;
             }
         }
 
@@ -287,6 +317,11 @@
         // Kanban Record - Utility classes
         &.oe_kanban_global_click, &.oe_kanban_global_click_edit {
             cursor: pointer;
+            &:focus, &:focus-within {
+                -webkit-box-shadow: 1px 1px 1px 0px gray('600');
+                -moz-box-shadow: 1px 1px 1px 0px gray('600');
+                box-shadow: 1px 1px 1px 0px gray('600');
+            }
         }
 
         &.ui-sortable-helper {
@@ -544,6 +579,8 @@
 
     // Kanban UN-grouped Layout
     &.o_kanban_ungrouped {
+        min-height: 100%;
+        align-content: flex-start;
         flex-flow: row wrap;
         justify-content: flex-start;
 

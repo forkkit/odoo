@@ -2,8 +2,18 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 
-from odoo.tests.common import BaseCase
-from odoo.tools import html_sanitize, append_content_to_html, plaintext2html, email_split, misc
+from unittest.mock import patch
+import email.policy
+import email.message
+import threading
+
+from odoo.tests.common import BaseCase, SavepointCase, TransactionCase
+from odoo.tools import (
+    is_html_empty, html_sanitize, append_content_to_html, plaintext2html,
+    email_split,
+    misc, formataddr,
+)
+
 from . import test_mail_examples
 
 
@@ -94,10 +104,10 @@ class TestSanitizer(BaseCase):
         not_emails = [
             '<blockquote cite="mid:CAEJSRZvWvud8c6Qp=wfNG6O1+wK3i_jb33qVrF7XyrgPNjnyUA@mail.gmail.com" type="cite">cat</blockquote>',
             '<img alt="@github-login" class="avatar" src="/web/image/pi" height="36" width="36">']
-        for email in not_emails:
-            sanitized = html_sanitize(email)
-            left_part = email.split('>')[0]  # take only left part, as the sanitizer could add data information on node
-            self.assertNotIn(misc.html_escape(email), sanitized, 'html_sanitize stripped emails of original html')
+        for not_email in not_emails:
+            sanitized = html_sanitize(not_email)
+            left_part = not_email.split('>')[0]  # take only left part, as the sanitizer could add data information on node
+            self.assertNotIn(misc.html_escape(not_email), sanitized, 'html_sanitize stripped emails of original html')
             self.assertIn(left_part, sanitized)
 
     def test_style_parsing(self):
@@ -303,11 +313,26 @@ class TestHtmlTools(BaseCase):
              '<!DOCTYPE...><html encoding="blah">some <b>content</b>\n<pre>--\nYours truly</pre>\n</html>'),
             ('<!DOCTYPE...><HTML encoding="blah">some <b>content</b></HtMl>', '--\nYours truly', True, False, False,
              '<!DOCTYPE...><html encoding="blah">some <b>content</b>\n<p>--<br/>Yours truly</p>\n</html>'),
+            ('<html><body>some <b>content</b></body></html>', '--\nYours & <truly>', True, True, False,
+             '<html><body>some <b>content</b>\n<pre>--\nYours &amp; &lt;truly&gt;</pre>\n</body></html>'),
             ('<html><body>some <b>content</b></body></html>', '<!DOCTYPE...>\n<html><body>\n<p>--</p>\n<p>Yours truly</p>\n</body>\n</html>', False, False, False,
              '<html><body>some <b>content</b>\n\n\n<p>--</p>\n<p>Yours truly</p>\n\n\n</body></html>'),
         ]
         for html, content, plaintext_flag, preserve_flag, container_tag, expected in test_samples:
             self.assertEqual(append_content_to_html(html, content, plaintext_flag, preserve_flag, container_tag), expected, 'append_content_to_html is broken')
+
+    def test_is_html_empty(self):
+        void_strings_samples = ['', False, ' ']
+        for content in void_strings_samples:
+            self.assertTrue(is_html_empty(content))
+
+        void_html_samples = ['<p><br></p>', '<p><br> </p>', '<p><br /></p >']
+        for content in void_html_samples:
+            self.assertTrue(is_html_empty(content), 'Failed with %s' % content)
+
+        valid_html_samples = ['<p><br>1</p>', '<p>1<br > </p>']
+        for content in valid_html_samples:
+            self.assertFalse(is_html_empty(content))
 
 
 class TestEmailTools(BaseCase):
@@ -323,3 +348,88 @@ class TestEmailTools(BaseCase):
         ]
         for text, expected in cases:
             self.assertEqual(email_split(text), expected, 'email_split is broken')
+
+    def test_email_formataddr(self):
+        email = 'joe@example.com'
+        email_idna = 'joe@examplé.com'
+        cases = [
+            # (name, address),          charsets            expected
+            (('', email),               ['ascii', 'utf-8'], 'joe@example.com'),
+            (('joe', email),            ['ascii', 'utf-8'], '"joe" <joe@example.com>'),
+            (('joe doe', email),        ['ascii', 'utf-8'], '"joe doe" <joe@example.com>'),
+            (('joe"doe', email),        ['ascii', 'utf-8'], '"joe\\"doe" <joe@example.com>'),
+            (('joé', email),            ['ascii'],          '=?utf-8?b?am/DqQ==?= <joe@example.com>'),
+            (('joé', email),            ['utf-8'],          '"joé" <joe@example.com>'),
+            (('', email_idna),          ['ascii'],          'joe@xn--exampl-gva.com'),
+            (('', email_idna),          ['utf-8'],          'joe@examplé.com'),
+            (('joé', email_idna),       ['ascii'],          '=?utf-8?b?am/DqQ==?= <joe@xn--exampl-gva.com>'),
+            (('joé', email_idna),       ['utf-8'],          '"joé" <joe@examplé.com>'),
+            (('', 'joé@example.com'),   ['ascii', 'utf-8'], 'joé@example.com'),
+        ]
+
+        for pair, charsets, expected in cases:
+            for charset in charsets:
+                with self.subTest(pair=pair, charset=charset):
+                    self.assertEqual(formataddr(pair, charset), expected)
+
+
+class EmailConfigCase(SavepointCase):
+    @patch.dict("odoo.tools.config.options", {"email_from": "settings@example.com"})
+    def test_default_email_from(self, *args):
+        """Email from setting is respected."""
+        # ICP setting is more important
+        ICP = self.env["ir.config_parameter"].sudo()
+        ICP.set_param("mail.catchall.domain", "example.org")
+        ICP.set_param("mail.default.from", "icp")
+        message = self.env["ir.mail_server"].build_email(
+            False, "recipient@example.com", "Subject",
+            "The body of an email",
+        )
+        self.assertEqual(message["From"], "icp@example.org")
+        # Without ICP, the config file/CLI setting is used
+        ICP.set_param("mail.default.from", False)
+        message = self.env["ir.mail_server"].build_email(
+            False, "recipient@example.com", "Subject",
+            "The body of an email",
+        )
+        self.assertEqual(message["From"], "settings@example.com")
+
+
+class TestEmailMessage(TransactionCase):
+    def test_as_string(self):
+        """Ensure all email sent are bpo-34424 free"""
+
+        class FakeSMTP:
+            """SMTP stub"""
+            def __init__(this):
+                this.email_sent = False
+
+            def sendmail(this, smtp_from, smtp_to_list, message_str,
+                         mail_options=(), rcpt_options=()):
+                this.email_sent = True
+                message_truth = (
+                    r'From: .+? <joe@example\.com>\r\n'
+                    r'To: .+? <joe@example\.com>\r\n'
+                    r'\r\n'
+                )
+                self.assertRegex(message_str, message_truth)
+
+            def send_message(this, message, smtp_from, smtp_to_list,
+                             mail_options=(), rcpt_options=()):
+                message_str = message.as_string()
+                this.email_sent = True
+                message_truth = (
+                    r'From: .+? <joe@example\.com>\r\n'
+                    r'To: .+? <joe@example\.com>\r\n'
+                    r'\r\n'
+                )
+                self.assertRegex(message_str, message_truth)
+
+        msg = email.message.EmailMessage(policy=email.policy.SMTP)
+        msg['From'] = '"Joé Doe" <joe@example.com>'
+        msg['To'] = '"Joé Doe" <joe@example.com>'
+
+        smtp = FakeSMTP()
+        self.patch(threading.currentThread(), 'testing', False)
+        self.env['ir.mail_server'].send_email(msg, smtp_session=smtp)
+        self.assertTrue(smtp.email_sent)

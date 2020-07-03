@@ -26,6 +26,10 @@ odoo.define('web.test.x2many', function (require) {
         trigger: 'tr:contains(Moderator) .o_input_dropdown > input',
         run: 'click',
     }, {
+        content: "insert value in moderator",
+        trigger: 'input.ui-autocomplete-input',
+        run: 'text test',
+    }, {
         content: "click on 'Create and Edit...'",
         trigger: '.ui-autocomplete .o_m2o_dropdown_option:last',
     }, {
@@ -77,6 +81,11 @@ odoo.define('web.test.x2many', function (require) {
     }, { // add message a
         content: "Select First Tab",
         trigger: 'a[role=tab]:first',
+        // We check the "Save" button is in the DOM to ensure that the form renderer
+        // is fully loaded and is on the right pane (right now the renderer dispatches
+        // a click on its last active pane header. We can remove this assert once the
+        // form renderer behaves properly).
+        extra_trigger: 'button.o_form_button_save',
     }, {
         content: "create new message a",
         trigger: '.o_form_sheet .tab-pane:eq(0) .o_field_x2many_list_row_add a'
@@ -218,7 +227,7 @@ odoo.define('web.test.x2many', function (require) {
         extra_trigger: '.tab-pane:eq(0) .o_field_widget tbody tr td:contains(aaa)',
     }, {
         content: "open the many2one to select another user",
-        trigger: '.o_input_dropdown > input',
+        trigger: '.o_field_many2one[name="author"] .o_input_dropdown > input',
         run: 'text Marc',
     }, {
         content: "select another user",

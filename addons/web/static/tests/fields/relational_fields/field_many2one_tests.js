@@ -2,7 +2,6 @@ odoo.define('web.field_many_to_one_tests', function (require) {
 "use strict";
 
 var BasicModel = require('web.BasicModel');
-var concurrency = require('web.concurrency');
 var FormView = require('web.FormView');
 var ListView = require('web.ListView');
 var relationalFields = require('web.relational_fields');
@@ -10,6 +9,7 @@ var StandaloneFieldManagerMixin = require('web.StandaloneFieldManagerMixin');
 var testUtils = require('web.test_utils');
 var Widget = require('web.Widget');
 
+const cpHelpers = testUtils.controlPanel;
 var createView = testUtils.createView;
 
 QUnit.module('fields', {}, function () {
@@ -245,11 +245,11 @@ QUnit.module('fields', {}, function () {
             // save form
             await testUtils.form.clickSave(form);
             // click next on pager
-            await testUtils.dom.click(form.pager.$('.o_pager_next'));
+            await testUtils.dom.click(form.el.querySelector('.o_pager .o_pager_next'));
 
             // this checks that the view did not ask for confirmation that the
             // record is dirty
-            assert.strictEqual(form.pager.$el.text().trim(), '2 / 2',
+            assert.strictEqual(form.el.querySelector('.o_pager').innerText.trim(), '2 / 2',
                 'pager should be at second page');
             form.destroy();
         });
@@ -317,11 +317,11 @@ QUnit.module('fields', {}, function () {
             // save form
             await testUtils.form.clickSave(form);
             // click next on pager
-            await testUtils.dom.click(form.pager.$('.o_pager_next'));
+            await testUtils.dom.click(form.el.querySelector('.o_pager .o_pager_next'));
 
             // this checks that the view did not ask for confirmation that the
             // record is dirty
-            assert.strictEqual(form.pager.$el.text().trim(), '2 / 2',
+            assert.strictEqual(form.el.querySelector('.o_pager').innerText.trim(), '2 / 2',
                 'pager should be at second page');
             form.destroy();
         });
@@ -507,11 +507,11 @@ QUnit.module('fields', {}, function () {
 
             assert.strictEqual($('tr.o_data_row').length, 9, "should display 9 records");
 
-            await testUtils.dom.click($('button:contains(Filters)'));
-            await testUtils.dom.click($('.o_add_custom_filter:visible'));
-            assert.strictEqual($('.o_filter_condition select.o_searchview_extended_prop_field').val(), 'datetime',
+            await cpHelpers.toggleFilterMenu('.modal');
+            await cpHelpers.toggleAddCustomFilter('.modal');
+            assert.strictEqual(document.querySelector('.modal .o_generator_menu_field').value, 'datetime',
                 "datetime field should be selected");
-            await testUtils.dom.click($('.o_apply_filter'));
+            await cpHelpers.applyFilter('.modal');
 
             assert.strictEqual($('tr.o_data_row').length, 0, "should display 0 records");
             form.destroy();
@@ -593,7 +593,6 @@ QUnit.module('fields', {}, function () {
             assert.containsNone(document.body, '.modal',
                 "No save should be triggered when removing value");
 
-            await testUtils.fields.many2one.clickOpenDropdown('trululu');
             await testUtils.fields.many2one.clickHighlightedItem('trululu');
 
             assert.containsOnce(document.body, '.modal',
@@ -626,8 +625,7 @@ QUnit.module('fields', {}, function () {
 
             assert.strictEqual(document.activeElement, input, "Input should be focused when activated");
 
-            await testUtils.fields.many2one.clickOpenDropdown('trululu');
-            await testUtils.fields.many2one.clickItem('trululu', 'Create');
+            await testUtils.fields.many2one.createAndEdit('trululu', "ABC");
 
             // At this point, if the focus is correctly registered by the m2o, there
             // should be only one modal (the "Create" one) and none for saving changes.
@@ -668,8 +666,78 @@ QUnit.module('fields', {}, function () {
             form.destroy();
         });
 
+        QUnit.test('empty many2one field', async function (assert) {
+            assert.expect(4);
+
+            const form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: `<form string="Partners">
+                        <sheet>
+                            <group>
+                                <field name="trululu"/>
+                            </group>
+                        </sheet>
+                    </form>`,
+                viewOptions: {
+                    mode: 'edit',
+                },
+            });
+
+            const $dropdown = form.$('.o_field_many2one input').autocomplete('widget');
+            await testUtils.fields.many2one.clickOpenDropdown('trululu');
+            assert.containsNone($dropdown, 'li.o_m2o_dropdown_option',
+                'autocomplete should not contains dropdown options');
+            assert.containsOnce($dropdown, 'li.o_m2o_start_typing',
+                'autocomplete should contains start typing option');
+
+            await testUtils.fields.editAndTrigger(form.$('.o_field_many2one[name="trululu"] input'),
+                'abc', 'keydown');
+            await testUtils.nextTick();
+            assert.containsN($dropdown, 'li.o_m2o_dropdown_option', 2,
+                'autocomplete should contains 2 dropdown options');
+            assert.containsNone($dropdown, 'li.o_m2o_start_typing',
+                'autocomplete should not contains start typing option');
+
+            form.destroy();
+        });
+
+        QUnit.test('empty many2one field with node options', async function (assert) {
+            assert.expect(2);
+
+            const form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: `<form string="Partners">
+                    <sheet>
+                        <group>
+                            <field name="trululu" options="{'no_create_edit': 1}"/>
+                            <field name="product_id" options="{'no_create_edit': 1, 'no_quick_create': 1}"/>
+                        </group>
+                    </sheet>
+                </form>`,
+                viewOptions: {
+                    mode: 'edit',
+                },
+            });
+
+            const $dropdownTrululu = form.$('.o_field_many2one[name="trululu"] input').autocomplete('widget');
+            const $dropdownProduct = form.$('.o_field_many2one[name="product_id"] input').autocomplete('widget');
+            await testUtils.fields.many2one.clickOpenDropdown('trululu');
+            assert.containsOnce($dropdownTrululu, 'li.o_m2o_start_typing',
+                'autocomplete should contains start typing option');
+
+            await testUtils.fields.many2one.clickOpenDropdown('product_id');
+            assert.containsNone($dropdownProduct, 'li.o_m2o_start_typing',
+                'autocomplete should contains start typing option');
+
+            form.destroy();
+        });
+
         QUnit.test('many2one in edit mode', async function (assert) {
-            assert.expect(16);
+            assert.expect(17);
 
             // create 10 partners to have the 'Search More' option in the autocomplete dropdown
             for (var i = 0; i < 10; i++) {
@@ -717,9 +785,11 @@ QUnit.module('fields', {}, function () {
             assert.ok($dropdown.is(':visible'),
                 'clicking on the m2o input should open the dropdown if it is not open yet');
             assert.strictEqual($dropdown.find('li:not(.o_m2o_dropdown_option)').length, 7,
-                'autocomplete should contains 7 suggestions');
-            assert.strictEqual($dropdown.find('li.o_m2o_dropdown_option').length, 2,
-                'autocomplete should contain "Search More" and Create and Edit..."');
+                'autocomplete should contains 8 suggestions');
+            assert.strictEqual($dropdown.find('li.o_m2o_dropdown_option').length, 1,
+                'autocomplete should contain "Search More"');
+            assert.containsNone($dropdown, 'li.o_m2o_start_typing',
+                'autocomplete should not contains start typing option if value is available');
 
             await testUtils.fields.many2one.clickOpenDropdown('trululu');
             assert.ok(!$dropdown.is(':visible'),
@@ -742,8 +812,8 @@ QUnit.module('fields', {}, function () {
             assert.ok(!$('.modal .modal-footer .o_select_button').length,
                 "there should be no 'Select' button in the footer");
             assert.ok($('.modal tbody tr').length > 10, "list should contain more than 10 records");
-            await testUtils.fields.triggerKey('press', $('.modal .o_searchview_input'), 'P'),
-            await testUtils.fields.triggerKeydown($('.modal .o_searchview_input'), 'enter');
+            await cpHelpers.editSearch('.modal', "P");
+            await cpHelpers.validateSearch('.modal');
             assert.strictEqual($('.modal tbody tr').length, 10,
                 "list should be restricted to records containing a P (10 records)");
             // choose a record
@@ -786,6 +856,39 @@ QUnit.module('fields', {}, function () {
 
             assert.hasAttrValue(form.$('a.o_form_uri'), 'href', "#",
                 "href should have #");
+
+            form.destroy();
+        });
+
+        QUnit.test('many2one with co-model whose name field is a many2one', async function (assert) {
+            assert.expect(4);
+
+            this.data.product.fields.name = {
+                string: 'User Name',
+                type: 'many2one',
+                relation: 'user',
+            };
+
+            const form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: '<form><field name="product_id"/></form>',
+                archs: {
+                    'product,false,form': '<form><field name="name"/></form>',
+                },
+            });
+
+            await testUtils.fields.many2one.createAndEdit('product_id', "ABC");
+            assert.containsOnce(document.body, '.modal .o_form_view');
+
+            // quick create 'new value'
+            await testUtils.fields.many2one.searchAndClickItem('name', {search: 'new value'});
+            assert.strictEqual($('.modal .o_field_many2one input').val(), 'new value');
+
+            await testUtils.dom.click($('.modal .modal-footer .btn-primary')); // save in modal
+            assert.containsNone(document.body, '.modal .o_form_view');
+            assert.strictEqual(form.$('.o_field_many2one input').val(), 'new value');
 
             form.destroy();
         });
@@ -834,6 +937,52 @@ QUnit.module('fields', {}, function () {
             assert.verifySteps(['search: ', 'search: ', 'search: p', 'search: p']);
 
             relationalFields.FieldMany2One.prototype.AUTOCOMPLETE_DELAY = M2O_DELAY;
+            form.destroy();
+        });
+
+        QUnit.test('many2one search with trailing and leading spaces', async function (assert) {
+            assert.expect(10);
+
+            const form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: `<form><field name="trululu"/></form>`,
+                mockRPC: function (route, args) {
+                    if (args.method === 'name_search') {
+                        assert.step('search: ' + args.kwargs.name);
+                    }
+                    return this._super.apply(this, arguments);
+                },
+            });
+
+            const $dropdown = form.$('.o_field_many2one input').autocomplete('widget');
+
+            await testUtils.fields.many2one.clickOpenDropdown('trululu');
+            assert.isVisible($dropdown);
+            assert.containsN($dropdown, 'li:not(.o_m2o_dropdown_option)', 4,
+                'autocomplete should contains 4 suggestions');
+
+            // search with leading spaces
+            form.$('.o_field_many2one input').val('   first').trigger('keydown').trigger('keyup');
+            await testUtils.nextTick();
+            assert.containsOnce($dropdown, 'li:not(.o_m2o_dropdown_option)',
+                'autocomplete should contains 1 suggestion');
+
+            // search with trailing spaces
+            form.$('.o_field_many2one input').val('first  ').trigger('keydown').trigger('keyup');
+            await testUtils.nextTick();
+            assert.containsOnce($dropdown, 'li:not(.o_m2o_dropdown_option)',
+                'autocomplete should contains 1 suggestion');
+
+            // search with leading and trailing spaces
+            form.$('.o_field_many2one input').val('   first   ').trigger('keydown').trigger('keyup');
+            await testUtils.nextTick();
+            assert.containsOnce($dropdown, 'li:not(.o_m2o_dropdown_option)',
+                'autocomplete should contains 1 suggestion');
+
+            assert.verifySteps(['search: ', 'search: first', 'search: first', 'search: first']);
+
             form.destroy();
         });
 
@@ -911,7 +1060,7 @@ QUnit.module('fields', {}, function () {
             var fixture = $('#qunit-fixture');
             var self = this;
 
-            var model = testUtils.createModel({
+            var model = await testUtils.createModel({
                 Model: BasicModel,
                 data: this.data,
             });
@@ -933,7 +1082,8 @@ QUnit.module('fields', {}, function () {
                 },
             });
             var parent = new StandaloneWidget(model);
-            testUtils.mock.addMockEnvironment(parent, {
+            model.setParent(parent);
+            await testUtils.mock.addMockEnvironment(parent, {
                 data: self.data,
                 mockRPC: function (route, args) {
                     assert.step(args.method);
@@ -1790,7 +1940,7 @@ QUnit.module('fields', {}, function () {
         });
 
         QUnit.test('list in form: call button in sub view', async function (assert) {
-            assert.expect(6);
+            assert.expect(11);
 
             this.data.partner.records[0].p = [2];
             var form = await createView({
@@ -1821,6 +1971,7 @@ QUnit.module('fields', {}, function () {
                             'should call with correct currentID in env');
                         assert.deepEqual(event.data.env.resIDs, [37],
                             'should call with correct resIDs in env');
+                        assert.step(event.data.action_data.name);
                     },
                 },
                 archs: {
@@ -1838,8 +1989,14 @@ QUnit.module('fields', {}, function () {
             await testUtils.dom.click(form.$('td.o_data_cell:first'));
             await testUtils.dom.click(form.$('.o_external_button'));
             await testUtils.dom.click($('button:contains("Just do it !")'));
+            assert.verifySteps(['action']);
             await testUtils.dom.click($('button:contains("Just don\'t do it !")'));
+            assert.verifySteps([]); // the second button is disabled, it can't be clicked
 
+            await testUtils.dom.click($('.modal .btn-secondary:contains(Discard)'));
+            await testUtils.dom.click(form.$('.o_external_button'));
+            await testUtils.dom.click($('button:contains("Just don\'t do it !")'));
+            assert.verifySteps(['object']);
             form.destroy();
         });
 
@@ -2095,7 +2252,7 @@ QUnit.module('fields', {}, function () {
         });
 
         QUnit.test('quick create on a many2one', async function (assert) {
-            assert.expect(1);
+            assert.expect(2);
 
             var form = await createView({
                 View: FormView,
@@ -2115,10 +2272,85 @@ QUnit.module('fields', {}, function () {
                 },
             });
 
-            form.$('.o_field_many2one input').focus();
+            await testUtils.dom.triggerEvent(form.$('.o_field_many2one input'),'focus');
             await testUtils.fields.editAndTrigger(form.$('.o_field_many2one input'),
-            'new partner', ['keyup', 'focusout']);
+            'new partner', ['keyup', 'blur']);
             await testUtils.dom.click($('.modal .modal-footer .btn-primary').first());
+            assert.strictEqual($('.modal .modal-body').text().trim(), "Do you want to create new partner as a new Product?");
+
+            form.destroy();
+        });
+
+        QUnit.test('failing quick create on a many2one', async function (assert) {
+            assert.expect(4);
+
+            const form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: '<form><field name="product_id"/></form>',
+                archs: {
+                    'product,false,form': '<form><field name="name"/></form>',
+                },
+                mockRPC(route, args) {
+                    if (args.method === 'name_create') {
+                        return Promise.reject();
+                    }
+                    if (args.method === 'create') {
+                        assert.deepEqual(args.args[0], { name: 'xyz' });
+                    }
+                    return this._super(...arguments);
+                },
+            });
+
+            await testUtils.fields.many2one.searchAndClickItem('product_id', {
+                search: 'abcd',
+                item: 'Create "abcd"',
+            });
+            assert.containsOnce(document.body, '.modal .o_form_view');
+            assert.strictEqual($('.o_field_widget[name=name]').val(), 'abcd');
+
+            await testUtils.fields.editInput($('.modal .o_field_widget[name=name]'), 'xyz');
+            await testUtils.dom.click($('.modal .modal-footer .btn-primary'));
+            assert.strictEqual(form.$('.o_field_widget[name=product_id] input').val(), 'xyz');
+
+            form.destroy();
+        });
+
+        QUnit.test('failing quick create on a many2one inside a one2many', async function (assert) {
+            assert.expect(4);
+
+            const form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: '<form><field name="p"/></form>',
+                archs: {
+                    'partner,false,list': '<tree editable="bottom"><field name="product_id"/></tree>',
+                    'product,false,form': '<form><field name="name"/></form>',
+                },
+                mockRPC(route, args) {
+                    if (args.method === 'name_create') {
+                        return Promise.reject();
+                    }
+                    if (args.method === 'create') {
+                        assert.deepEqual(args.args[0], { name: 'xyz' });
+                    }
+                    return this._super(...arguments);
+                },
+            });
+
+            await testUtils.dom.click(form.$('.o_field_x2many_list_row_add a'));
+            await testUtils.fields.many2one.searchAndClickItem('product_id', {
+                search: 'abcd',
+                item: 'Create "abcd"',
+            });
+            assert.containsOnce(document.body, '.modal .o_form_view');
+            assert.strictEqual($('.o_field_widget[name=name]').val(), 'abcd');
+
+            await testUtils.fields.editInput($('.modal .o_field_widget[name=name]'), 'xyz');
+            await testUtils.dom.click($('.modal .modal-footer .btn-primary'));
+            assert.strictEqual(form.$('.o_field_widget[name=product_id] input').val(), 'xyz');
 
             form.destroy();
         });
@@ -2757,6 +2989,66 @@ QUnit.module('fields', {}, function () {
             form.destroy();
         });
 
+        QUnit.test('search more in many2one: resequence inside dialog', async function (assert) {
+            // when the user clicks on 'Search More...' in a many2one dropdown, resequencing inside
+            // the dialog works
+            assert.expect(10);
+
+            this.data.partner.fields.sequence = { string: 'Sequence', type: 'integer' };
+            for (var i = 0; i < 8; i++) {
+                this.data.partner.records.push({id: 100 + i, display_name: 'test_' + i});
+            }
+
+            var form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: '<form><field name="trululu"/></form>',
+                archs: {
+                    'partner,false,list': '<list>' +
+                        '<field name="sequence" widget="handle"/>' +
+                        '<field name="display_name"/>' +
+                    '</list>',
+                    'partner,false,search': '<search></search>',
+                },
+                mockRPC: function (route, args) {
+                    assert.step(args.method || route);
+                    if (route === '/web/dataset/search_read') {
+                        assert.deepEqual(args.domain, [],
+                            "should not preselect ids as there as nothing in the m2o input");
+                    }
+                    return this._super.apply(this, arguments);
+                },
+            });
+
+            await testUtils.fields.many2one.searchAndClickItem('trululu', {
+                item: 'Search More',
+                search: '',
+            });
+
+            var $modal = $('.modal');
+            assert.equal($modal.length, 1,
+                'There should be 1 modal opened');
+
+            var $handles = $modal.find('.ui-sortable-handle');
+            assert.equal($handles.length, 11,
+                'There should be 11 sequence handlers');
+
+            await testUtils.dom.dragAndDrop($handles.eq(1),
+                $modal.find('tbody tr').first(), { position: 'top' });
+
+            assert.verifySteps([
+                'default_get',
+                'name_search', // to display results in the dropdown
+                'load_views', // list view in dialog
+                '/web/dataset/search_read', // to display results in the dialog
+                '/web/dataset/resequence', // resequencing lines
+                'read',
+            ]);
+
+            form.destroy();
+        });
+
         QUnit.test('many2one dropdown disappears on scroll', async function (assert) {
             assert.expect(2);
 
@@ -3115,6 +3407,108 @@ QUnit.module('fields', {}, function () {
             assert.containsOnce(form, 'th:not(.o_list_record_remove_header)',
                 "should be 1 column after the value change");
             form.destroy();
+        });
+
+        QUnit.module('Many2OneAvatar');
+
+        QUnit.test('many2one_avatar widget in form view', async function (assert) {
+            assert.expect(10);
+
+            const form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: '<form><field name="user_id" widget="many2one_avatar"/></form>',
+                res_id: 1,
+            });
+
+            assert.hasClass(form.$('.o_form_view'), 'o_form_readonly');
+            assert.strictEqual(form.$('.o_field_widget[name=user_id]').text().trim(), 'Aline');
+            assert.containsOnce(form, 'img.o_m2o_avatar[data-src="/web/image/user/17/image_128"]');
+
+            await testUtils.form.clickEdit(form);
+
+            assert.hasClass(form.$('.o_form_view'), 'o_form_editable');
+            assert.containsOnce(form, '.o_input_dropdown');
+            assert.strictEqual(form.$('.o_input_dropdown input').val(), 'Aline');
+            assert.containsOnce(form, '.o_external_button');
+
+            await testUtils.fields.many2one.clickOpenDropdown("user_id");
+            await testUtils.fields.many2one.clickItem("user_id", "Christine");
+            await testUtils.form.clickSave(form);
+
+            assert.hasClass(form.$('.o_form_view'), 'o_form_readonly');
+            assert.strictEqual(form.$('.o_field_widget[name=user_id]').text().trim(), 'Christine');
+            assert.containsOnce(form, 'img.o_m2o_avatar[data-src="/web/image/user/19/image_128"]');
+
+            form.destroy();
+        });
+
+        QUnit.test('many2one_avatar widget in form view, with onchange', async function (assert) {
+            assert.expect(7);
+
+            this.data.partner.onchanges = {
+                int_field: function (obj) {
+                    if (obj.int_field === 1) {
+                        obj.user_id = [19, 'Christine'];
+                    } else if (obj.int_field === 2) {
+                        obj.user_id = false;
+                    } else {
+                        obj.user_id = [17, 'Aline']; // default value
+                    }
+                },
+            };
+            const form = await createView({
+                View: FormView,
+                model: 'partner',
+                data: this.data,
+                arch: `
+                    <form>
+                        <field name="int_field"/>
+                        <field name="user_id" widget="many2one_avatar" readonly="1"/>
+                    </form>`,
+            });
+
+            assert.hasClass(form.$('.o_form_view'), 'o_form_editable');
+            assert.strictEqual(form.$('.o_field_widget[name=user_id]').text().trim(), 'Aline');
+            assert.containsOnce(form, 'img.o_m2o_avatar[data-src="/web/image/user/17/image_128"]');
+
+            await testUtils.fields.editInput(form.$('.o_field_widget[name=int_field]'), 1);
+
+            assert.strictEqual(form.$('.o_field_widget[name=user_id]').text().trim(), 'Christine');
+            assert.containsOnce(form, 'img.o_m2o_avatar[data-src="/web/image/user/19/image_128"]');
+
+            await testUtils.fields.editInput(form.$('.o_field_widget[name=int_field]'), 2);
+
+            assert.strictEqual(form.$('.o_field_widget[name=user_id]').text().trim(), '');
+            assert.containsNone(form, 'img.o_m2o_avatar');
+
+            form.destroy();
+        });
+
+        QUnit.test('many2one_avatar widget in list view', async function (assert) {
+            assert.expect(5);
+
+            this.data.partner.records = [
+                { id: 1, user_id: 17, },
+                { id: 2, user_id: 19, },
+                { id: 3, user_id: 17, },
+                { id: 3, user_id: false, },
+            ];
+            const list = await createView({
+                View: ListView,
+                model: 'partner',
+                data: this.data,
+                arch: '<tree><field name="user_id" widget="many2one_avatar"/></tree>',
+            });
+
+            assert.strictEqual(list.$('.o_data_cell span').text(), 'AlineChristineAline');
+            assert.containsOnce(list.$('.o_data_cell:nth(0)'), 'img.o_m2o_avatar[data-src="/web/image/user/17/image_128"]');
+            assert.containsOnce(list.$('.o_data_cell:nth(1)'), 'img.o_m2o_avatar[data-src="/web/image/user/19/image_128"]');
+            assert.containsOnce(list.$('.o_data_cell:nth(2)'), 'img.o_m2o_avatar[data-src="/web/image/user/17/image_128"]');
+            assert.containsNone(list.$('.o_data_cell:nth(3)'), 'img.o_m2o_avatar');
+
+            list.destroy();
         });
     });
 });

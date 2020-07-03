@@ -103,8 +103,7 @@ class IrActionsReport(models.Model):
         ' rendering method. HTML means the report will be opened directly in your'
         ' browser PDF means the report will be rendered using Wkhtmltopdf and'
         ' downloaded by the user.')
-    report_name = fields.Char(string='Template Name', required=True,
-                              help="For QWeb reports, name of the template used in the rendering. The method 'render_html' of the model 'report.template_name' will be called (if any) to give the html. For RML reports, this is the LocalService name.")
+    report_name = fields.Char(string='Template Name', required=True)
     report_file = fields.Char(string='Report File', required=False, readonly=False, store=True,
                               help="The path to the main report file (depending on Report Type) or empty if the content is in another field")
     groups_id = fields.Many2many('res.groups', 'res_groups_report_rel', 'uid', 'gid', string='Groups')
@@ -114,7 +113,7 @@ class IrActionsReport(models.Model):
     print_report_name = fields.Char('Printed Report Name', translate=True,
                                     help="This is the filename of the report going to download. Keep empty to not change the report filename. You can use a python expression with the 'object' and 'time' variables.")
     attachment_use = fields.Boolean(string='Reload from Attachment',
-                                    help='If you check this, then the second time the user prints with same attachment name, it returns the previous report.')
+                                    help='If enabled, then the second time the user prints with same attachment name, it returns the previous report.')
     attachment = fields.Char(string='Save as Attachment Prefix',
                              help='This is the filename of the attachment used to store the printing result. Keep empty to not save the printed reports. You can use a python expression with the object and time variables.')
 
@@ -178,8 +177,9 @@ class IrActionsReport(models.Model):
         if attachment.mimetype.startswith('image'):
             stream = io.BytesIO(base64.b64decode(attachment.datas))
             img = Image.open(stream)
-            img.convert("RGB").save(stream, format="pdf")
-            return stream
+            output_stream = io.BytesIO()
+            img.convert("RGB").save(output_stream, format="pdf")
+            return output_stream
         return io.BytesIO(base64.decodebytes(attachment.datas))
 
     def retrieve_attachment(self, record):
@@ -198,7 +198,7 @@ class IrActionsReport(models.Model):
                 ('res_id', '=', record.id)
         ], limit=1)
 
-    def postprocess_pdf_report(self, record, buffer):
+    def _postprocess_pdf_report(self, record, buffer):
         '''Hook to handle post processing during the pdf report generation.
         The basic behavior consists to create a new attachment containing the pdf
         base64 encoded.
@@ -212,7 +212,7 @@ class IrActionsReport(models.Model):
             return None
         attachment_vals = {
             'name': attachment_name,
-            'datas': base64.encodebytes(buffer.getvalue()),
+            'raw': buffer.getvalue(),
             'res_model': self.model,
             'res_id': record.id,
             'type': 'binary',
@@ -370,7 +370,7 @@ class IrActionsReport(models.Model):
             # set context language to body language
             if node.get('data-oe-lang'):
                 layout_with_lang = layout_with_lang.with_context(lang=node.get('data-oe-lang'))
-            body = layout_with_lang.render(dict(subst=False, body=lxml.html.tostring(node), base_url=base_url))
+            body = layout_with_lang._render(dict(subst=False, body=lxml.html.tostring(node), base_url=base_url))
             bodies.append(body)
             if node.get('data-oe-model') == self.model:
                 res_ids.append(int(node.get('data-oe-id', 0)))
@@ -388,8 +388,8 @@ class IrActionsReport(models.Model):
             if attribute[0].startswith('data-report-'):
                 specific_paperformat_args[attribute[0]] = attribute[1]
 
-        header = layout.render(dict(subst=True, body=lxml.html.tostring(header_node), base_url=base_url))
-        footer = layout.render(dict(subst=True, body=lxml.html.tostring(footer_node), base_url=base_url))
+        header = layout._render(dict(subst=True, body=lxml.html.tostring(header_node), base_url=base_url))
+        footer = layout._render(dict(subst=True, body=lxml.html.tostring(footer_node), base_url=base_url))
 
         return bodies, res_ids, header, footer, specific_paperformat_args
 
@@ -461,6 +461,7 @@ class IrActionsReport(models.Model):
                         'Wkhtmltopdf failed (error code: %s). Memory limit too low or maximum file number of subprocess reached. Message : %s')
                 else:
                     message = _('Wkhtmltopdf failed (error code: %s). Message: %s')
+                _logger.warning(message, process.returncode, err[-1000:])
                 raise UserError(message % (str(process.returncode), err[-1000:]))
             else:
                 if err:
@@ -491,7 +492,7 @@ class IrActionsReport(models.Model):
         return report_obj.with_context(context).search(conditions, limit=1)
 
     @api.model
-    def barcode(self, barcode_type, value, width=600, height=100, humanreadable=0, quiet=1):
+    def barcode(self, barcode_type, value, width=600, height=100, humanreadable=0, quiet=1, mask=None):
         if barcode_type == 'UPCA' and len(value) in (11, 12, 13):
             barcode_type = 'EAN13'
             if len(value) in (11, 12):
@@ -502,6 +503,15 @@ class IrActionsReport(models.Model):
                 barcode_type, value=value, format='png', width=width, height=height,
                 humanReadable=humanreadable, quiet=quiet
             )
+
+            # If a mask is asked and it is available, call its function to
+            # post-process the generated QR-code image
+            if mask:
+                available_masks = self.get_available_barcode_masks()
+                mask_to_apply = available_masks.get(mask)
+                if mask_to_apply:
+                    mask_to_apply(width, height, barcode)
+
             return barcode.asString('png')
         except (ValueError, AttributeError):
             if barcode_type == 'Code128':
@@ -510,10 +520,23 @@ class IrActionsReport(models.Model):
                 return self.barcode('Code128', value, width=width, height=height,
                     humanreadable=humanreadable, quiet=quiet)
 
-    def render_template(self, template, values=None):
+    @api.model
+    def get_available_barcode_masks(self):
+        """ Hook for extension.
+        This function returns the available QR-code masks, in the form of a
+        list of (code, mask_function) elements, where code is a string identifying
+        the mask uniquely, and mask_function is a function returning a reportlab
+        Drawing object with the result of the mask, and taking as parameters:
+            - width of the QR-code, in pixels
+            - height of the QR-code, in pixels
+            - reportlab Drawing object containing the barcode to apply the mask on
+        """
+        return {}
+
+    def _render_template(self, template, values=None):
         """Allow to render a QWeb template python-side. This function returns the 'ir.ui.view'
         render but embellish it with some variables/methods used in reports.
-        :param values: additionnal methods/variables used in the rendering
+        :param values: additional methods/variables used in the rendering
         :returns: html representation of the template
         """
         if values is None:
@@ -529,7 +552,7 @@ class IrActionsReport(models.Model):
                 website = request.website
                 context = dict(context, translatable=context.get('lang') != request.env['ir.http']._get_default_lang().code)
 
-        view_obj = self.env['ir.ui.view'].with_context(context)
+        view_obj = self.env['ir.ui.view'].sudo().with_context(context)
         values.update(
             time=time,
             context_timestamp=lambda t: fields.Datetime.context_timestamp(self.with_context(tz=user.tz), t),
@@ -538,7 +561,7 @@ class IrActionsReport(models.Model):
             website=website,
             web_base_url=self.env['ir.config_parameter'].sudo().get_param('web.base.url', default=''),
         )
-        return view_obj.render_template(template, values)
+        return view_obj._render_template(template, values)
 
     def _post_pdf(self, save_in_attachment, pdf_content=None, res_ids=None):
         '''Merge the existing attachments by adding one by one the content of the attachments
@@ -559,12 +582,14 @@ class IrActionsReport(models.Model):
                     pass
 
         # Check special case having only one record with existing attachment.
+        # In that case, return directly the attachment content.
+        # In that way, we also ensure the embedded files are well preserved.
         if len(save_in_attachment) == 1 and not pdf_content:
-            return self._merge_pdfs(list(save_in_attachment.values()))
+            return list(save_in_attachment.values())[0].getvalue()
 
         # Create a list of streams representing all sub-reports part of the final result
         # in order to append the existing attachments and the potentially modified sub-reports
-        # by the postprocess_pdf_report calls.
+        # by the _postprocess_pdf_report calls.
         streams = []
 
         # In wkhtmltopdf has been called, we need to split the pdf in order to call the postprocess method.
@@ -580,7 +605,7 @@ class IrActionsReport(models.Model):
                 if len(res_ids) == 1:
                     # Only one record, so postprocess directly and append the whole pdf.
                     if res_ids[0] in record_map and not res_ids[0] in save_in_attachment:
-                        new_stream = self.postprocess_pdf_report(record_map[res_ids[0]], pdf_content_stream)
+                        new_stream = self._postprocess_pdf_report(record_map[res_ids[0]], pdf_content_stream)
                         # If the buffer has been modified, mark the old buffer to be closed as well.
                         if new_stream and new_stream != pdf_content_stream:
                             close_streams([pdf_content_stream])
@@ -588,15 +613,25 @@ class IrActionsReport(models.Model):
                     streams.append(pdf_content_stream)
                 else:
                     # In case of multiple docs, we need to split the pdf according the records.
-                    # To do so, we split the pdf based on outlines computed by wkhtmltopdf.
+                    # To do so, we split the pdf based on top outlines computed by wkhtmltopdf.
                     # An outline is a <h?> html tag found on the document. To retrieve this table,
-                    # we look on the pdf structure using pypdf to compute the outlines_pages that is
-                    # an array like [0, 3, 5] that means a new document start at page 0, 3 and 5.
+                    # we look on the pdf structure using pypdf to compute the outlines_pages from
+                    # the top level heading in /Outlines.
                     reader = PdfFileReader(pdf_content_stream)
-                    if reader.trailer['/Root'].get('/Dests'):
-                        outlines_pages = sorted(
-                            [outline.getObject()[0] for outline in reader.trailer['/Root']['/Dests'].values()])
+                    root = reader.trailer['/Root']
+                    if '/Outlines' in root and '/First' in root['/Outlines']:
+                        outlines_pages = []
+                        node = root['/Outlines']['/First']
+                        while True:
+                            outlines_pages.append(root['/Dests'][node['/Dest']][0])
+                            if '/Next' not in node:
+                                break
+                            node = node['/Next']
+                        outlines_pages = sorted(set(outlines_pages))
+                        # There should be only one top-level heading by document
                         assert len(outlines_pages) == len(res_ids)
+                        # There should be a top-level heading on first page
+                        assert outlines_pages[0] == 0
                         for i, num in enumerate(outlines_pages):
                             to = outlines_pages[i + 1] if i + 1 < len(outlines_pages) else reader.numPages
                             attachment_writer = PdfFileWriter()
@@ -605,7 +640,7 @@ class IrActionsReport(models.Model):
                             stream = io.BytesIO()
                             attachment_writer.write(stream)
                             if res_ids[i] and res_ids[i] not in save_in_attachment:
-                                new_stream = self.postprocess_pdf_report(record_map[res_ids[i]], stream)
+                                new_stream = self._postprocess_pdf_report(record_map[res_ids[i]], stream)
                                 # If the buffer has been modified, mark the old buffer to be closed as well.
                                 if new_stream and new_stream != stream:
                                     close_streams([stream])
@@ -643,7 +678,7 @@ class IrActionsReport(models.Model):
         writer.write(result_stream)
         return result_stream.getvalue()
 
-    def render_qweb_pdf(self, res_ids=None, data=None):
+    def _render_qweb_pdf(self, res_ids=None, data=None):
         if not data:
             data = {}
         data.setdefault('report_type', 'pdf')
@@ -651,7 +686,7 @@ class IrActionsReport(models.Model):
         # In case of test environment without enough workers to perform calls to wkhtmltopdf,
         # fallback to render_html.
         if (tools.config['test_enable'] or tools.config['test_file']) and not self.env.context.get('force_report_rendering'):
-            return self.render_qweb_html(res_ids, data=data)
+            return self._render_qweb_html(res_ids, data=data)
 
         # As the assets are generated during the same transaction as the rendering of the
         # templates calling them, there is a scenario where the assets are unreachable: when
@@ -668,17 +703,17 @@ class IrActionsReport(models.Model):
         # Disable the debug mode in the PDF rendering in order to not split the assets bundle
         # into separated files to load. This is done because of an issue in wkhtmltopdf
         # failing to load the CSS/Javascript resources in time.
-        # Without this, the header/footer of the reports randomly disapear
+        # Without this, the header/footer of the reports randomly disappear
         # because the resources files are not loaded in time.
         # https://github.com/wkhtmltopdf/wkhtmltopdf/issues/2083
         context['debug'] = False
 
-        # The test cursor prevents the use of another environnment while the current
+        # The test cursor prevents the use of another environment while the current
         # transaction is not finished, leading to a deadlock when the report requests
         # an asset bundle during the execution of test scenarios. In this case, return
         # the html version.
         if isinstance(self.env.cr, TestCursor):
-            return self.with_context(context).render_qweb_html(res_ids, data=data)[0]
+            return self.with_context(context)._render_qweb_html(res_ids, data=data)[0]
 
         save_in_attachment = OrderedDict()
         if res_ids:
@@ -712,7 +747,7 @@ class IrActionsReport(models.Model):
             # bypassed
             raise UserError(_("Unable to find Wkhtmltopdf on this system. The PDF can not be created."))
 
-        html = self.with_context(context).render_qweb_html(res_ids, data=data)[0]
+        html = self.with_context(context)._render_qweb_html(res_ids, data=data)[0]
 
         # Ensure the current document is utf-8 encoded.
         html = html.decode('utf-8')
@@ -737,22 +772,22 @@ class IrActionsReport(models.Model):
         return pdf_content, 'pdf'
 
     @api.model
-    def render_qweb_text(self, docids, data=None):
+    def _render_qweb_text(self, docids, data=None):
         if not data:
             data = {}
         data.setdefault('report_type', 'text')
         data = self._get_rendering_context(docids, data)
-        return self.render_template(self.report_name, data), 'text'
+        return self._render_template(self.report_name, data), 'text'
 
     @api.model
-    def render_qweb_html(self, docids, data=None):
+    def _render_qweb_html(self, docids, data=None):
         """This method generates and returns html version of a report.
         """
         if not data:
             data = {}
         data.setdefault('report_type', 'html')
         data = self._get_rendering_context(docids, data)
-        return self.render_template(self.report_name, data), 'html'
+        return self._render_template(self.report_name, data), 'html'
 
     @api.model
     def _get_rendering_context_model(self):
@@ -778,9 +813,9 @@ class IrActionsReport(models.Model):
             })
         return data
 
-    def render(self, res_ids, data=None):
+    def _render(self, res_ids, data=None):
         report_type = self.report_type.lower().replace('-', '_')
-        render_func = getattr(self, 'render_' + report_type, None)
+        render_func = getattr(self, '_render_' + report_type, None)
         if not render_func:
             return None
         return render_func(res_ids, data=data)
@@ -788,7 +823,7 @@ class IrActionsReport(models.Model):
     def report_action(self, docids, data=None, config=True):
         """Return an action of type ir.actions.report.
 
-        :param docids: id/ids/browserecord of the records to print (if not used, pass an empty list)
+        :param docids: id/ids/browse record of the records to print (if not used, pass an empty list)
         :param report_name: Name of the template to generate an action for
         """
         context = self.env.context

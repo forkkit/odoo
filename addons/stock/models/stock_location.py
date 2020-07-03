@@ -1,13 +1,9 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from datetime import datetime
-from dateutil import relativedelta
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
-
-from odoo import api, fields, models, _
 from odoo.osv import expression
-from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
 
 
 class Location(models.Model):
@@ -118,7 +114,10 @@ class Location(models.Model):
                     raise UserError(_('You still have some product in locations %s') %
                         (','.join(children_quants.mapped('location_id.name'))))
                 else:
-                    super(Location, children_location - self).with_context(do_not_check_quant=True).write(values)
+                    super(Location, children_location - self).with_context(do_not_check_quant=True).write({
+                        'active': values['active'],
+                    })
+
         return super(Location, self).write(values)
 
     @api.model
@@ -127,6 +126,8 @@ class Location(models.Model):
         args = args or []
         if operator == 'ilike' and not (name or '').strip():
             domain = []
+        elif operator in expression.NEGATIVE_TERM_OPERATORS:
+            domain = [('barcode', operator, name), ('complete_name', operator, name)]
         else:
             domain = ['|', ('barcode', operator, name), ('complete_name', operator, name)]
         location_ids = self._search(expression.AND([domain, args]), limit=limit, access_rights_uid=name_get_uid)
@@ -161,7 +162,7 @@ class Location(models.Model):
 
     def should_bypass_reservation(self):
         self.ensure_one()
-        return self.usage in ('supplier', 'customer', 'inventory', 'production') or self.scrap_location
+        return self.usage in ('supplier', 'customer', 'inventory', 'production') or self.scrap_location or (self.usage == 'transit' and not self.company_id)
 
 
 class Route(models.Model):
@@ -174,9 +175,9 @@ class Route(models.Model):
     active = fields.Boolean('Active', default=True, help="If the active field is set to False, it will allow you to hide the route without removing it.")
     sequence = fields.Integer('Sequence', default=0)
     rule_ids = fields.One2many('stock.rule', 'route_id', 'Rules', copy=True)
-    product_selectable = fields.Boolean('Applicable on Product', default=True, help="When checked, the route will be selectable in the Inventory tab of the Product form.  It will take priority over the Warehouse route. ")
-    product_categ_selectable = fields.Boolean('Applicable on Product Category', help="When checked, the route will be selectable on the Product Category.  It will take priority over the Warehouse route. ")
-    warehouse_selectable = fields.Boolean('Applicable on Warehouse', help="When a warehouse is selected for this route, this route should be seen as the default route when products pass through this warehouse.  This behaviour can be overridden by the routes on the Product/Product Categories or by the Preferred Routes on the Procurement")
+    product_selectable = fields.Boolean('Applicable on Product', default=True, help="When checked, the route will be selectable in the Inventory tab of the Product form.")
+    product_categ_selectable = fields.Boolean('Applicable on Product Category', help="When checked, the route will be selectable on the Product Category.")
+    warehouse_selectable = fields.Boolean('Applicable on Warehouse', help="When a warehouse is selected for this route, this route should be seen as the default route when products pass through this warehouse.")
     supplied_wh_id = fields.Many2one('stock.warehouse', 'Supplied Warehouse')
     supplier_wh_id = fields.Many2one('stock.warehouse', 'Supplying Warehouse')
     company_id = fields.Many2one(
@@ -212,21 +213,3 @@ class Route(models.Model):
         for route in self:
             route.with_context(active_test=False).rule_ids.filtered(lambda ru: ru.active == route.active).toggle_active()
         super(Route, self).toggle_active()
-
-    def view_product_ids(self):
-        return {
-            'name': _('Products'),
-            'view_mode': 'tree,form',
-            'res_model': 'product.template',
-            'type': 'ir.actions.act_window',
-            'domain': [('route_ids', 'in', self.ids)],
-        }
-
-    def view_categ_ids(self):
-        return {
-            'name': _('Product Categories'),
-            'view_mode': 'tree,form',
-            'res_model': 'product.category',
-            'type': 'ir.actions.act_window',
-            'domain': [('route_ids', 'in', self.ids)],
-        }

@@ -17,8 +17,11 @@
         'views/stock_move_views.xml',
         'views/stock_picking_views.xml',
         'views/supplier_info_views.xml',
+        'views/product_views.xml',
+        'wizard/stock_picking_return_views.xml',
     ],
     'demo': [
         'data/mrp_subcontracting_demo.xml',
     ],
+    'uninstall_hook': 'uninstall_hook',
 }

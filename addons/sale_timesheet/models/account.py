@@ -62,17 +62,24 @@ class AccountAnalyticLine(models.Model):
         return result
 
     def _check_can_write(self, values):
-        if self.sudo().filtered(lambda aal: aal.so_line.product_id.invoice_policy == "delivery") and self.filtered(lambda timesheet: timesheet.timesheet_invoice_id):
+        if self.sudo().filtered(lambda aal: aal.so_line.product_id.invoice_policy == "delivery") and self.filtered(lambda t: t.timesheet_invoice_id and t.timesheet_invoice_id.state != 'cancel'):
             if any([field_name in values for field_name in ['unit_amount', 'employee_id', 'project_id', 'task_id', 'so_line', 'amount', 'date']]):
                 raise UserError(_('You can not modify already invoiced timesheets (linked to a Sales order items invoiced on Time and material).'))
 
     @api.model
     def _timesheet_preprocess(self, values):
+        if values.get('task_id') and not values.get('account_id'):
+            task = self.env['project.task'].browse(values.get('task_id'))
+            if task.analytic_account_id:
+                values['account_id'] = task.analytic_account_id.id
+                values['company_id'] = task.analytic_account_id.company_id.id
         values = super(AccountAnalyticLine, self)._timesheet_preprocess(values)
         # task implies so line (at create)
-        if 'task_id' in values and not values.get('so_line') and values.get('employee_id'):
+        if 'task_id' in values and not values.get('so_line') and (values.get('employee_id') or self.mapped('employee_id')):
+            if not values.get('employee_id') and len(self.mapped('employee_id')) > 1:
+                raise UserError(_('You can not modify timesheets from different employees'))
             task = self.env['project.task'].sudo().browse(values['task_id'])
-            employee = self.env['hr.employee'].sudo().browse(values['employee_id'])
+            employee = self.env['hr.employee'].sudo().browse(values['employee_id']) if values.get('employee_id') else self.mapped('employee_id')
             values['so_line'] = self._timesheet_determine_sale_line(task, employee).id
         return values
 
@@ -113,3 +120,8 @@ class AccountAnalyticLine(models.Model):
         """
         domain = super(AccountAnalyticLine, self)._timesheet_get_portal_domain()
         return expression.AND([domain, [('timesheet_invoice_type', 'in', ['billable_time', 'non_billable'])]])
+
+    def unlink(self):
+        if any(line.timesheet_invoice_id and line.timesheet_invoice_id.state == 'posted' for line in self):
+            raise UserError(_('You cannot remove a timesheet that has already been invoiced.'))
+        return super(AccountAnalyticLine, self).unlink()

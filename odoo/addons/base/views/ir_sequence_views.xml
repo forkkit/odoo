@@ -13,12 +13,12 @@
                       </group>
                       <group>
                         <field name="code"/>
-                        <field name="active"/>
+                        <field name="active" widget="boolean_toggle"/>
                         <field name="company_id" groups="base.group_multi_company"/>
                       </group>
                     </group>
                     <notebook>
-                    <page string="Sequence">
+                    <page string="Sequence" name="sequence">
                         <group>
                           <group>
                             <field name="prefix"/>

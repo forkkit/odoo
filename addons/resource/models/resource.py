@@ -157,7 +157,7 @@ class ResourceCalendar(models.Model):
     def default_get(self, fields):
         res = super(ResourceCalendar, self).default_get(fields)
         if not res.get('name') and res.get('company_id'):
-            res['name'] = _('Working Hours of %s') % self.env['res.company'].browse(res['company_id']).name
+            res['name'] = _('Working Hours of %s', self.env['res.company'].browse(res['company_id']).name)
         if 'attendance_ids' in fields and not res.get('attendance_ids'):
             res['attendance_ids'] = [
                 (0, 0, {'name': _('Monday Morning'), 'dayofweek': '0', 'hour_from': 8, 'hour_to': 12, 'day_period': 'morning'}),
@@ -174,6 +174,8 @@ class ResourceCalendar(models.Model):
         return res
 
     name = fields.Char(required=True)
+    active = fields.Boolean("Active", default=True,
+                            help="If the active field is set to false, it will allow you to hide the Working Time without removing it.")
     company_id = fields.Many2one(
         'res.company', 'Company',
         default=lambda self: self.env.company)
@@ -184,7 +186,7 @@ class ResourceCalendar(models.Model):
         'resource.calendar.leaves', 'calendar_id', 'Time Off')
     global_leave_ids = fields.One2many(
         'resource.calendar.leaves', 'calendar_id', 'Global Time Off',
-        domain=[('resource_id', '=', False)]
+        domain=[('resource_id', '=', False)], copy=True,
         )
     hours_per_day = fields.Float("Average Hour per Day", default=HOURS_PER_DAY,
                                  help="Average hours per day a resource is supposed to work with this calendar.")
@@ -194,6 +196,23 @@ class ResourceCalendar(models.Model):
         help="This field is used in order to define in which timezone the resources will work.")
     two_weeks_calendar = fields.Boolean(string="Calendar in 2 weeks mode")
     two_weeks_explanation = fields.Char('Explanation', compute="_compute_two_weeks_explanation")
+
+    @api.returns('self', lambda value: value.id)
+    def copy(self, default=None):
+        self.ensure_one()
+        if default is None:
+            default = {}
+        if not default.get('name'):
+            default.update(name=_('%s (copy)') % (self.name))
+        return super(ResourceCalendar, self).copy(default)
+
+    @api.constrains('attendance_ids')
+    def _check_attendance_ids(self):
+        for resource in self:
+            if (resource.two_weeks_calendar and
+                    resource.attendance_ids.filtered(lambda a: a.display_type == 'line_section') and
+                    not resource.attendance_ids.sorted('sequence')[0].display_type):
+                raise ValidationError(_("In a calendar with 2 weeks mode, all periods need to be in the sections."))
 
     @api.depends('two_weeks_calendar')
     def _compute_two_weeks_explanation(self):
@@ -316,11 +335,12 @@ class ResourceCalendar(models.Model):
     # --------------------------------------------------
     # Computation API
     # --------------------------------------------------
-    def _attendance_intervals(self, start_dt, end_dt, resource=None, domain=None):
+    def _attendance_intervals(self, start_dt, end_dt, resource=None, domain=None, tz=None):
         """ Return the attendance intervals in the given datetime range.
-            The returned intervals are expressed in the resource's timezone.
+            The returned intervals are expressed in specified tz or in the resource's timezone.
         """
         assert start_dt.tzinfo and end_dt.tzinfo
+        self.ensure_one()
         combine = datetime.combine
 
         resource_ids = [resource.id, False] if resource else [False]
@@ -331,8 +351,8 @@ class ResourceCalendar(models.Model):
             ('display_type', '=', False),
         ]])
 
-        # express all dates and times in the resource's timezone
-        tz = timezone((resource or self).tz)
+        # express all dates and times in specified tz or in the resource's timezone
+        tz = tz if tz else timezone((resource or self).tz)
         start_dt = start_dt.astimezone(tz)
         end_dt = end_dt.astimezone(tz)
 
@@ -366,9 +386,9 @@ class ResourceCalendar(models.Model):
 
         return Intervals(result)
 
-    def _leave_intervals(self, start_dt, end_dt, resource=None, domain=None):
+    def _leave_intervals(self, start_dt, end_dt, resource=None, domain=None, tz=None):
         """ Return the leave intervals in the given datetime range.
-            The returned intervals are expressed in the calendar's timezone.
+            The returned intervals are expressed in specified tz or in the calendar's timezone.
         """
         assert start_dt.tzinfo and end_dt.tzinfo
         self.ensure_one()
@@ -385,7 +405,7 @@ class ResourceCalendar(models.Model):
         ]
 
         # retrieve leave intervals in (start_dt, end_dt)
-        tz = timezone((resource or self).tz)
+        tz = tz if tz else timezone((resource or self).tz)
         start_dt = start_dt.astimezone(tz)
         end_dt = end_dt.astimezone(tz)
         result = []
@@ -396,10 +416,10 @@ class ResourceCalendar(models.Model):
 
         return Intervals(result)
 
-    def _work_intervals(self, start_dt, end_dt, resource=None, domain=None):
+    def _work_intervals(self, start_dt, end_dt, resource=None, domain=None, tz=None):
         """ Return the effective work intervals between the given datetimes. """
-        return (self._attendance_intervals(start_dt, end_dt, resource) -
-                self._leave_intervals(start_dt, end_dt, resource, domain))
+        return (self._attendance_intervals(start_dt, end_dt, resource, tz=tz) -
+                self._leave_intervals(start_dt, end_dt, resource, domain, tz=tz))
 
     # --------------------------------------------------
     # Private Methods / Helpers
@@ -440,6 +460,36 @@ class ResourceCalendar(models.Model):
             day_total[start.date()] += (stop - start).total_seconds() / 3600
         return day_total
 
+    def _get_closest_work_time(self, dt, match_end=False, resource=None, search_range=None):
+        """Return the closest work interval boundary within the search range.
+        Consider only starts of intervals unless `match_end` is True. It will then only consider
+        ends of intervals.
+        :param dt: reference datetime
+        :param match_end: wether to search for the begining of an interval or the end.
+        :param search_range: time interval considered. Defaults to the entire day of `dt`
+        :rtype: datetime | None
+        """
+        def interval_dt(interval):
+            return interval[1 if match_end else 0]
+
+        if not dt.tzinfo or search_range and not (search_range[0].tzinfo and search_range[1].tzinfo):
+            raise ValueError('Provided datetimes needs to be timezoned')
+        dt = dt.astimezone(timezone(self.tz))
+
+        if not search_range:
+            range_start = dt + relativedelta(hour=0, minute=0, second=0)
+            range_end = dt + relativedelta(days=1, hour=0, minute=0, second=0)
+        else:
+            range_start, range_end = search_range
+
+        if not range_start <= dt <= range_end:
+            return None
+        work_intervals = sorted(
+            self._work_intervals(range_start, range_end, resource),
+            key=lambda i: abs(interval_dt(i) - dt),
+        )
+        return interval_dt(work_intervals[0]) if work_intervals else None
+
     # --------------------------------------------------
     # External API
     # --------------------------------------------------
@@ -454,6 +504,7 @@ class ResourceCalendar(models.Model):
 
             Counts the number of work hours between two datetimes.
         """
+        self.ensure_one()
         # Set timezone in UTC if no timezone is explicitly given
         if not start_dt.tzinfo:
             start_dt = start_dt.replace(tzinfo=utc)
@@ -641,7 +692,7 @@ class ResourceResource(models.Model):
 
     name = fields.Char(required=True)
     active = fields.Boolean(
-        'Active', default=True, tracking=True,
+        'Active', default=True,
         help="If the active field is set to False, it will allow you to hide the resource record without removing it.")
     company_id = fields.Many2one('res.company', string='Company', default=lambda self: self.env.company)
     resource_type = fields.Selection([
@@ -704,27 +755,41 @@ class ResourceResource(models.Model):
             self.tz = self.user_id.tz
 
     def _get_work_interval(self, start, end):
-        """ Return interval's start datetime for interval closest to start. And interval's end datetime for interval closest to end.
-            If none is found return None
-            Note: this method is used in enterprise (forecast and planning)
+        # Deprecated method. Use `_adjust_to_calendar` instead
+        return self._adjust_to_calendar(start, end)
 
-            :start: datetime
-            :end: datetime
-            :return: (datetime|None, datetime|None)
+    def _adjust_to_calendar(self, start, end):
+        """Adjust the given start and end datetimes to the closest effective hours encoded
+        in the resource calendar. Only attendances in the same day as `start` and `end` are
+        considered (respectively). If no attendance is found during that day, the closest hour
+        is None.
+        e.g. simplified example:
+             given two attendances: 8am-1pm and 2pm-5pm, given start=9am and end=6pm
+             resource._adjust_to_calendar(start, end)
+             >>> {resource: (8am, 5pm)}
+        :return: Closest matching start and end of working periods for each resource
+        :rtype: dict(resource, tuple(datetime | None, datetime | None))
         """
-        start_datetime = timezone_datetime(start)
-        end_datetime = timezone_datetime(end)
-        resource_mapping = {}
+        start, revert_start_tz = make_aware(start)
+        end, revert_end_tz = make_aware(end)
+        result = {}
         for resource in self:
-            work_intervals = sorted(
-                resource.calendar_id._work_intervals(start_datetime, end_datetime, resource),
-                key=lambda x: x[0]
+            calendar_start = resource.calendar_id._get_closest_work_time(start, resource=resource)
+            search_range = None
+            tz = timezone(resource.tz)
+            if calendar_start and start.astimezone(tz).date() == end.astimezone(tz).date():
+                # Make sure to only search end after start
+                search_range = (
+                    start,
+                    end + relativedelta(days=1, hour=0, minute=0, second=0),
+                )
+            calendar_end = resource.calendar_id._get_closest_work_time(end, match_end=True, resource=resource, search_range=search_range)
+            result[resource] = (
+                calendar_start and revert_start_tz(calendar_start),
+                calendar_end and revert_end_tz(calendar_end),
             )
-            if work_intervals:
-                resource_mapping[resource.id] = (work_intervals[0][0].astimezone(utc), work_intervals[-1][1].astimezone(utc))
-            else:
-                resource_mapping[resource.id] = (None, None)
-        return resource_mapping
+        return result
+
 
     def _get_unavailable_intervals(self, start, end):
         """ Compute the intervals during which employee is unavailable with hour granularity between start and end

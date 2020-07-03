@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo.addons.test_mail.tests.common import mail_new_test_user
+from odoo.addons.mail.tests.common import mail_new_test_user
 from odoo.tests.common import TransactionCase, users, warmup
 from odoo.tests import tagged
 from odoo.tools import mute_logger
@@ -35,7 +35,7 @@ class TestMassMailPerformance(TestMassMailPerformanceBase):
             'name': 'Recipient %s' % x,
             'email_from': 'Recipient <rec.%s@example.com>' % x,
         } for x in range(0, 50)]
-        self.mm_recs = self.env['mass.mail.test'].create(values)
+        self.mm_recs = self.env['mailing.performance'].create(values)
 
     @users('__system__', 'marketing')
     @warmup
@@ -46,11 +46,12 @@ class TestMassMailPerformance(TestMassMailPerformanceBase):
             'subject': 'Test',
             'body_html': '<p>Hello <a role="button" href="https://www.example.com/foo/bar?baz=qux">quux</a><a role="button" href="/unsubscribe_from_list">Unsubscribe</a></p>',
             'reply_to_mode': 'email',
-            'mailing_model_id': self.ref('test_mass_mailing.model_mass_mail_test'),
+            'mailing_model_id': self.ref('test_mass_mailing.model_mailing_performance'),
             'mailing_domain': [('id', 'in', self.mm_recs.ids)],
         })
 
-        with self.assertQueryCount(__system__=2478, marketing=3128):
+        # runbot needs +50 compared to local
+        with self.assertQueryCount(__system__=1914, marketing=1915):
             mailing.action_send_mail()
 
         self.assertEqual(mailing.sent, 50)
@@ -68,13 +69,13 @@ class TestMassMailBlPerformance(TestMassMailPerformanceBase):
             'name': 'Recipient %s' % x,
             'email_from': 'Recipient <rec.%s@example.com>' % x,
         } for x in range(0, 62)]
-        self.mm_recs = self.env['mass.mail.test.bl'].create(values)
+        self.mm_recs = self.env['mailing.performance.blacklist'].create(values)
 
         for x in range(1, 13):
             self.env['mail.blacklist'].create({
                 'email': 'rec.%s@example.com' % (x * 5)
             })
-        self.env['mass.mail.test.bl'].flush()
+        self.env['mailing.performance.blacklist'].flush()
 
     @users('__system__', 'marketing')
     @warmup
@@ -85,11 +86,12 @@ class TestMassMailBlPerformance(TestMassMailPerformanceBase):
             'subject': 'Test',
             'body_html': '<p>Hello <a role="button" href="https://www.example.com/foo/bar?baz=qux">quux</a><a role="button" href="/unsubscribe_from_list">Unsubscribe</a></p>',
             'reply_to_mode': 'email',
-            'mailing_model_id': self.ref('test_mass_mailing.model_mass_mail_test_bl'),
+            'mailing_model_id': self.ref('test_mass_mailing.model_mailing_performance_blacklist'),
             'mailing_domain': [('id', 'in', self.mm_recs.ids)],
         })
 
-        with self.assertQueryCount(__system__=2865, marketing=3611):
+        # runbot needs +62 compared to local
+        with self.assertQueryCount(__system__=2241, marketing=2242):
             mailing.action_send_mail()
 
         self.assertEqual(mailing.sent, 50)

@@ -8,13 +8,6 @@ import psycopg2
 
 _schema = logging.getLogger('odoo.schema')
 
-_TABLE_KIND = {
-    'BASE TABLE': 'r',
-    'VIEW': 'v',
-    'FOREIGN TABLE': 'f',
-    'LOCAL TEMPORARY': 't',
-}
-
 _CONFDELTYPES = {
     'RESTRICT': 'r',
     'NO ACTION': 'a',
@@ -42,17 +35,37 @@ def table_exists(cr, tablename):
 
 def table_kind(cr, tablename):
     """ Return the kind of a table: ``'r'`` (regular table), ``'v'`` (view),
-        ``'f'`` (foreign table), ``'t'`` (temporary table), or ``None``.
+        ``'f'`` (foreign table), ``'t'`` (temporary table),
+        ``'m'`` (materialized view), or ``None``.
     """
-    query = "SELECT table_type FROM information_schema.tables WHERE table_name=%s"
+    query = """
+        SELECT c.relkind
+          FROM pg_class c
+          JOIN pg_namespace n ON (n.oid = c.relnamespace)
+         WHERE c.relname = %s
+           AND n.nspname = 'public'
+    """
     cr.execute(query, (tablename,))
-    return _TABLE_KIND[cr.fetchone()[0]] if cr.rowcount else None
+    return cr.fetchone()[0] if cr.rowcount else None
 
-def create_model_table(cr, tablename, comment=None):
+def create_model_table(cr, tablename, comment=None, columns=()):
     """ Create the table for a model. """
-    cr.execute('CREATE TABLE "{}" (id SERIAL NOT NULL, PRIMARY KEY(id))'.format(tablename))
+    colspecs = ['id SERIAL NOT NULL'] + [
+        '"{}" {}'.format(columnname, columntype)
+        for columnname, columntype, columncomment in columns
+    ]
+    cr.execute('CREATE TABLE "{}" ({}, PRIMARY KEY(id))'.format(tablename, ", ".join(colspecs)))
+
+    queries, params = [], []
     if comment:
-        cr.execute('COMMENT ON TABLE "{}" IS %s'.format(tablename), (comment,))
+        queries.append('COMMENT ON TABLE "{}" IS %s'.format(tablename))
+        params.append(comment)
+    for columnname, columntype, columncomment in columns:
+        queries.append('COMMENT ON COLUMN "{}"."{}" IS %s'.format(tablename, columnname))
+        params.append(columncomment)
+    if queries:
+        cr.execute("; ".join(queries), params)
+
     _schema.debug("Table %r: created", tablename)
 
 def table_columns(cr, tablename):
@@ -109,12 +122,10 @@ def set_not_null(cr, tablename, columnname):
     query = 'ALTER TABLE "{}" ALTER COLUMN "{}" SET NOT NULL'.format(tablename, columnname)
     try:
         with cr.savepoint(flush=False):
-            cr.execute(query)
+            cr.execute(query, log_exceptions=False)
             _schema.debug("Table %r: column %r: added constraint NOT NULL", tablename, columnname)
     except Exception:
-        msg = "Table %r: unable to set NOT NULL on column %r!\n" \
-              "If you want to have it, you should update the records and execute manually:\n%s"
-        _schema.warning(msg, tablename, columnname, query, exc_info=True)
+        raise Exception("Table %r: unable to set NOT NULL on column %r", tablename, columnname)
 
 def drop_not_null(cr, tablename, columnname):
     """ Drop the NOT NULL constraint on the given column. """
@@ -138,13 +149,11 @@ def add_constraint(cr, tablename, constraintname, definition):
     query2 = 'COMMENT ON CONSTRAINT "{}" ON "{}" IS %s'.format(constraintname, tablename)
     try:
         with cr.savepoint(flush=False):
-            cr.execute(query1)
-            cr.execute(query2, (definition,))
+            cr.execute(query1, log_exceptions=False)
+            cr.execute(query2, (definition,), log_exceptions=False)
             _schema.debug("Table %r: added constraint %r as %s", tablename, constraintname, definition)
     except Exception:
-        msg = "Table %r: unable to add constraint %r!\n" \
-              "If you want to have it, you should update the records and execute manually:\n%s"
-        _schema.warning(msg, tablename, constraintname, query1, exc_info=True)
+        raise Exception("Table %r: unable to add constraint %r as %s", tablename, constraintname, definition)
 
 def drop_constraint(cr, tablename, constraintname):
     """ drop the given constraint. """

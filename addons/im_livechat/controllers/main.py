@@ -33,10 +33,7 @@ class LivechatController(http.Controller):
     def load_templates(self, **kwargs):
         base_url = request.httprequest.base_url
         templates = [
-            'mail/static/src/xml/abstract_thread_window.xml',
-            'mail/static/src/xml/discuss.xml',
-            'mail/static/src/xml/thread.xml',
-            'im_livechat/static/src/xml/im_livechat.xml',
+            'im_livechat/static/src/legacy/public_livechat.xml',
         ]
         return [tools.file_open(tmpl, 'rb').read() for tmpl in templates]
 
@@ -83,28 +80,24 @@ class LivechatController(http.Controller):
     def get_session(self, channel_id, anonymous_name, previous_operator_id=None, **kwargs):
         user_id = None
         country_id = None
-        visitor_name = anonymous_name
         # if the user is identifiy (eg: portal user on the frontend), don't use the anonymous name. The user will be added to session.
         if request.session.uid:
             user_id = request.env.user.id
             country_id = request.env.user.country_id.id
         else:
-            visitor_sudo = request.env['website.visitor']._get_visitor_from_request()
-            if visitor_sudo:
-                visitor_name = visitor_sudo.display_name
             # if geoip, add the country name to the anonymous name
             if request.session.geoip:
                 # get the country of the anonymous person, if any
                 country_code = request.session.geoip.get('country_code', "")
                 country = request.env['res.country'].sudo().search([('code', '=', country_code)], limit=1) if country_code else None
                 if country:
-                    visitor_name = "%s (%s)" % (visitor_name, country.name)
+                    anonymous_name = "%s (%s)" % (anonymous_name, country.name)
                     country_id = country.id
 
         if previous_operator_id:
             previous_operator_id = int(previous_operator_id)
 
-        return request.env["im_livechat.channel"].with_context(lang=False).sudo().browse(channel_id)._open_livechat_mail_channel(visitor_name, previous_operator_id, user_id, country_id)
+        return request.env["im_livechat.channel"].with_context(lang=False).sudo().browse(channel_id)._open_livechat_mail_channel(anonymous_name, previous_operator_id, user_id, country_id)
 
     @http.route('/im_livechat/feedback', type='json', auth='public', cors="*")
     def feedback(self, uuid, rate, reason=None, **kwargs):
@@ -116,6 +109,7 @@ class LivechatController(http.Controller):
                 'rating': rate,
                 'consumed': True,
                 'feedback': reason,
+                'is_internal': False,
             }
             if not channel.rating_ids:
                 res_model_id = request.env['ir.model'].sudo().search([('model', '=', channel._name)], limit=1).id
@@ -152,10 +146,22 @@ class LivechatController(http.Controller):
         """
         Channel = request.env['mail.channel']
         channel = Channel.sudo().search([('uuid', '=', uuid)], limit=1)
-        channel.notify_typing(is_typing=is_typing, is_website_user=True)
+        channel.notify_typing(is_typing=is_typing)
 
     @http.route('/im_livechat/email_livechat_transcript', type='json', auth='public', cors="*")
     def email_livechat_transcript(self, uuid, email):
-        channel = request.env['mail.channel'].sudo().search([('uuid', '=', uuid)], limit=1)
+        channel = request.env['mail.channel'].sudo().search([
+            ('channel_type', '=', 'livechat'),
+            ('uuid', '=', uuid)], limit=1)
         if channel:
             channel._email_livechat_transcript(email)
+
+    @http.route('/im_livechat/visitor_leave_session', type='json', auth="public")
+    def visitor_leave_session(self, uuid):
+        """ Called when the livechat visitor leaves the conversation.
+         This will clean the chat request and warn the operator that the conversation is over.
+         This allows also to re-send a new chat request to the visitor, as while the visitor is
+         in conversation with an operator, it's not possible to send the visitor a chat request."""
+        mail_channel = request.env['mail.channel'].sudo().search([('uuid', '=', uuid)])
+        if mail_channel:
+            mail_channel._close_livechat_session()

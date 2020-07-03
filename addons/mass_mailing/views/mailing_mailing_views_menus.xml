@@ -12,13 +12,13 @@
         groups="mass_mailing.group_mass_mailing_user"/>
 
     <!-- Configuration / Blacklist -->
-    <menuitem id="mail_blacklist_mm_menu" name="Blacklist"
+    <menuitem id="mail_blacklist_mm_menu" name="Blacklisted Email Addresses"
         action="mail.mail_blacklist_action"
         parent="mass_mailing_configuration"/>
 
     <!-- Technical / Mass Mailing -->
     <menuitem id="mailing_mailing_menu_technical"
         name="Mass Mailing"
-        sequence="3"
+        sequence="4"
         parent="base.menu_custom"/>
 </odoo>

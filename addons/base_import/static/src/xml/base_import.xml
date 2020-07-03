@@ -1,4 +1,12 @@
 <templates>
+    <t t-name="base_import.ImportMenu" owl="1">
+        <li class="o_menu_item o_import_menu" role="menuitem">
+            <button type="button" class="dropdown-item" t-on-click="_onImportClick">
+                Import Records
+            </button>
+        </li>
+    </t>
+
     <t t-name="ImportView">
         <t t-set="_id" t-value="_.uniqueId('export')"/>
         <form action="" method="post" enctype="multipart/form-data" class="oe_import">
@@ -54,6 +62,12 @@
                             Track history during import
                         </label>
                     </div>
+
+                    <div class="oe_import_has_multiple_sheets js_import_options">
+                        <label for="oe_import_sheet">Selected Sheet:</label>
+                        <input class="oe_import_sheet" id="oe_import_sheet"/>
+                    </div>
+
                     <div>
                         <input type="checkbox" class="oe_import_has_header"
                                id="oe_import_has_header" checked="checked"/>
@@ -84,6 +98,7 @@
                 <div class="table-responsive">
                     <table class="table-striped table-bordered oe_import_grid bg-white" />
                 </div>
+                <h6 class="oe_padding">This is a preview of the first 10 rows of your file</h6>
             </div>
             <div class="o_view_nocontent">
                 <div class="o_nocontent_help">
@@ -109,7 +124,6 @@
         <button type="button" class="btn btn-primary o_import_import o_import_import_full d-none">Import</button>
         <button type="button" class="btn btn-primary o_import_import o_import_import_partial d-none">Resume</button>
         <button type="button" class="btn btn-secondary o_import_validate d-none">Test</button>
-        <button type="button" class="btn btn-secondary o_import_file_reload d-none">Reload File</button>
         <button type="button" class="btn btn-primary oe_import_file">Load File</button>
         <button type="button" class="btn btn-secondary o_import_cancel">Cancel</button>
     </t>
@@ -127,7 +141,7 @@
         <thead>
             <tr t-if="headers" class="oe_import_grid-header">
                 <td t-foreach="headers" t-as="header" class="oe_import_grid-cell"
-                    ><span class="o_import_header_name"><t t-esc="header"/></span></td>
+                    ><span class="o_import_header_name o_single_line_text" t-att-title="header"><t t-esc="header"/></span></td>
             </tr>
             <tr class="oe_import_fields">
                 <!-- Iterate on first row to ensure we have all columns -->
@@ -138,8 +152,16 @@
         </thead>
         <tbody>
             <tr t-foreach="preview" t-as="row" class="oe_import_grid-row">
-                <td t-foreach="row" t-as="cell" class="oe_import_grid-cell"
-                    ><t t-esc="cell"/></td>
+                <td t-foreach="row" t-as="cell" class="oe_import_grid-cell">
+                    <!-- content can be displayed on several lines if it contains whitespaces -->
+                    <!-- in that case, we only display the 120 first characters -->
+                    <!-- otherwise, we let the text-overflow: ellipsis do the job -->
+                    <t t-set="multiline" t-value="cell.includes(' ')"/>
+                    <t t-set="content" t-value="(multiline &amp;&amp; cell.length &gt; 120) ? (cell.substring(0, 120) + '...') : cell"/>
+                    <span t-attf-class="#{multiline ? 'o_multi_line_text' : 'o_single_line_text'}">
+                        <t t-esc="content"/>
+                    </span>
+                </td>
             </tr>
         </tbody>
     </t>
@@ -201,20 +223,5 @@
         </span>
         <t t-if="error.rows"  t-esc="at(error.rows)"/>
         <t t-if="error.moreinfo" t-raw="info(error.moreinfo)"/>
-    </t>
-    <t t-name="ImportView.import_button">
-        <button t-if='widget and widget.importEnabled' type="button" class="btn btn-secondary o_button_import">
-            Import
-        </button>
-    </t>
-    <t t-extend="ListView.buttons">
-        <t t-jquery="button.o_list_button_add" t-operation="after">
-           <t t-call="ImportView.import_button"/>
-        </t>
-    </t>
-    <t t-extend="KanbanView.buttons">
-        <t t-jquery="button" t-operation="after">
-            <t t-call="ImportView.import_button"/>
-        </t>
     </t>
 </templates>

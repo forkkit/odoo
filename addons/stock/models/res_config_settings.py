@@ -26,32 +26,26 @@ class ResConfigSettings(models.TransientModel):
         implied_group='stock.group_adv_location',
         help="Add and customize route operations to process product moves in your warehouse(s): e.g. unload > quality control > stock for incoming products, pick > pack > ship for outgoing products. \n You can also set putaway strategies on warehouse locations in order to send incoming products into specific child locations straight away (e.g. specific bins, racks).")
     group_warning_stock = fields.Boolean("Warnings for Stock", implied_group='stock.group_warning_stock')
+    group_stock_sign_delivery = fields.Boolean("Signature", implied_group='stock.group_stock_sign_delivery')
     module_stock_picking_batch = fields.Boolean("Batch Pickings")
     module_stock_barcode = fields.Boolean("Barcode Scanner")
     stock_move_email_validation = fields.Boolean(related='company_id.stock_move_email_validation', readonly=False)
     stock_mail_confirmation_template_id = fields.Many2one(related='company_id.stock_mail_confirmation_template_id', readonly=False)
     module_stock_sms = fields.Boolean("SMS Confirmation")
     module_delivery = fields.Boolean("Delivery Methods")
-    module_delivery_dhl = fields.Boolean("DHL USA")
-    module_delivery_fedex = fields.Boolean("FedEx")
-    module_delivery_ups = fields.Boolean("UPS")
-    module_delivery_usps = fields.Boolean("USPS")
-    module_delivery_bpost = fields.Boolean("bpost")
-    module_delivery_easypost = fields.Boolean("Easypost")
+    module_delivery_dhl = fields.Boolean("DHL USA Connector")
+    module_delivery_fedex = fields.Boolean("FedEx Connector")
+    module_delivery_ups = fields.Boolean("UPS Connector")
+    module_delivery_usps = fields.Boolean("USPS Connector")
+    module_delivery_bpost = fields.Boolean("bpost Connector")
+    module_delivery_easypost = fields.Boolean("Easypost Connector")
     group_stock_multi_locations = fields.Boolean('Storage Locations', implied_group='stock.group_stock_multi_locations',
         help="Store products in specific locations of your warehouse (e.g. bins, racks) and to track inventory accordingly.")
-    group_stock_multi_warehouses = fields.Boolean('Multi-Warehouses', implied_group='stock.group_stock_multi_warehouses')
 
     @api.onchange('group_stock_multi_locations')
     def _onchange_group_stock_multi_locations(self):
         if not self.group_stock_multi_locations:
-            self.group_stock_multi_warehouses = False
             self.group_stock_adv_location = False
-
-    @api.onchange('group_stock_multi_warehouses')
-    def _onchange_group_stock_multi_warehouses(self):
-        if self.group_stock_multi_warehouses:
-            self.group_stock_multi_locations = True
 
     @api.onchange('group_stock_production_lot')
     def _onchange_group_stock_production_lot(self):
@@ -93,5 +87,5 @@ class ResConfigSettings(models.TransientModel):
                 ('code', '!=', 'incoming'),
                 ('show_operations', '=', False)
             ])
-            picking_types.write({'show_operations': True})
+            picking_types.sudo().write({'show_operations': True})
         return res

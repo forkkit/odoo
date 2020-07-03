@@ -7,7 +7,9 @@ import io
 import re
 import requests
 import PyPDF2
+import json
 
+from dateutil.relativedelta import relativedelta
 from PIL import Image
 from werkzeug import urls
 
@@ -59,6 +61,15 @@ class SlideLink(models.Model):
     slide_id = fields.Many2one('slide.slide', required=True, ondelete='cascade')
     name = fields.Char('Title', required=True)
     link = fields.Char('Link', required=True)
+
+
+class SlideResource(models.Model):
+    _name = 'slide.slide.resource'
+    _description = "Additional resource for a particular slide"
+
+    slide_id = fields.Many2one('slide.slide', required=True, ondelete='cascade')
+    name = fields.Char('Name', required=True)
+    data = fields.Binary('Resource')
 
 
 class EmbeddedSlide(models.Model):
@@ -116,13 +127,14 @@ class Slide(models.Model):
 
     # description
     name = fields.Char('Title', required=True, translate=True)
-    active = fields.Boolean(default=True)
+    active = fields.Boolean(default=True, tracking=100)
     sequence = fields.Integer('Sequence', default=0)
     user_id = fields.Many2one('res.users', string='Uploaded by', default=lambda self: self.env.uid)
     description = fields.Text('Description', translate=True)
     channel_id = fields.Many2one('slide.channel', string="Course", required=True)
     tag_ids = fields.Many2many('slide.tag', 'rel_slide_tag', 'slide_id', 'tag_id', string='Tags')
     is_preview = fields.Boolean('Allow Preview', default=False, help="The course is accessible by anyone : the users don't need to join the channel to access the content of the course.")
+    is_new_slide = fields.Boolean('Is New Slide', compute='_compute_is_new_slide')
     completion_time = fields.Float('Duration', digits=(10, 4), help="The estimated completion time for this slide")
     # Categories
     is_category = fields.Boolean('Is a category', default=False)
@@ -130,18 +142,18 @@ class Slide(models.Model):
     slide_ids = fields.One2many('slide.slide', "category_id", string="Slides")
     # subscribers
     partner_ids = fields.Many2many('res.partner', 'slide_slide_partner', 'slide_id', 'partner_id',
-                                   string='Subscribers', groups='website.group_website_publisher', copy=False)
-    slide_partner_ids = fields.One2many('slide.slide.partner', 'slide_id', string='Subscribers information', groups='website.group_website_publisher', copy=False)
+                                   string='Subscribers', groups='website_slides.group_website_slides_officer', copy=False)
+    slide_partner_ids = fields.One2many('slide.slide.partner', 'slide_id', string='Subscribers information', groups='website_slides.group_website_slides_officer', copy=False)
     user_membership_id = fields.Many2one(
         'slide.slide.partner', string="Subscriber information", compute='_compute_user_membership_id', compute_sudo=False,
         help="Subscriber information for the current logged in user")
     # Quiz related fields
     question_ids = fields.One2many("slide.question", "slide_id", string="Questions")
     questions_count = fields.Integer(string="Numbers of Questions", compute='_compute_questions_count')
-    quiz_first_attempt_reward = fields.Integer("First attempt reward", default=10)
-    quiz_second_attempt_reward = fields.Integer("Second attempt reward", default=7)
-    quiz_third_attempt_reward = fields.Integer("Third attempt reward", default=5,)
-    quiz_fourth_attempt_reward = fields.Integer("Reward for every attempt after the third try", default=2)
+    quiz_first_attempt_reward = fields.Integer("Reward: first attempt", default=10)
+    quiz_second_attempt_reward = fields.Integer("Reward: second attempt", default=7)
+    quiz_third_attempt_reward = fields.Integer("Reward: third attempt", default=5,)
+    quiz_fourth_attempt_reward = fields.Integer("Reward: every attempt after the third try", default=2)
     # content
     slide_type = fields.Selection([
         ('infographic', 'Infographic'),
@@ -157,11 +169,13 @@ class Slide(models.Model):
     url = fields.Char('Document URL', help="Youtube or Google Document URL")
     document_id = fields.Char('Document ID', help="Youtube or Google Document ID")
     link_ids = fields.One2many('slide.slide.link', 'slide_id', string="External URL for this slide")
+    slide_resource_ids = fields.One2many('slide.slide.resource', 'slide_id', string="Additional Resource for this slide")
+    slide_resource_downloadable = fields.Boolean('Allow Download', default=True, help="Allow the user to download the content of the slide.")
     mime_type = fields.Char('Mime-type')
-    html_content = fields.Html("HTML Content", help="Custom HTML content for slides of type 'Web Page'.", translate=True)
+    html_content = fields.Html("HTML Content", help="Custom HTML content for slides of type 'Web Page'.", translate=True, sanitize_form=False)
     # website
     website_id = fields.Many2one(related='channel_id.website_id', readonly=True)
-    date_published = fields.Datetime('Publish Date', readonly=True, tracking=True)
+    date_published = fields.Datetime('Publish Date', readonly=True, tracking=1)
     likes = fields.Integer('Likes', compute='_compute_user_info', store=True, compute_sudo=False)
     dislikes = fields.Integer('Dislikes', compute='_compute_user_info', store=True, compute_sudo=False)
     user_vote = fields.Integer('User vote', compute='_compute_user_info', compute_sudo=False)
@@ -169,7 +183,7 @@ class Slide(models.Model):
     # views
     embedcount_ids = fields.One2many('slide.embed', 'slide_id', string="Embed Count")
     slide_views = fields.Integer('# of Website Views', store=True, compute="_compute_slide_views")
-    public_views = fields.Integer('# of Public Views')
+    public_views = fields.Integer('# of Public Views', copy=False)
     total_views = fields.Integer("Views", default="0", compute='_compute_total', store=True)
     # comments
     comments_count = fields.Integer('Number of comments', compute="_compute_comments_count")
@@ -188,6 +202,11 @@ class Slide(models.Model):
     _sql_constraints = [
         ('exclusion_html_content_and_url', "CHECK(html_content IS NULL OR url IS NULL)", "A slide is either filled with a document url or HTML content. Not both.")
     ]
+
+    @api.depends('date_published', 'is_published')
+    def _compute_is_new_slide(self):
+        for slide in self:
+            slide.is_new_slide = slide.date_published > fields.Datetime.now() - relativedelta(days=7) if slide.is_published else False
 
     @api.depends('channel_id.slide_ids.is_category', 'channel_id.slide_ids.sequence')
     def _compute_category_id(self):
@@ -260,12 +279,12 @@ class Slide(models.Model):
         for slide in self:
             slide.slide_views = mapped_data.get(slide.id, 0)
 
-    @api.depends('slide_ids.slide_type', 'slide_ids.is_published', 'slide_ids.is_category')
+    @api.depends('slide_ids.sequence', 'slide_ids.slide_type', 'slide_ids.is_published', 'slide_ids.is_category')
     def _compute_slides_statistics(self):
         # Do not use dict.fromkeys(self.ids, dict()) otherwise it will use the same dictionnary for all keys.
         # Therefore, when updating the dict of one key, it updates the dict of all keys.
         keys = ['nbr_%s' % slide_type for slide_type in self.env['slide.slide']._fields['slide_type'].get_values(self.env)]
-        default_vals = dict((key, 0) for key in keys)
+        default_vals = dict((key, 0) for key in keys + ['total_slides'])
 
         res = self.env['slide.slide'].read_group(
             [('is_published', '=', True), ('category_id', 'in', self.ids), ('is_category', '=', False)],
@@ -281,13 +300,14 @@ class Slide(models.Model):
         """ Compute statistics based on all existing slide types """
         slide_types = self.env['slide.slide']._fields['slide_type'].get_values(self.env)
         keys = ['nbr_%s' % slide_type for slide_type in slide_types]
-        result = dict((cid, dict((key, 0) for key in keys)) for cid in self.ids)
+        result = dict((cid, dict((key, 0) for key in keys + ['total_slides'])) for cid in self.ids)
         for res_group in read_group_res:
             cid = res_group['category_id'][0]
-            result[cid]['total_slides'] = 0
-            for slide_type in slide_types:
-                result[cid]['nbr_%s' % slide_type] += res_group.get('slide_type', '') == slide_type and res_group['__count'] or 0
-                result[cid]['total_slides'] += result[cid]['nbr_%s' % slide_type]
+            slide_type = res_group.get('slide_type')
+            if slide_type:
+                slide_type_count = res_group.get('__count', 0)
+                result[cid]['nbr_%s' % slide_type] = slide_type_count
+                result[cid]['total_slides'] += slide_type_count
         return result
 
     @api.depends('slide_partner_ids.partner_id')
@@ -316,7 +336,9 @@ class Slide(models.Model):
             elif record.slide_type == 'video' and record.document_id:
                 if not record.mime_type:
                     # embed youtube video
-                    record.embed_code = '<iframe src="//www.youtube.com/embed/%s?theme=light" allowFullScreen="true" frameborder="0"></iframe>' % (record.document_id)
+                    query = urls.url_parse(record.url).query
+                    query = query + '&theme=light' if query else 'theme=light'
+                    record.embed_code = '<iframe src="//www.youtube.com/embed/%s?%s" allowFullScreen="true" frameborder="0"></iframe>' % (record.document_id, query)
                 else:
                     # embed google doc video
                     record.embed_code = '<iframe src="//drive.google.com/file/d/%s/preview" allowFullScreen="true" frameborder="0"></iframe>' % (record.document_id)
@@ -329,7 +351,7 @@ class Slide(models.Model):
         if self.url:
             res = self._parse_document_url(self.url)
             if res.get('error'):
-                raise Warning(_('Could not fetch data from url. Document or access right not available:\n%s') % res['error'])
+                raise Warning(res.get('error'))
             values = res['values']
             if not values.get('document_id'):
                 raise Warning(_('Please enter valid Youtube or Google Doc URL'))
@@ -338,12 +360,20 @@ class Slide(models.Model):
 
     @api.onchange('datas')
     def _on_change_datas(self):
-        """ For PDFs, we assume that it takes 5 minutes to read a page. """
+        """ For PDFs, we assume that it takes 5 minutes to read a page.
+            If the selected file is not a PDF, it is an image (You can
+            only upload PDF or Image file) then the slide_type is changed
+            into infographic and the uploaded dataS is transfered to the
+            image field. (It avoids the infinite loading in PDF viewer)"""
         if self.datas:
             data = base64.b64decode(self.datas)
             if data.startswith(b'%PDF-'):
                 pdf = PyPDF2.PdfFileReader(io.BytesIO(data), overwriteWarnings=False)
                 self.completion_time = (5 * len(pdf.pages)) / 60
+            else:
+                self.slide_type = 'infographic'
+                self.image_1920 = self.datas
+                self.datas = None
 
     @api.depends('name', 'channel_id.website_id.domain')
     def _compute_website_url(self):
@@ -361,9 +391,6 @@ class Slide(models.Model):
                 else:
                     url = '%s/slides/slide/%s' % (base_url, slug(slide))
                 slide.website_url = url
-
-    def get_backend_menu_id(self):
-        return self.env.ref('website_slides.website_slides_menu_root').id
 
     @api.depends('channel_id.can_publish')
     def _compute_can_publish(self):
@@ -432,6 +459,13 @@ class Slide(models.Model):
         rec.sequence = 0
         return rec
 
+    def unlink(self):
+        if self.question_ids and self.channel_id.channel_partner_ids:
+            raise UserError(_("People already took this quiz. To keep course progression it should not be deleted."))
+        for category in self.filtered(lambda slide: slide.is_category):
+            category.channel_id._move_category_slides(category, False)
+        super(Slide, self).unlink()
+
     # ---------------------------------------------------------
     # Mail/Rating
     # ---------------------------------------------------------
@@ -474,12 +508,12 @@ class Slide(models.Model):
         base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
         for slide in self.filtered(lambda slide: slide.website_published and slide.channel_id.publish_template_id):
             publish_template = slide.channel_id.publish_template_id
-            html_body = publish_template.with_context(base_url=base_url)._render_template(publish_template.body_html, 'slide.slide', slide.id)
-            subject = publish_template._render_template(publish_template.subject, 'slide.slide', slide.id)
+            html_body = publish_template.with_context(base_url=base_url)._render_field('body_html', slide.ids)[slide.id]
+            subject = publish_template._render_field('subject', slide.ids)[slide.id]
             slide.channel_id.with_context(mail_create_nosubscribe=True).message_post(
                 subject=subject,
                 body=html_body,
-                subtype='website_slides.mt_channel_slide_published',
+                subtype_xmlid='website_slides.mt_channel_slide_published',
                 email_layout_xmlid='mail.mail_notification_light',
             )
         return True
@@ -498,10 +532,18 @@ class Slide(models.Model):
         mail_ids = []
         base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
         for record in self:
+            template = record.channel_id.share_template_id.with_context(
+                user=self.env.user,
+                email=email,
+                base_url=base_url,
+                fullscreen=fullscreen
+            )
+            email_values = {'email_to': email}
             if self.env.user.has_group('base.group_portal'):
-                mail_ids.append(self.channel_id.share_template_id.with_context(user=self.env.user, email=email, base_url=base_url, fullscreen=fullscreen).sudo().send_mail(record.id, notif_layout='mail.mail_notification_light', email_values={'email_from': self.env['res.company'].catchall or self.env['res.company'].email, 'email_to': email}))
-            else:
-                mail_ids.append(self.channel_id.share_template_id.with_context(user=self.env.user, email=email, base_url=base_url, fullscreen=fullscreen).send_mail(record.id, notif_layout='mail.mail_notification_light', email_values={'email_to': email}))
+                template = template.sudo()
+                email_values['email_from'] = self.env.company.catchall_formatted or self.env.company.email_formatted
+
+            mail_ids.append(template.send_mail(record.id, notif_layout='mail.mail_notification_light', email_values=email_values))
         return mail_ids
 
     def action_like(self):
@@ -707,7 +749,7 @@ class Slide(models.Model):
         key = self.env['website'].get_current_website().website_slide_google_app_key
         fetch_res = self._fetch_data('https://www.googleapis.com/youtube/v3/videos', {'id': document_id, 'key': key, 'part': 'snippet,contentDetails', 'fields': 'items(id,snippet,contentDetails)'}, 'json')
         if fetch_res.get('error'):
-            return fetch_res
+            return {'error': self._extract_google_error_message(fetch_res.get('error'))}
 
         values = {'slide_type': 'video', 'document_id': document_id}
         items = fetch_res['values'].get('items')
@@ -741,6 +783,22 @@ class Slide(models.Model):
             })
         return {'values': values}
 
+    def _extract_google_error_message(self, error):
+        """
+        See here for Google error format
+        https://developers.google.com/drive/api/v3/handle-errors
+        """
+        try:
+            error = json.loads(error)
+            error = (error.get('error', {}).get('errors', []) or [{}])[0].get('reason')
+        except json.decoder.JSONDecodeError:
+            error = str(error)
+
+        if error == 'keyInvalid':
+            return _('Your Google API key is invalid, please update it into your settings.\nSettings > Website > Features > API Key')
+
+        return _('Could not fetch data from url. Document or access right not available:\n%s', error)
+
     @api.model
     def _parse_google_document(self, document_id, only_preview_fields):
         def get_slide_type(vals):
@@ -768,7 +826,7 @@ class Slide(models.Model):
 
         fetch_res = self._fetch_data('https://www.googleapis.com/drive/v2/files/%s' % document_id, params, "json")
         if fetch_res.get('error'):
-            return fetch_res
+            return {'error': self._extract_google_error_message(fetch_res.get('error'))}
 
         google_values = fetch_res['values']
         if only_preview_fields:
@@ -806,3 +864,10 @@ class Slide(models.Model):
         res['default_opengraph']['og:image'] = res['default_twitter']['twitter:image'] = self.env['website'].image_url(self, 'image_1024')
         res['default_meta_description'] = self.description
         return res
+
+    # ---------------------------------------------------------
+    # Data / Misc
+    # ---------------------------------------------------------
+
+    def get_backend_menu_id(self):
+        return self.env.ref('website_slides.website_slides_menu_root').id

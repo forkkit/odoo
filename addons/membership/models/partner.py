@@ -39,7 +39,7 @@ class Partner(models.Model):
 
     @api.depends('member_lines.account_invoice_line',
                  'member_lines.account_invoice_line.move_id.state',
-                 'member_lines.account_invoice_line.move_id.invoice_payment_state',
+                 'member_lines.account_invoice_line.move_id.payment_state',
                  'member_lines.account_invoice_line.move_id.partner_id',
                  'free_member',
                  'member_lines.date_to', 'member_lines.date_from',
@@ -93,7 +93,7 @@ class Partner(models.Model):
                         state = 'old'
                         break
 
-            if partner.free_member and state is not 'paid':
+            if partner.free_member and state != 'paid':
                 state = 'free'
             partner.membership_state = state
 
@@ -125,7 +125,7 @@ class Partner(models.Model):
                 raise UserError(_("Partner doesn't have an address to make the invoice."))
 
             invoice_vals_list.append({
-                'type': 'out_invoice',
+                'move_type': 'out_invoice',
                 'partner_id': partner.id,
                 'invoice_line_ids': [
                     (0, None, {'product_id': product.id, 'quantity': 1, 'price_unit': amount, 'tax_ids': [(6, 0, product.taxes_id.ids)]})

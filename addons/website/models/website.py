@@ -13,7 +13,7 @@ from werkzeug.datastructures import OrderedMultiDict
 from werkzeug.exceptions import NotFound
 
 from odoo import api, fields, models, tools
-from odoo.addons.http_routing.models.ir_http import slugify, _guess_mimetype
+from odoo.addons.http_routing.models.ir_http import slugify, _guess_mimetype, url_for
 from odoo.addons.website.models.ir_http import sitemap_qs2dom
 from odoo.addons.portal.controllers.portal import pager
 from odoo.http import request
@@ -52,13 +52,15 @@ class Website(models.Model):
         return def_lang_id or self._active_languages()[0]
 
     name = fields.Char('Website Name', required=True)
-    domain = fields.Char('Website Domain')
+    domain = fields.Char('Website Domain',
+        help='Will be prefixed by http in canonical URLs if no scheme is specified')
     country_group_ids = fields.Many2many('res.country.group', 'website_country_group_rel', 'website_id', 'country_group_id',
                                          string='Country Groups', help='Used when multiple websites have the same domain.')
     company_id = fields.Many2one('res.company', string="Company", default=lambda self: self.env.company, required=True)
     language_ids = fields.Many2many('res.lang', 'website_lang_rel', 'website_id', 'lang_id', 'Languages', default=_active_languages)
     default_lang_id = fields.Many2one('res.lang', string="Default Language", default=_default_language, required=True)
     auto_redirect_lang = fields.Boolean('Autoredirect Language', default=True, help="Should users be redirected to their browser's language")
+    cookies_bar = fields.Boolean('Cookies Bar', help="Display a customizable cookies bar on your website.")
 
     def _default_social_facebook(self):
         return self.env.ref('base.main_company').social_facebook
@@ -90,11 +92,13 @@ class Website(models.Model):
     social_linkedin = fields.Char('LinkedIn Account', default=_default_social_linkedin)
     social_youtube = fields.Char('Youtube Account', default=_default_social_youtube)
     social_instagram = fields.Char('Instagram Account', default=_default_social_instagram)
-    social_default_image = fields.Binary(string="Default Social Share Image", help="If set, replaces the company logo as the default social share image.")
+    social_default_image = fields.Binary(string="Default Social Share Image", help="If set, replaces the website logo as the default social share image.")
+    has_social_default_image = fields.Boolean(compute='_compute_has_social_default_image', store=True)
 
     google_analytics_key = fields.Char('Google Analytics Key')
     google_management_client_id = fields.Char('Google Client ID')
     google_management_client_secret = fields.Char('Google Client Secret')
+    google_search_console = fields.Char(help='Google key, or Enable to access first reply')
 
     google_maps_api_key = fields.Char('Google Maps API Key')
 
@@ -102,9 +106,13 @@ class Website(models.Model):
     cdn_activated = fields.Boolean('Content Delivery Network (CDN)')
     cdn_url = fields.Char('CDN Base URL', default='')
     cdn_filters = fields.Text('CDN Filters', default=lambda s: '\n'.join(DEFAULT_CDN_FILTERS), help="URL matching those filters will be rewritten using the CDN Base URL")
-    partner_id = fields.Many2one(related='user_id.partner_id', relation='res.partner', string='Public Partner', readonly=False)
+    partner_id = fields.Many2one(related='user_id.partner_id', string='Public Partner', readonly=False)
     menu_id = fields.Many2one('website.menu', compute='_compute_menu', string='Main Menu')
     homepage_id = fields.Many2one('website.page', string='Homepage')
+    custom_code_head = fields.Text('Custom <head> code')
+    custom_code_footer = fields.Text('Custom end of <body> code')
+
+    robots_txt = fields.Text('Robots.txt', translate=False, groups='website.group_website_designer')
 
     def _default_favicon(self):
         img_path = get_resource_path('web', 'static/src/img/favicon.ico')
@@ -126,10 +134,30 @@ class Website(models.Model):
         if language_ids and self.default_lang_id not in language_ids:
             self.default_lang_id = language_ids[0]
 
-    def _compute_menu(self):
-        Menu = self.env['website.menu']
+    @api.depends('social_default_image')
+    def _compute_has_social_default_image(self):
         for website in self:
-            website.menu_id = Menu.search([('parent_id', '=', False), ('website_id', '=', website.id)], order='id', limit=1).id
+            website.has_social_default_image = bool(website.social_default_image)
+
+    def _compute_menu(self):
+        for website in self:
+            menus = self.env['website.menu'].browse(website._get_menu_ids())
+
+            # use field parent_id (1 query) to determine field child_id (2 queries by level)"
+            for menu in menus:
+                menu._cache['child_id'] = ()
+            for menu in menus:
+                # don't add child menu if parent is forbidden
+                if menu.parent_id and menu.parent_id in menus:
+                    menu.parent_id._cache['child_id'] += (menu.id,)
+            # prefetch every website.page and ir.ui.view at once
+            menus.mapped('is_visible')
+            website.menu_id = menus and menus.filtered(lambda m: not m.parent_id)[0].id or False
+
+    # self.env.uid for ir.rule groups on menu
+    @tools.ormcache('self.env.uid', 'self.id')
+    def _get_menu_ids(self):
+        return self.env['website.menu'].search([('website_id', '=', self.id)]).ids
 
     @api.model
     def create(self, vals):
@@ -159,12 +187,32 @@ class Website(models.Model):
             public_user_to_change_websites = self.filtered(lambda w: w.sudo().user_id.company_id.id != values['company_id'])
             if public_user_to_change_websites:
                 company = self.env['res.company'].browse(values['company_id'])
-                super(Website, public_user_to_change_websites).write(dict(values, user_id=company._get_public_user().id))
+                super(Website, public_user_to_change_websites).write(dict(values, user_id=company and company._get_public_user().id))
 
         result = super(Website, self - public_user_to_change_websites).write(values)
         if 'cdn_activated' in values or 'cdn_url' in values or 'cdn_filters' in values:
             # invalidate the caches from static node at compile time
             self.env['ir.qweb'].clear_caches()
+
+        if 'cookies_bar' in values:
+            if values['cookies_bar']:
+                cookies_view = self.env.ref('website.cookie_policy', raise_if_not_found=False)
+                if cookies_view:
+                    cookies_view.with_context(website_id=self.id).write({'website_id': self.id})
+                    specific_cook_view = self.with_context(website_id=self.id).viewref('website.cookie_policy')
+                    self.env['website.page'].create({
+                        'is_published': True,
+                        'website_indexed': False,
+                        'url': '/cookie-policy',
+                        'website_id': self.id,
+                        'view_id': specific_cook_view.id,
+                    })
+            else:
+                self.env['website.page'].search([
+                    ('website_id', '=', self.id),
+                    ('url', '=', '/cookie-policy'),
+                ]).unlink()
+
         return result
 
     @api.model
@@ -184,10 +232,16 @@ class Website(models.Model):
         attachments_to_unlink.unlink()
         return super(Website, self).unlink()
 
+    def create_and_redirect_to_theme(self):
+        self._force()
+        action = self.env.ref('website.theme_install_kanban_action')
+        return action.read()[0]
+
     # ----------------------------------------------------------
     # Page Management
     # ----------------------------------------------------------
     def _bootstrap_homepage(self):
+        Page = self.env['website.page']
         standard_homepage = self.env.ref('website.homepage', raise_if_not_found=False)
         if not standard_homepage:
             return
@@ -200,14 +254,25 @@ class Website(models.Model):
         </t>''' % (self.id)
         standard_homepage.with_context(website_id=self.id).arch_db = new_homepage_view
 
-        self.homepage_id = self.env['website.page'].search([('website_id', '=', self.id),
-                                                            ('key', '=', standard_homepage.key)])
+        homepage_page = Page.search([
+            ('website_id', '=', self.id),
+            ('key', '=', standard_homepage.key),
+        ], limit=1)
+        if not homepage_page:
+            homepage_page = Page.create({
+                'website_published': True,
+                'url': '/',
+                'view_id': self.with_context(website_id=self.id).viewref('website.homepage').id,
+            })
         # prevent /-1 as homepage URL
-        self.homepage_id.url = '/'
+        homepage_page.url = '/'
+        self.homepage_id = homepage_page
 
         # Bootstrap default menu hierarchy, create a new minimalist one if no default
         default_menu = self.env.ref('website.main_menu')
         self.copy_menu_hierarchy(default_menu)
+        home_menu = self.env['website.menu'].search([('website_id', '=', self.id), ('url', '=', '/')])
+        home_menu.page_id = self.homepage_id
 
     def copy_menu_hierarchy(self, top_menu):
         def copy_menu(menu, t_menu):
@@ -219,7 +284,7 @@ class Website(models.Model):
                 copy_menu(submenu, new_menu)
         for website in self:
             new_top_menu = top_menu.copy({
-                'name': _('Top Menu for Website %s') % website.id,
+                'name': _('Top Menu for Website %s', website.id),
                 'website_id': website.id,
             })
             for submenu in top_menu.child_id:
@@ -264,6 +329,7 @@ class Website(models.Model):
                 'url': page_url,
                 'website_id': website.id,  # remove it if only one website or not?
                 'view_id': view.id,
+                'track': True,
             })
             result['view_id'] = view.id
         if add_menu:
@@ -342,7 +408,7 @@ class Website(models.Model):
         for page in pages:
             dependencies.setdefault(page_key, [])
             dependencies[page_key].append({
-                'text': _('Page <b>%s</b> contains a link to this page') % page.url,
+                'text': _('Page <b>%s</b> contains a link to this page', page.url),
                 'item': page.name,
                 'link': page.url,
             })
@@ -370,7 +436,7 @@ class Website(models.Model):
             menu_key = _('Menus')
         for menu in menus:
             dependencies.setdefault(menu_key, []).append({
-                'text': _('This page is in the menu <b>%s</b>') % menu.name,
+                'text': _('This page is in the menu <b>%s</b>', menu.name),
                 'link': '/web#id=%s&view_type=form&model=website.menu' % menu.id,
                 'item': menu.name,
             })
@@ -406,7 +472,7 @@ class Website(models.Model):
         for p in pages:
             dependencies.setdefault(page_key, [])
             dependencies[page_key].append({
-                'text': _('Page <b>%s</b> is calling this file') % p.url,
+                'text': _('Page <b>%s</b> is calling this file', p.url),
                 'item': p.name,
                 'link': p.url,
             })
@@ -480,7 +546,12 @@ class Website(models.Model):
     @api.model
     def get_current_website(self, fallback=True):
         if request and request.session.get('force_website_id'):
-            return self.browse(request.session['force_website_id'])
+            website_id = self.browse(request.session['force_website_id']).exists()
+            if not website_id:
+                # Don't crash is session website got deleted
+                request.session.pop('force_website_id')
+            else:
+                return website_id
 
         website_id = self.env.context.get('website_id')
         if website_id:
@@ -584,7 +655,7 @@ class Website(models.Model):
 
     @api.model
     def is_public_user(self):
-        return request.env.user.id == request.website.user_id.id
+        return request.env.user.id == request.website._get_cached('user_id')
 
     @api.model
     def viewref(self, view_id, raise_if_not_found=True):
@@ -600,7 +671,7 @@ class Website(models.Model):
             :param raise_if_not_found: should the method raise an error if no view found
             :return: The view record or empty recordset
         '''
-        View = self.env['ir.ui.view']
+        View = self.env['ir.ui.view'].sudo()
         view = View
         if isinstance(view_id, str):
             if 'website_id' in self._context:
@@ -628,6 +699,23 @@ class Website(models.Model):
             raise ValueError('No record found for unique ID %s. It may have been deleted.' % (view_id))
         return view
 
+    @tools.ormcache_context(keys=('website_id',))
+    def _cache_customize_show_views(self):
+        views = self.env['ir.ui.view'].with_context(active_test=False).sudo().search([('customize_show', '=', True)])
+        views = views.filter_duplicate()
+        return {v.key: v.active for v in views}
+
+    @tools.ormcache_context('key', keys=('website_id',))
+    def is_view_active(self, key, raise_if_not_found=False):
+        """
+            Return True if active, False if not active, None if not found or not a customize_show view
+        """
+        views = self._cache_customize_show_views()
+        view = key in views and views[key]
+        if view is None and raise_if_not_found:
+            raise ValueError('No view of type customize_show found for key %s' % key)
+        return view
+
     @api.model
     def get_template(self, template):
         View = self.env['ir.ui.view']
@@ -639,7 +727,7 @@ class Website(models.Model):
             view_id = View.get_view_id(template)
         if not view_id:
             raise NotFound
-        return View.browse(view_id)
+        return View.sudo().browse(view_id)
 
     @api.model
     def pager(self, url, total, page=1, step=30, scope=5, url_args=None):
@@ -673,7 +761,7 @@ class Website(models.Model):
         return all(p.name in rule._converters for p in params
                    if p.kind in supported_kinds and has_no_default(p))
 
-    def enumerate_pages(self, query_string=None, force=False):
+    def _enumerate_pages(self, query_string=None, force=False):
         """ Available pages in the website/CMS. This is mostly used for links
             generation and can be overridden by modules setting up new HTML
             controllers for dynamic pages (e.g. blog).
@@ -693,7 +781,7 @@ class Website(models.Model):
         sitemap_endpoint_done = set()
 
         for rule in router.iter_rules():
-            if 'sitemap' in rule.endpoint.routing:
+            if 'sitemap' in rule.endpoint.routing and rule.endpoint.routing['sitemap'] is not True:
                 if rule.endpoint in sitemap_endpoint_done:
                     continue
                 sitemap_endpoint_done.add(rule.endpoint)
@@ -708,8 +796,12 @@ class Website(models.Model):
             if not self.rule_is_enumerable(rule):
                 continue
 
+            if 'sitemap' not in rule.endpoint.routing:
+                logger.warning('No Sitemap value provided for controller %s (%s)' %
+                               (rule.endpoint.method, ','.join(rule.endpoint.routing['routes'])))
+
             converters = rule._converters or {}
-            if query_string and not converters and (query_string not in rule.build([{}], append_unknown=False)[1]):
+            if query_string and not converters and (query_string not in rule.build({}, append_unknown=False)[1]):
                 continue
 
             values = [{}]
@@ -719,6 +811,9 @@ class Website(models.Model):
                 key=lambda x: (hasattr(x[1], 'domain') and (x[1].domain != '[]'), rule._trace.index((True, x[0]))))
 
             for (i, (name, converter)) in enumerate(convitems):
+                if 'website_id' in self.env[converter.model]._fields and (not converter.domain or converter.domain == '[]'):
+                    converter.domain = "[('website_id', 'in', (False, current_website_id))]"
+
                 newval = []
                 for val in values:
                     query = i == len(convitems) - 1 and query_string
@@ -727,19 +822,16 @@ class Website(models.Model):
                         query = sitemap_qs2dom(query, r, self.env[converter.model]._rec_name)
                         if query == FALSE_DOMAIN:
                             continue
-                    for value_dict in converter.generate(uid=self.env.uid, dom=query, args=val):
+
+                    for rec in converter.generate(uid=self.env.uid, dom=query, args=val):
                         newval.append(val.copy())
-                        value_dict[name] = value_dict['loc']
-                        del value_dict['loc']
-                        newval[-1].update(value_dict)
+                        newval[-1].update({name: rec})
                 values = newval
 
             for value in values:
                 domain_part, url = rule.build(value, append_unknown=False)
                 if not query_string or query_string.lower() in url.lower():
                     page = {'loc': url}
-                    if url in ('/sitemap.xml',):
-                        continue
                     if url in url_set:
                         continue
                     url_set.add(url)
@@ -749,14 +841,17 @@ class Website(models.Model):
         # '/' already has a http.route & is in the routing_map so it will already have an entry in the xml
         domain = [('url', '!=', '/')]
         if not force:
-            domain += [('website_indexed', '=', True)]
+            domain += [('website_indexed', '=', True), ('visibility', '=', False)]
             # is_visible
-            domain += [('website_published', '=', True), '|', ('date_publish', '=', False), ('date_publish', '<=', fields.Datetime.now())]
+            domain += [
+                ('website_published', '=', True), ('visibility', '=', False),
+                '|', ('date_publish', '=', False), ('date_publish', '<=', fields.Datetime.now())
+            ]
 
         if query_string:
             domain += [('url', 'like', query_string)]
 
-        pages = self.get_website_pages(domain)
+        pages = self._get_website_pages(domain)
 
         for page in pages:
             record = {'loc': page['url'], 'id': page['id'], 'name': page['name']}
@@ -766,19 +861,27 @@ class Website(models.Model):
                 record['lastmod'] = page['write_date'].date()
             yield record
 
-    def get_website_pages(self, domain=[], order='name', limit=None):
+    def _get_website_pages(self, domain=[], order='name', limit=None):
         domain += self.get_current_website().website_domain()
-        pages = self.env['website.page'].search(domain, order='name', limit=limit)
+        pages = self.env['website.page'].sudo().search(domain, order=order, limit=limit)
         return pages
 
     def search_pages(self, needle=None, limit=None):
         name = slugify(needle, max_length=50, path=True)
         res = []
-        for page in self.enumerate_pages(query_string=name, force=True):
+        for page in self._enumerate_pages(query_string=name, force=True):
             res.append(page)
             if len(res) == limit:
                 break
         return res
+
+    def get_suggested_controllers(self):
+        """
+            Returns a tuple (name, url, icon).
+            Where icon can be a module name, or a path
+        """
+        suggested_controllers = [(_('Homepage'), url_for('/'), 'website')]
+        return suggested_controllers
 
     @api.model
     def image_url(self, record, field, size=None):
@@ -843,7 +946,7 @@ class Website(models.Model):
             arguments = dict(request.endpoint_arguments)
             for key, val in list(arguments.items()):
                 if isinstance(val, models.BaseModel):
-                    if val.env.context.get('lang') != lang.url_code:
+                    if val.env.context.get('lang') != lang.code:
                         arguments[key] = val.with_context(lang=lang.url_code)
             path = router.build(request.endpoint, arguments)
         else:
@@ -878,6 +981,18 @@ class Website(models.Model):
         # if the current URL is indeed canonical or not.
         return current_url == canonical_url
 
+    @tools.ormcache('self.id')
+    def _get_cached_values(self):
+        self.ensure_one()
+        return {
+            'user_id': self.user_id.id,
+            'company_id': self.company_id.id,
+            'default_lang_id': self.default_lang_id.id,
+        }
+
+    def _get_cached(self, field):
+        return self._get_cached_values()[field]
+
 
 class BaseModel(models.AbstractModel):
     _inherit = 'base'
@@ -897,3 +1012,8 @@ class BaseModel(models.AbstractModel):
             return self.website_id._get_http_domain()
         else:
             return super(BaseModel, self).get_base_url()
+
+    def get_website_meta(self):
+        # dummy version of 'get_website_meta' above; this is a graceful fallback
+        # for models that don't inherit from 'website.seo.metadata'
+        return {}

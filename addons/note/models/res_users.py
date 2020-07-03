@@ -12,13 +12,13 @@ class Users(models.Model):
     _name = 'res.users'
     _inherit = ['res.users']
 
-    @api.model
-    def create(self, values):
-        user = super(Users, self).create(values)
+    @api.model_create_multi
+    def create(self, vals_list):
+        users = super().create(vals_list)
+        user_group_id = self.env['ir.model.data'].xmlid_to_res_id('base.group_user')
         # for new employee, create his own 5 base note stages
-        if user.has_group('base.group_user'):
-            user._create_note_stages()
-        return user
+        users.filtered_domain([('groups_id', 'in', [user_group_id])])._create_note_stages()
+        return users
 
     @api.model
     def _init_data_user_note_stages(self):
@@ -37,16 +37,14 @@ GROUP BY id"""
         self.browse(uids)._create_note_stages()
 
     def _create_note_stages(self):
-        data_found = False
         for num in range(4):
             stage = self.env.ref('note.note_stage_%02d' % (num,), raise_if_not_found=False)
-            data_found = True
-            if stage:
-                for user in self:
-                    stage.sudo().copy(default={'user_id': user.id})
-        if data_found:
+            if not stage:
+                break
             for user in self:
-                _logger.info('Note default columns created for user id %s', user.id)
+                stage.sudo().copy(default={'user_id': user.id})
+        else:
+            _logger.debug("Created note columns for %s", self)
 
     @api.model
     def systray_get_activities(self):

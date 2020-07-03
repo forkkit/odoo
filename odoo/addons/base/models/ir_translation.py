@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
+import hashlib
 import itertools
+import json
 import logging
 import operator
 from collections import defaultdict
@@ -27,15 +29,15 @@ class IrTranslationImport(object):
     """
     _table = 'tmp_ir_translation_import'
 
-    def __init__(self, model):
+    def __init__(self, cr, overwrite=False):
         """ Store some values, and also create a temporary SQL table to accept
         the data.
 
         :param model: the model to insert the data into (as a recordset)
         """
-        self._cr = model._cr
-        self._model_table = model._table
-        self._overwrite = model._context.get('overwrite', False)
+        self._cr = cr
+        self._model_table = "ir_translation"
+        self._overwrite = overwrite
         self._debug = False
         self._rows = []
 
@@ -237,9 +239,11 @@ class IrTranslation(models.Model):
                         record = model.browse(trans.res_id)
                         record.modified([field.name])
         for trans in self:
-            if trans.type != 'model' or trans.name.split(',')[0] in self.CACHED_MODELS:
-                self.clear_caches()
-                break
+            if (trans.type != 'model' or
+               (trans.name.split(',')[0] in self.CACHED_MODELS) or
+               (trans.comments and 'openerp-web' in trans.comments)):  # clear get_web_trans_hash
+                        self.clear_caches()
+                        break
 
     @api.model
     def _set_ids(self, name, tt, lang, ids, value, src=None):
@@ -263,7 +267,7 @@ class IrTranslation(models.Model):
         existing_ids = [row[0] for row in self._cr.fetchall()]
 
         # create missing translations
-        self.create([{
+        self.sudo().create([{
                 'lang': lang,
                 'type': tt,
                 'name': name,
@@ -437,12 +441,22 @@ class IrTranslation(models.Model):
                 elif (src, translation.lang) in done:
                     discarded += translation
                 else:
-                    translation.write({'src': src, 'state': translation.state})
+                    vals = {'src': src, 'state': translation.state}
+                    if translation.lang == records.env.lang:
+                        vals['value'] = src
+                    translation.write(vals)
                     done.add((src, translation.lang))
 
         # process outdated and discarded translations
         outdated.write({'state': 'to_translate'})
-        discarded.unlink()
+
+        if discarded:
+            # delete in SQL to avoid invalidating the whole cache
+            discarded._modified()
+            discarded.modified(self._fields)
+            self.flush(self._fields, discarded)
+            self.invalidate_cache(ids=discarded._ids)
+            self.env.cr.execute("DELETE FROM ir_translation WHERE id IN %s", [discarded._ids])
 
     @api.model
     @tools.ormcache_context('model_name', keys=('lang',))
@@ -533,7 +547,7 @@ class IrTranslation(models.Model):
                         continue
                     value2 = field.translate({val: src}.get, value1)
                     if value2 != value0:
-                        raise ValidationError(_("Translation is not valid:\n%s") % val)
+                        raise ValidationError(_("Translation is not valid:\n%s", val))
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -584,7 +598,7 @@ class IrTranslation(models.Model):
         if callable(field.translate):
             # insert missing translations for each term in src
             query = """ INSERT INTO ir_translation (lang, type, name, res_id, src, value, module, state)
-                        SELECT l.code, 'model_terms', %(name)s, %(res_id)s, %(src)s, %(src)s, %(module)s, 'to_translate'
+                        SELECT l.code, 'model_terms', %(name)s, %(res_id)s, %(src)s, '', %(module)s, 'to_translate'
                         FROM res_lang l
                         WHERE l.active AND NOT EXISTS (
                             SELECT 1 FROM ir_translation
@@ -605,7 +619,7 @@ class IrTranslation(models.Model):
         else:
             # insert missing translations for src
             query = """ INSERT INTO ir_translation (lang, type, name, res_id, src, value, module, state)
-                        SELECT l.code, 'model', %(name)s, %(res_id)s, %(src)s, %(src)s, %(module)s, 'to_translate'
+                        SELECT l.code, 'model', %(name)s, %(res_id)s, %(src)s, '', %(module)s, 'to_translate'
                         FROM res_lang l
                         WHERE l.active AND NOT EXISTS (
                             SELECT 1 FROM ir_translation
@@ -737,7 +751,7 @@ class IrTranslation(models.Model):
             self.insert_missing(fld, rec)
 
         action = {
-            'name': 'Translate',
+            'name': _('Translate'),
             'res_model': 'ir.translation',
             'type': 'ir.actions.act_window',
             'view_mode': 'tree',
@@ -774,24 +788,18 @@ class IrTranslation(models.Model):
 
         return action
 
-    @api.model
-    def _get_import_cursor(self):
+    def _get_import_cursor(self, overwrite):
         """ Return a cursor-like object for fast inserting translations """
-        return IrTranslationImport(self)
+        return IrTranslationImport(self._cr, overwrite)
 
-    def _load_module_terms(self, modules, langs):
+    def _load_module_terms(self, modules, langs, overwrite=False):
         """ Load PO files of the given modules for the given languages. """
-        # make sure the given languages are active
-        res_lang = self.env['res.lang'].sudo()
-        for lang in langs:
-            res_lang.load_lang(lang)
         # load i18n files
         for module_name in modules:
             modpath = get_module_path(module_name)
             if not modpath:
                 continue
             for lang in langs:
-                context = dict(self._context)
                 lang_code = tools.get_iso_codes(lang)
                 base_lang_code = None
                 if '_' in lang_code:
@@ -802,28 +810,28 @@ class IrTranslation(models.Model):
                     base_trans_file = get_module_resource(module_name, 'i18n', base_lang_code + '.po')
                     if base_trans_file:
                         _logger.info('module %s: loading base translation file %s for language %s', module_name, base_lang_code, lang)
-                        tools.trans_load(self._cr, base_trans_file, lang, verbose=False, module_name=module_name, context=context)
-                        context['overwrite'] = True  # make sure the requested translation will override the base terms later
+                        tools.trans_load(self._cr, base_trans_file, lang, verbose=False, overwrite=overwrite)
+                        overwrite = True  # make sure the requested translation will override the base terms later
 
                     # i18n_extra folder is for additional translations handle manually (eg: for l10n_be)
                     base_trans_extra_file = get_module_resource(module_name, 'i18n_extra', base_lang_code + '.po')
                     if base_trans_extra_file:
                         _logger.info('module %s: loading extra base translation file %s for language %s', module_name, base_lang_code, lang)
-                        tools.trans_load(self._cr, base_trans_extra_file, lang, verbose=False, module_name=module_name, context=context)
-                        context['overwrite'] = True  # make sure the requested translation will override the base terms later
+                        tools.trans_load(self._cr, base_trans_extra_file, lang, verbose=False, overwrite=overwrite)
+                        overwrite = True  # make sure the requested translation will override the base terms later
 
                 # Step 2: then load the main translation file, possibly overriding the terms coming from the base language
                 trans_file = get_module_resource(module_name, 'i18n', lang_code + '.po')
                 if trans_file:
                     _logger.info('module %s: loading translation file (%s) for language %s', module_name, lang_code, lang)
-                    tools.trans_load(self._cr, trans_file, lang, verbose=False, module_name=module_name, context=context)
+                    tools.trans_load(self._cr, trans_file, lang, verbose=False, overwrite=overwrite)
                 elif lang_code != 'en_US':
                     _logger.info('module %s: no translation for language %s', module_name, lang_code)
 
                 trans_extra_file = get_module_resource(module_name, 'i18n_extra', lang_code + '.po')
                 if trans_extra_file:
                     _logger.info('module %s: loading extra translation file (%s) for language %s', module_name, lang_code, lang)
-                    tools.trans_load(self._cr, trans_extra_file, lang, verbose=False, module_name=module_name, context=context)
+                    tools.trans_load(self._cr, trans_extra_file, lang, verbose=False, overwrite=overwrite)
         return True
 
     @api.model
@@ -865,9 +873,16 @@ class IrTranslation(models.Model):
         langs = self.env['res.lang']._lang_get(lang)
         lang_params = None
         if langs:
-            lang_params = langs.read([
-                "name", "direction", "date_format", "time_format",
-                "grouping", "decimal_point", "thousands_sep", "week_start"])[0]
+            lang_params = {
+                "name": langs.name,
+                "direction": langs.direction,
+                "date_format": langs.date_format,
+                "time_format": langs.time_format,
+                "grouping": langs.grouping,
+                "decimal_point": langs.decimal_point,
+                "thousands_sep": langs.thousands_sep,
+                "week_start": langs.week_start,
+            }
             lang_params['week_start'] = int(lang_params['week_start'])
             lang_params['code'] = lang
 
@@ -887,3 +902,15 @@ class IrTranslation(models.Model):
                 for m in msg_group)
 
         return translations_per_module, lang_params
+
+    @api.model
+    @tools.ormcache('frozenset(mods)', 'lang')
+    def get_web_translations_hash(self, mods, lang):
+        translations, lang_params = self.get_translations_for_webclient(mods, lang)
+        translation_cache = {
+            'lang_parameters': lang_params,
+            'modules': translations,
+            'lang': lang,
+            'multi_lang': len(self.env['res.lang'].sudo().get_installed()) > 1,
+        }
+        return hashlib.sha1(json.dumps(translation_cache, sort_keys=True).encode()).hexdigest()

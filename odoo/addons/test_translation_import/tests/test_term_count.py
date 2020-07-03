@@ -7,7 +7,7 @@ import io
 import odoo
 from odoo.tests import common, tagged
 from odoo.tools.misc import file_open, mute_logger
-from odoo.tools.translate import _, _lt
+from odoo.tools.translate import _, _lt, TranslationFileReader, TranslationModuleReader
 
 
 TRANSLATED_TERM = _lt("Klingon")
@@ -18,7 +18,8 @@ class TestTermCount(common.TransactionCase):
         """
         Just make sure we have as many translation entries as we wanted.
         """
-        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_FR', module_name='test_translation_import', verbose=False)
+        self.env['res.lang']._activate_lang('fr_FR')
+        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_FR', verbose=False)
         translations = self.env['ir.translation'].search([
             ('lang', '=', 'fr_FR'),
             ('src', '=', '1XBUO5PUYH2RYZSA1FTLRYS8SPCNU1UYXMEYMM25ASV7JC2KTJZQESZYRV9L8CGB'),
@@ -40,6 +41,7 @@ class TestTermCount(common.TransactionCase):
         """
         Just make sure we have as many translation entries as we wanted and module deducted from file content
         """
+        self.env['res.lang']._activate_lang('fr_FR')
         odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_FR', verbose=False)
         translations = self.env['ir.translation'].search([
             ('lang', '=', 'fr_FR'),
@@ -56,10 +58,11 @@ class TestTermCount(common.TransactionCase):
         menu = self.env.ref('test_translation_import.menu_test_translation_import')
         menu.name = "New Name"
         # install french and change translation content
-        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_FR', module_name='test_translation_import', verbose=False)
+        self.env['res.lang']._activate_lang('fr_FR')
+        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_FR', verbose=False)
         menu.with_context(lang='fr_FR').name = "Nouveau nom"
         # reload with overwrite
-        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_FR', module_name='test_translation_import', verbose=False, context={'overwrite': True})
+        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_FR', verbose=False, overwrite=True)
 
         # trans_load invalidates ormcache but not record cache
         menu.env.cache.invalidate()
@@ -67,8 +70,9 @@ class TestTermCount(common.TransactionCase):
         self.assertEqual(menu.with_context(lang='fr_FR').name, "Nouveau nom")
 
     def test_lang_with_base(self):
-        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_BE', module_name='test_translation_import', verbose=False)
-        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr_BE.po', 'fr_BE', module_name='test_translation_import', verbose=False, context={'overwrite': True})
+        self.env['res.lang']._activate_lang('fr_BE')
+        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_BE', verbose=False)
+        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr_BE.po', 'fr_BE', verbose=False, overwrite=True)
 
         # language override base language
         translations = self.env['ir.translation'].search([
@@ -95,7 +99,8 @@ class TestTermCount(common.TransactionCase):
         """
         Just make sure we do not create duplicated translation with 'code' type
         """
-        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_FR', module_name='test_translation_import', verbose=False)
+        self.env['res.lang']._activate_lang('fr_FR')
+        odoo.tools.trans_load(self.cr, 'test_translation_import/i18n/fr.po', 'fr_FR', verbose=False)
         ids = self.env['ir.translation'].search([
             ('lang', '=', 'fr_FR'),
             ('src', '=', 'Test translation with two code lines'),
@@ -118,12 +123,15 @@ class TestTermCount(common.TransactionCase):
     def test_export_empty_string(self):
         """When the string and the translation is equal the translation is empty"""
         # Export the translations
-        def update_translations(context=None):
-            context = dict(context or {}, overwrite=True)
+        def update_translations(create_empty_translation=False):
+            self.env['res.lang']._activate_lang('fr_FR')
             with closing(io.BytesIO()) as bufferobj:
                 odoo.tools.trans_export('fr_FR', ['test_translation_import'], bufferobj, 'po', self.cr)
                 bufferobj.name = 'test_translation_import/i18n/fr.po'
-                odoo.tools.trans_load_data(self.cr, bufferobj, 'po', 'fr_FR', verbose=False, context=context)
+                odoo.tools.trans_load_data(self.cr, bufferobj, 'po', 'fr_FR',
+                                           verbose=False,
+                                           create_empty_translation=create_empty_translation,
+                                           overwrite=True)
 
         # Check that the not translated key is not created
         update_translations()
@@ -131,7 +139,7 @@ class TestTermCount(common.TransactionCase):
         self.assertFalse(translation, 'An empty translation is not imported')
 
         # Check that "Generate Missing Terms" create empty string for not translated key
-        update_translations({'create_empty_translation': True})
+        update_translations(create_empty_translation=True)
         translation = self.env['ir.translation'].search_count([('src', '=', 'Efgh'), ('value', '=', '')])
         self.assertTrue(translation, 'The translation of "Efgh" should be empty')
 
@@ -220,6 +228,114 @@ class TestTermCount(common.TransactionCase):
         self.env.context = dict(self.env.context, lang="dot")
         self.assertEqual(_("Accounting"), "samva", "The code translation was not applied")
 
+    def test_export_pollution(self):
+        """ Test that exporting the translation only exports the translations of the module """
+        with file_open('test_translation_import/i18n/dot.csv', 'rb') as f:
+            csv_file = base64.b64encode(f.read())
+
+        # dot.csv only contains one term
+        import_tlh = self.env["base.language.import"].create({
+            'name': 'Dothraki',
+            'code': 'dot',
+            'data': csv_file,
+            'filename': 'dot.csv',
+        })
+        with mute_logger('odoo.addons.base.models.res_lang'):
+            import_tlh.import_lang()
+
+        # create a translation that has the same src as an existing field but no module
+        # information and a different res_id that the real field
+        # this translation should not be included in the export
+        self.env['ir.translation'].create({
+            'src': '1XBUO5PUYH2RYZSA1FTLRYS8SPCNU1UYXMEYMM25ASV7JC2KTJZQESZYRV9L8CGB',
+            'value': '1XBUO5PUYH2RYZSA1FTLRYS8SPCNU1UYXMEYMM25ASV7JC2KTJZQESZYRV9L8CGB in Dothraki',
+            'type': 'model',
+            'name': 'ir.model.fields,field_description',
+            'res_id': -1,
+            'lang': 'dot',
+        })
+        module = self.env.ref('base.module_test_translation_import')
+        export = self.env["base.language.export"].create({
+            'lang': 'dot',
+            'format': 'po',
+            'modules': [(6, 0, [module.id])]
+        })
+        export.act_getfile()
+        po_file = export.data
+        reader = TranslationFileReader(base64.b64decode(po_file).decode(), fileformat='po')
+        for row in reader:
+            if row['value']:
+                # should contains only one row from the csv, not the manual one
+                self.assertEqual(row['src'], "Accounting")
+                self.assertEqual(row['value'], "samva")
+
+    def test_translation_placeholder(self):
+        """Verify placeholder use in _()"""
+        context = {'lang': "fr_BE"}
+        self.env.ref("base.lang_fr_BE").active = True
+
+        # translation with positional placeholders
+        translation = self.env['ir.translation'].create({
+            'src': 'Text with %s placeholder',
+            'value': 'Text avec %s marqueur',
+            'type': 'code',
+            'name': 'addons/test_translation_import/tests/test_count_term.py',
+            'res_id': 0,
+            'lang': 'fr_BE',
+        })
+
+        # correctly translate
+        self.assertEqual(
+            _("Text with %s placeholder", 1),
+            "Text avec 1 marqueur",
+            "Translation placeholders were not applied"
+        )
+
+        # source error: wrong arguments
+        with self.assertRaises(TypeError), self.cr.savepoint():
+            _("Text with %s placeholder", 1, "🧀")
+
+        # translation error: log error and fallback on source
+        translation.value = "Text avec s% marqueur"
+        with self.assertLogs('odoo.tools.translate', 'ERROR'):
+            self.assertEqual(
+                _("Text with %s placeholder", 1),
+                "Text with 1 placeholder",
+                "Fallback to source was not used for bad translation"
+            )
+
+
+        # translation with named placeholders
+        translation = self.env['ir.translation'].create({
+            'src': 'Text with %(num)s placeholders %(symbol)s',
+            'value': 'Text avec %(num)s marqueurs %(symbol)s',
+            'type': 'code',
+            'name': 'addons/test_translation_import/tests/test_count_term.py',
+            'res_id': 0,
+            'lang': 'fr_BE',
+        })
+
+        # correctly translate
+        self.assertEqual(
+            _("Text with %(num)s placeholders %(symbol)s", num=2, symbol="🧀"),
+            "Text avec 2 marqueurs 🧀",
+            "Translation placeholders were not applied"
+        )
+
+        # source error: wrong arguments
+        with self.assertRaises(KeyError), self.cr.savepoint():
+            _("Text with %(num)s placeholders %(symbol)s", symbol="🧀")
+
+        # translation error: log error and fallback on source
+        translation.value = "Text avec %(num)s marqueurs %(symbole)s"
+        with self.assertLogs('odoo.tools.translate', 'ERROR'):
+            self.assertEqual(
+                _("Text with %(num)s placeholders %(symbol)s", num=2, symbol="🧀"),
+                "Text with 2 placeholders 🧀",
+                "Fallback to source was not used for bad translation"
+            )
+
+
 @tagged('post_install', '-at_install')
 class TestTranslationFlow(common.TransactionCase):
 
@@ -227,12 +343,13 @@ class TestTranslationFlow(common.TransactionCase):
         """ Ensure export+import gives the same result as loading a language """
         # load language and generate missing terms to create missing empty terms
         with mute_logger('odoo.addons.base.models.ir_translation'):
-            self.env["base.language.install"].create({'lang': 'fr_FR'}).lang_install()
+            self.env["base.language.install"].create({'lang': 'fr_FR', 'overwrite': True}).lang_install()
         self.env["base.update.translations"].create({'lang': 'fr_FR'}).act_update()
 
         translations = self.env["ir.translation"].search([
             ('lang', '=', 'fr_FR'),
-            ('module', '=', 'test_translation_import')
+            ('module', '=', 'test_translation_import'),
+            ('value', '!=', ''),
         ])
 
         # minus 3 as the original fr.po contains 3 fake code translations (cf
@@ -259,10 +376,55 @@ class TestTranslationFlow(common.TransactionCase):
             'overwrite': False,
         })
         with mute_logger('odoo.addons.base.models.res_lang'):
-            import_fr.with_context(create_empty_translation=True).import_lang()
+            import_fr.import_lang()
 
         import_translation = self.env["ir.translation"].search([
             ('lang', '=', 'fr_FR'),
-            ('module', '=', 'test_translation_import')
+            ('module', '=', 'test_translation_import'),
+            ('value', '!=', ''),
         ])
+
         self.assertEqual(init_translation_count, len(import_translation))
+
+    def test_export_import_csv(self):
+        """ Ensure can reimport exported csv """
+        self.env.ref("base.lang_fr").active = True
+
+        module = self.env.ref('base.module_test_translation_import')
+        export = self.env["base.language.export"].create({
+            'lang': 'fr_FR',
+            'format': 'csv',
+            'modules': [(6, 0, [module.id])]
+        })
+        export.act_getfile()
+        po_file = export.data
+        self.assertIsNotNone(po_file)
+
+        self.env["ir.translation"].search([
+            ('lang', '=', 'fr_FR'),
+            ('module', '=', 'test_translation_import')
+        ]).unlink()
+
+        import_fr = self.env["base.language.import"].create({
+            'name': 'French',
+            'code': 'fr_FR',
+            'data': export.data,
+            'filename': export.name,
+            'overwrite': False,
+        })
+        with mute_logger('odoo.addons.base.models.res_lang'):
+            import_fr.with_context(create_empty_translation=True).import_lang()
+
+    def test_export_static_templates(self):
+        trans_static = []
+        po_reader = TranslationModuleReader(self.env.cr, ['test_translation_import'])
+        for line in po_reader:
+            module, ttype, name, res_id, source, value, comments = line
+            if name == "addons/test_translation_import/static/src/xml/js_templates.xml":
+                trans_static.append(source)
+
+        self.assertNotIn('no export', trans_static)
+        self.assertIn('do export', trans_static)
+        self.assertIn('text node', trans_static)
+        self.assertIn('slot', trans_static)
+        self.assertIn('slot 2', trans_static)

@@ -3,11 +3,11 @@
 from odoo.tests.common import SavepointCase
 from odoo.exceptions import UserError
 
-class TestProjectBase(SavepointCase):
+class TestProjectCommon(SavepointCase):
 
     @classmethod
     def setUpClass(cls):
-        super(TestProjectBase, cls).setUpClass()
+        super(TestProjectCommon, cls).setUpClass()
 
         user_group_employee = cls.env.ref('base.group_user')
         user_group_project_user = cls.env.ref('project.group_project_user')
@@ -19,6 +19,9 @@ class TestProjectBase(SavepointCase):
         cls.partner_2 = cls.env['res.partner'].create({
             'name': 'Valid Poilvache',
             'email': 'valid.other@gmail.com'})
+        cls.partner_3 = cls.env['res.partner'].create({
+            'name': 'Valid Poilboeuf',
+            'email': 'valid.poilboeuf@gmail.com'})
 
         # Test users to use through the various tests
         Users = cls.env['res.users'].with_context({'no_reset_password': True})

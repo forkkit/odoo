@@ -99,7 +99,7 @@ class PortalWizardUser(models.TransientModel):
                                 '\n- '.join(partners_error_emails.mapped('email'))))
         if partners_error_user:
             error_msg.append("%s\n- %s" % (_("Some contacts have the same email as an existing portal user:"),
-                                '\n- '.join(['%s <%s>' % (p.display_name, p.email) for p in partners_error_user])))
+                                '\n- '.join([p.email_formatted for p in partners_error_user])))
         if error_msg:
             error_msg.append(_("To resolve this error, you can: \n"
                 "- Correct the emails of the relevant contacts\n"
@@ -132,7 +132,7 @@ class PortalWizardUser(models.TransientModel):
                         company_id = wizard_user.partner_id.company_id.id
                     else:
                         company_id = self.env.company.id
-                    user_portal = wizard_user.sudo().with_context(company_id=company_id)._create_user()
+                    user_portal = wizard_user.sudo().with_company(company_id)._create_user()
                 else:
                     user_portal = user
                 wizard_user.write({'user_id': user_portal.id})
@@ -155,13 +155,12 @@ class PortalWizardUser(models.TransientModel):
         """ create a new user for wizard_user.partner_id
             :returns record of res.users
         """
-        company_id = self.env.context.get('company_id')
         return self.env['res.users'].with_context(no_reset_password=True)._create_user_from_template({
             'email': extract_email(self.email),
             'login': extract_email(self.email),
             'partner_id': self.partner_id.id,
-            'company_id': company_id,
-            'company_ids': [(6, 0, [company_id])],
+            'company_id': self.env.company.id,
+            'company_ids': [(6, 0, self.env.company.ids)],
         })
 
     def _send_email(self):

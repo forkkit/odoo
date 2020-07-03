@@ -26,18 +26,21 @@ WebsiteNewMenu.include({
     _createNewBlogPost: function () {
         return this._rpc({
             model: 'blog.blog',
-            method: 'name_search',
-        }).then(function (blog_ids) {
-            if (blog_ids.length === 1) {
-                document.location = '/blog/' + blog_ids[0][0] + '/post/new';
+            method: 'search_read',
+            args: [wUtils.websiteDomain(this), ['name']],
+        }).then(function (blogs) {
+            if (blogs.length === 1) {
+                document.location = '/blog/' + blogs[0]['id'] + '/post/new';
                 return new Promise(function () {});
-            } else if (blog_ids.length > 1) {
+            } else if (blogs.length > 1) {
                 return wUtils.prompt({
                     id: 'editor_new_blog',
                     window_title: _t("New Blog Post"),
                     select: _t("Select Blog"),
                     init: function (field) {
-                        return blog_ids;
+                        return _.map(blogs, function (blog) {
+                            return [blog['id'], blog['name']];
+                        });
                     },
                 }).then(function (result) {
                     var blog_id = result.val;
@@ -108,11 +111,11 @@ options.registry.CoverProperties.include({
     /**
      * @override
      */
-    _setActive: function () {
-        this._super(...arguments);
+    updateUI: async function () {
+        await this._super(...arguments);
         var isRegularCover = this.$target.is('.o_wblog_post_page_cover_regular');
-        var $coverFull = this.$el.find('[data-select-class*="cover_full"]');
-        var $coverMid = this.$el.find('[data-select-class*="cover_mid"]');
+        var $coverFull = this.$el.find('[data-select-class*="o_full_screen_height"]');
+        var $coverMid = this.$el.find('[data-select-class*="o_half_screen_height"]');
         var $coverAuto = this.$el.find('[data-select-class*="cover_auto"]');
         this._coverFullOriginalLabel = this._coverFullOriginalLabel || $coverFull.text();
         this._coverMidOriginalLabel = this._coverMidOriginalLabel || $coverMid.text();

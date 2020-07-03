@@ -40,10 +40,46 @@
         <field name="no_of_recruitment">6</field>
     </record>
 
+    <record id="hr_recruitment_linkedin_developer" model="hr.recruitment.source">
+        <field name="source_id" ref="utm.utm_source_linkedin"/>
+        <field name="job_id" ref="hr.job_developer"/>
+    </record>
+
+    <record id="hr_recruitment_linkedin_ceo" model="hr.recruitment.source">
+        <field name="source_id" ref="utm.utm_source_linkedin"/>
+        <field name="job_id" ref="hr.job_ceo"/>
+    </record>
+
+    <record id="hr_recruitment_linkedin_cto" model="hr.recruitment.source">
+        <field name="source_id" ref="utm.utm_source_linkedin"/>
+        <field name="job_id" ref="hr.job_cto"/>
+    </record>
+
+    <record id="hr_recruitment_linkedin_consultant" model="hr.recruitment.source">
+        <field name="source_id" ref="utm.utm_source_linkedin"/>
+        <field name="job_id" ref="hr.job_consultant"/>
+    </record>
+
+    <record id="hr_recruitment_linkedin_hrm" model="hr.recruitment.source">
+        <field name="source_id" ref="utm.utm_source_linkedin"/>
+        <field name="job_id" ref="hr.job_hrm"/>
+    </record>
+
+    <record id="hr_recruitment_linkedin_marketing" model="hr.recruitment.source">
+        <field name="source_id" ref="utm.utm_source_linkedin"/>
+        <field name="job_id" ref="hr.job_marketing"/>
+    </record>
+
+    <record id="hr_recruitment_linkedin_trainee" model="hr.recruitment.source">
+        <field name="source_id" ref="utm.utm_source_linkedin"/>
+        <field name="job_id" ref="hr.job_trainee"/>
+    </record>
+
     <record id="hr_case_salesman0" model="hr.applicant">
         <field name="name">Sales Manager</field>
         <field name="job_id" ref="hr.job_marketing"/>
         <field name="department_id" ref="hr.dep_sales"/>
+        <field name="medium_id" ref="utm.utm_medium_direct"/>
         <field name="type_id" ref="degree_graduate"/>
         <field name="categ_ids" eval="[(6,0,[ref('tag_applicant_sales')])]"/>
         <field name="user_id" ref="base.user_demo"/>
@@ -68,6 +104,7 @@
         <field name="name">Developer PHP</field>
         <field name="job_id" ref="hr.job_developer"/>
         <field name="department_id" ref="hr.dep_rd"/>
+        <field name="medium_id" ref="utm.utm_medium_email"/>
         <field name="type_id" ref="degree_graduate"/>
         <field name="categ_ids" eval="[(6,0,[ref('tag_applicant_it')])]"/>
         <field name="user_id" ref="base.user_admin"/>
@@ -92,6 +129,7 @@
         <field name="name">Developer Python</field>
         <field name="job_id" ref="hr.job_developer"/>
         <field name="department_id" ref="hr.dep_rd"/>
+        <field name="medium_id" ref="utm.utm_medium_email"/>
         <field name="type_id" ref="degree_graduate"/>
         <field name="categ_ids" eval="[(6,0,[ref('tag_applicant_it')])]"/>
         <field name="user_id" ref="base.user_admin"/>
@@ -160,6 +198,7 @@
     </record>
     <record id="hr_case_yrsexperienceinphp0" model="hr.applicant">
         <field name="name">Marketing Job</field>
+        <field eval="(datetime.now()+relativedelta(months=-2)).strftime('%Y-%m-03 01:00:00')" name="create_date"/>
         <field name="job_id" ref="hr.job_marketing"/>
         <field name="department_id" ref="hr.dep_sales"/>
         <field name="type_id" ref="degree_graduate"/>
@@ -170,6 +209,7 @@
     </record>
     <record id="hr_case_marketingjob0" model="hr.applicant">
         <field name="name">More than 5 yrs Experience in PHP</field>
+        <field eval="(datetime.now()+relativedelta(months=-1)).strftime('%Y-%m-08 01:00:00')" name="create_date"/>
         <field name="job_id" ref="hr.job_developer"/>
         <field name="department_id" ref="hr.dep_rd"/>
         <field name="type_id" ref="degree_licenced"/>

@@ -36,8 +36,6 @@ Wysiwyg.include({
         if (!this.options.inIframe) {
             return this._super();
         }
-        var debug = odoo.debug;
-        odoo.debug = false;
 
         var defAsset;
         if (this.options.iframeCssAssets) {
@@ -50,8 +48,6 @@ Wysiwyg.include({
         }
 
         promiseWysiwyg = promiseWysiwyg || ajax.loadAsset('web_editor.wysiwyg_iframe_editor_assets');
-        odoo.debug = debug;
-
         this.defAsset = Promise.all([promiseWysiwyg, defAsset]);
 
         this.$target = this.$el;
@@ -74,7 +70,7 @@ Wysiwyg.include({
     _loadIframe: function () {
         var self = this;
         this.$iframe = $('<iframe class="wysiwyg_iframe">').css({
-            'min-height': '400px',
+            'min-height': '55vh',
             width: '100%'
         });
         var avoidDoubleLoad = 0; // this bug only appears on some configurations.

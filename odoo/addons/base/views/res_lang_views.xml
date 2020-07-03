@@ -13,7 +13,7 @@
                     <field name="direction" groups="base.group_no_one"/>
                     <field name="active"/>
                     <button name="%(base.action_view_base_language_install)d"
-                        string="Activate Language and Update Translations"
+                        string="Activate / Update"
                         type="action"
                         icon="fa-refresh"/>
                 </tree>
@@ -42,7 +42,7 @@
                                 <field name="code"/>
                                 <field name="iso_code"/>
                                 <field name="url_code" invisible="1" required="0"/>
-                                <field name="active"/>
+                                <field name="active" widget="boolean_toggle"/>
                             </group>
                             <group>
                                 <field name="direction"/>

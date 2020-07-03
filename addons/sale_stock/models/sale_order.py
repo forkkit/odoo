@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
+import json
+import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
 
 from odoo import api, fields, models, _
-from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT, float_compare
+from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT, float_compare, float_round
 from odoo.exceptions import UserError
+
+_logger = logging.getLogger(__name__)
 
 
 class SaleOrder(models.Model):
@@ -14,9 +18,9 @@ class SaleOrder(models.Model):
 
     @api.model
     def _default_warehouse_id(self):
-        company = self.env.company.id
-        warehouse_ids = self.env['stock.warehouse'].search([('company_id', '=', company)], limit=1)
-        return warehouse_ids
+        # !!! Any change to the default value may have to be repercuted
+        # on _init_column() below.
+        return self.env.user._get_default_warehouse_id()
 
     incoterm = fields.Many2one(
         'account.incoterms', 'Incoterm',
@@ -40,6 +44,29 @@ class SaleOrder(models.Model):
                                           "the order lines in case of Service products. In case of shipping, the shipping policy of "
                                           "the order will be taken into account to either use the minimum or maximum lead time of "
                                           "the order lines.")
+    json_popover = fields.Char('JSON data for the popover widget', compute='_compute_json_popover')
+    show_json_popover = fields.Boolean('Has late picking', compute='_compute_json_popover')
+
+    def _init_column(self, column_name):
+        """ Ensure the default warehouse_id is correctly assigned
+
+        At column initialization, the ir.model.fields for res.users.property_warehouse_id isn't created,
+        which means trying to read the property field to get the default value will crash.
+        We therefore enforce the default here, without going through
+        the default function on the warehouse_id field.
+        """
+        if column_name != "warehouse_id":
+            return super(SaleOrder, self)._init_column(column_name)
+        field = self._fields[column_name]
+        default = self.env['stock.warehouse'].search([('company_id', '=', self.env.company.id)], limit=1)
+        value = field.convert_to_write(default, self)
+        value = field.convert_to_column(value, self)
+        if value is not None:
+            _logger.debug("Table '%s': setting default value of new column %s to %r",
+                self._table, column_name, value)
+            query = 'UPDATE "%s" SET "%s"=%s WHERE "%s" IS NULL' % (
+                self._table, column_name, field.column_format, column_name)
+            self._cr.execute(query, (value,))
 
     @api.depends('picking_ids.date_done')
     def _compute_effective_date(self):
@@ -53,13 +80,19 @@ class SaleOrder(models.Model):
         super(SaleOrder, self)._compute_expected_date()
         for order in self:
             dates_list = []
-            confirm_date = fields.Datetime.from_string(order.date_order if order.state in ['sale', 'done'] else fields.Datetime.now())
             for line in order.order_line.filtered(lambda x: x.state != 'cancel' and not x._is_delivery()):
-                dt = confirm_date + timedelta(days=line.customer_lead or 0.0)
+                dt = line._expected_date()
                 dates_list.append(dt)
             if dates_list:
                 expected_date = min(dates_list) if order.picking_policy == 'direct' else max(dates_list)
                 order.expected_date = fields.Datetime.to_string(expected_date)
+
+    @api.model
+    def create(self, vals):
+        if 'warehouse_id' not in vals and 'company_id' in vals:
+            user = self.env['res.users'].browse(vals.get('user_id', False))
+            vals['warehouse_id'] = user.with_company(vals.get('company_id'))._get_default_warehouse_id().id
+        return super().create(vals)
 
     def write(self, values):
         if values.get('order_line') and self.state == 'sale':
@@ -85,8 +118,23 @@ class SaleOrder(models.Model):
                         to_log[order_line] = (order_line.product_uom_qty, pre_order_line_qty.get(order_line, 0.0))
                 if to_log:
                     documents = self.env['stock.picking']._log_activity_get_documents(to_log, 'move_ids', 'UP')
+                    documents = {k:v for k, v in documents.items() if k[0].state != 'cancel'}
                     order._log_decrease_ordered_quantity(documents)
         return res
+
+    def _compute_json_popover(self):
+        for order in self:
+            late_stock_picking = order.picking_ids.filtered(lambda p: p.delay_alert_date)
+            order.json_popover = json.dumps({
+                'popoverTemplate': 'sale_stock.DelayAlertWidget',
+                'late_elements': [{
+                        'id': late_move.id,
+                        'name': late_move.display_name,
+                        'model': 'stock.picking',
+                    } for late_move in late_stock_picking
+                ]
+            })
+            order.show_json_popover = bool(late_stock_picking)
 
     def _action_confirm(self):
         self.order_line._action_launch_stock_rule()
@@ -100,7 +148,13 @@ class SaleOrder(models.Model):
     @api.onchange('company_id')
     def _onchange_company_id(self):
         if self.company_id:
-            self.warehouse_id = self.env['stock.warehouse'].search([('company_id', '=', self.company_id.id)], limit=1)
+            warehouse_id = self.env['ir.default'].get_model_defaults('sale.order').get('warehouse_id')
+            self.warehouse_id = warehouse_id or self.user_id.with_company(self.company_id.id)._get_default_warehouse_id().id
+
+    @api.onchange('user_id')
+    def onchange_user_id(self):
+        super().onchange_user_id()
+        self.warehouse_id = self.user_id.with_company(self.company_id.id)._get_default_warehouse_id().id
 
     @api.onchange('partner_shipping_id')
     def _onchange_partner_shipping_id(self):
@@ -150,7 +204,7 @@ class SaleOrder(models.Model):
             if sale_order.state == 'sale' and sale_order.order_line:
                 sale_order_lines_quantities = {order_line: (order_line.product_uom_qty, 0) for order_line in sale_order.order_line}
                 documents = self.env['stock.picking']._log_activity_get_documents(sale_order_lines_quantities, 'move_ids', 'UP')
-        self.mapped('picking_ids').action_cancel()
+        self.picking_ids.filtered(lambda p: p.state != 'done').action_cancel()
         if documents:
             filtered_documents = {}
             for (parent, responsible), rendering_context in documents.items():
@@ -186,10 +240,16 @@ class SaleOrder(models.Model):
                 'impacted_pickings': impacted_pickings,
                 'cancel': cancel
             }
-            return self.env.ref('sale_stock.exception_on_so').render(values=values)
+            return self.env.ref('sale_stock.exception_on_so')._render(values=values)
 
         self.env['stock.picking']._log_activity(_render_note_exception_quantity_so, documents)
 
+    def _show_cancel_wizard(self):
+        res = super(SaleOrder, self)._show_cancel_wizard()
+        for order in self:
+            if any(picking.state == 'done' for picking in order.picking_ids) and not order._context.get('disable_cancel_warning'):
+                return True
+        return res
 
 class SaleOrderLine(models.Model):
     _inherit = 'sale.order.line'
@@ -218,7 +278,7 @@ class SaleOrderLine(models.Model):
             else:
                 line.display_qty_widget = False
 
-    @api.depends('product_id', 'customer_lead', 'product_uom_qty', 'order_id.warehouse_id', 'order_id.commitment_date')
+    @api.depends('product_id', 'customer_lead', 'product_uom_qty', 'product_uom', 'order_id.warehouse_id', 'order_id.commitment_date')
     def _compute_qty_at_date(self):
         """ Compute the quantity forecasted of product at delivery date. There are
         two cases:
@@ -236,8 +296,7 @@ class SaleOrderLine(models.Model):
             if line.order_id.commitment_date:
                 date = line.order_id.commitment_date
             else:
-                confirm_date = line.order_id.date_order if line.order_id.state in ['sale', 'done'] else datetime.now()
-                date = confirm_date + timedelta(days=line.customer_lead or 0.0)
+                date = line._expected_date()
             grouped_lines[(line.warehouse_id.id, date)] |= line
 
         treated = self.browse()
@@ -257,6 +316,10 @@ class SaleOrderLine(models.Model):
                 line.qty_available_today = qty_available_today - qty_processed_per_product[line.product_id.id]
                 line.free_qty_today = free_qty_today - qty_processed_per_product[line.product_id.id]
                 line.virtual_available_at_date = virtual_available_at_date - qty_processed_per_product[line.product_id.id]
+                if line.product_uom and line.product_id.uom_id and line.product_uom != line.product_id.uom_id:
+                    line.qty_available_today = line.product_id.uom_id._compute_quantity(line.qty_available_today, line.product_uom)
+                    line.free_qty_today = line.product_id.uom_id._compute_quantity(line.free_qty_today, line.product_uom)
+                    line.virtual_available_at_date = line.product_id.uom_id._compute_quantity(line.virtual_available_at_date, line.product_uom)
                 qty_processed_per_product[line.product_id.id] += line.product_uom_qty
             treated |= lines
         remaining = (self - treated)
@@ -411,6 +474,7 @@ class SaleOrderLine(models.Model):
             'route_ids': self.route_id,
             'warehouse_id': self.order_id.warehouse_id or False,
             'partner_id': self.order_id.partner_shipping_id.id,
+            'product_description_variants': self._get_sale_order_line_multiline_description_variants(),
             'company_id': self.order_id.company_id,
         })
         for line in self.filtered("order_id.commitment_date"):
@@ -463,6 +527,7 @@ class SaleOrderLine(models.Model):
         precision = self.env['decimal.precision'].precision_get('Product Unit of Measure')
         procurements = []
         for line in self:
+            line = line.with_company(line.company_id)
             if line.state != 'sale' or not line.product_id.type in ('consu','product'):
                 continue
             qty = line._get_qty_procurement(previous_product_uom_qty)
@@ -503,12 +568,29 @@ class SaleOrderLine(models.Model):
         pack = self.product_packaging
         qty = self.product_uom_qty
         q = default_uom._compute_quantity(pack.qty, self.product_uom)
-        if qty and q and (qty % q):
+        # We do not use the modulo operator to check if qty is a mltiple of q. Indeed the quantity
+        # per package might be a float, leading to incorrect results. For example:
+        # 8 % 1.6 = 1.5999999999999996
+        # 5.4 % 1.8 = 2.220446049250313e-16
+        if (
+            qty
+            and q
+            and float_compare(
+                qty / q, float_round(qty / q, precision_rounding=1.0), precision_rounding=0.001
+            )
+            != 0
+        ):
             newqty = qty - (qty % q) + q
             return {
                 'warning': {
                     'title': _('Warning'),
-                    'message': _("This product is packaged by %.2f %s. You should sell %.2f %s.") % (pack.qty, default_uom.name, newqty, self.product_uom.name),
+                    'message': _(
+                        "This product is packaged by %(pack_size).2f %(pack_name)s. You should sell %(quantity).2f %(unit)s.",
+                        pack_size=pack.qty,
+                        pack_name=default_uom.name,
+                        quantity=newqty,
+                        unit=self.product_uom.name
+                    ),
                 },
             }
         return {}

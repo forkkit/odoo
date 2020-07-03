@@ -20,7 +20,6 @@ RUN dnf update -d 0 -e 0 -y && \
 	  python3-lxml \
 	  python3-mako \
 	  python3-markupsafe \
-	  python3-mock \
 	  python3-num2words \
 	  python3-ofxparse \
 	  python3-passlib \
@@ -39,8 +38,8 @@ RUN dnf update -d 0 -e 0 -y && \
 	  python3-reportlab \
 	  python3-requests \
 	  python3-six \
+	  python3-stdnum \
 	  python3-suds \
-	  python3-vatnumber \
 	  python3-vobject \
 	  python3-werkzeug \
 	  python3-xlwt \

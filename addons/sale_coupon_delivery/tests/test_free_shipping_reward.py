@@ -8,9 +8,47 @@ from odoo.tests import Form, tagged
 @tagged('post_install', '-at_install')
 class TestSaleCouponProgramRules(TestSaleCouponCommon):
 
-    def setUp(self):
-        super(TestSaleCouponProgramRules, self).setUp()
-        self.iPadMini = self.env.ref('product.product_product_6')
+    @classmethod
+    def setUpClass(cls):
+        super(TestSaleCouponProgramRules, cls).setUpClass()
+        cls.iPadMini = cls.env['product.product'].create({'name': 'Large Cabinet', 'list_price': 320.0})
+        tax_15pc_excl = cls.env['account.tax'].create({
+            'name': "15% Tax excl",
+            'amount_type': 'percent',
+            'amount': 15,
+        })
+        cls.product_delivery_poste = cls.env['product.product'].create({
+            'name': 'The Poste',
+            'type': 'service',
+            'categ_id': cls.env.ref('delivery.product_category_deliveries').id,
+            'sale_ok': False,
+            'purchase_ok': False,
+            'list_price': 20.0,
+            'taxes_id': [(6, 0, [tax_15pc_excl.id])],
+        })
+        cls.carrier = cls.env['delivery.carrier'].create({
+            'name': 'The Poste',
+            'fixed_price': 20.0,
+            'delivery_type': 'base_on_rule',
+            'product_id': cls.product_delivery_poste.id,
+        })
+        cls.env['delivery.price.rule'].create([{
+            'carrier_id': cls.carrier.id,
+            'max_value': 5,
+            'list_base_price': 20,
+        }, {
+            'carrier_id': cls.carrier.id,
+            'operator': '>=',
+            'max_value': 5,
+            'list_base_price': 50,
+        }, {
+            'carrier_id': cls.carrier.id,
+            'operator': '>=',
+            'max_value': 300,
+            'variable': 'price',
+            'list_base_price': 0,
+        }])
+
 
     # Test a free shipping reward + some expected behavior
     # (automatic line addition or removal)
@@ -19,7 +57,7 @@ class TestSaleCouponProgramRules(TestSaleCouponCommon):
         # Test case 1: The minimum amount is not reached, the reward should
         # not be created
         self.immediate_promotion_program.active = False
-        self.env['sale.coupon.program'].create({
+        self.env['coupon.program'].create({
             'name': 'Free Shipping if at least 100 euros',
             'promo_code_usage': 'no_code_needed',
             'reward_type': 'free_shipping',
@@ -95,14 +133,14 @@ class TestSaleCouponProgramRules(TestSaleCouponCommon):
 
     def test_shipping_cost(self):
         # Free delivery should not be taken into account when checking for minimum required threshold
-        p_minimum_threshold_free_delivery = self.env['sale.coupon.program'].create({
+        p_minimum_threshold_free_delivery = self.env['coupon.program'].create({
             'name': 'free shipping if > 872 tax exl',
             'promo_code_usage': 'no_code_needed',
             'reward_type': 'free_shipping',
             'program_type': 'promotion_program',
             'rule_minimum_amount': 872,
         })
-        p_minimum_threshold_discount = self.env['sale.coupon.program'].create({
+        p_minimum_threshold_discount = self.env['coupon.program'].create({
             'name': '10% reduction if > 872 tax exl',
             'promo_code_usage': 'no_code_needed',
             'reward_type': 'discount',
@@ -148,12 +186,7 @@ class TestSaleCouponProgramRules(TestSaleCouponCommon):
 
     def test_shipping_cost_numbers(self):
         # Free delivery should not be taken into account when checking for minimum required threshold
-        tax_15pc_excl = self.env['account.tax'].create({
-            'name': "15% Tax excl",
-            'amount_type': 'percent',
-            'amount': 15,
-        })
-        p_minimum_threshold_free_delivery = self.env['sale.coupon.program'].create({
+        p_minimum_threshold_free_delivery = self.env['coupon.program'].create({
             'name': 'free shipping if > 872 tax exl',
             'promo_code_usage': 'code_needed',
             'promo_code': 'free_shipping',
@@ -161,7 +194,7 @@ class TestSaleCouponProgramRules(TestSaleCouponCommon):
             'program_type': 'promotion_program',
             'rule_minimum_amount': 872,
         })
-        self.p2 = self.env['sale.coupon.program'].create({
+        self.p2 = self.env['coupon.program'].create({
             'name': 'Buy 4 large cabinet, get one for free',
             'promo_code_usage': 'no_code_needed',
             'reward_type': 'product',
@@ -178,16 +211,11 @@ class TestSaleCouponProgramRules(TestSaleCouponCommon):
             'product_uom_qty': 3.0,
             'order_id': order.id,
         })
-        # The delivery product has 15% tax on dball but not on dbbase. A module is probably adding the tax at some point.
-        # We want that tax to be set so we can be sure it is not added to the order total paid amount used in coupon as
-        # it was wrongly done before.
-        carrier = self.env.ref('delivery.delivery_carrier')
-        carrier.product_id.taxes_id = tax_15pc_excl
 
         # I add delivery cost in Sales order
         delivery_wizard = Form(self.env['choose.delivery.carrier'].with_context({
             'default_order_id': order.id,
-            'default_carrier_id': carrier.id
+            'default_carrier_id': self.carrier.id
         }))
         choose_delivery_carrier = delivery_wizard.save()
         choose_delivery_carrier.button_confirm()
@@ -212,7 +240,7 @@ class TestSaleCouponProgramRules(TestSaleCouponCommon):
         self.assertEqual(sum([line.price_total for line in order._get_no_effect_on_threshold_lines()]), 0)
         self.assertEqual(order.amount_untaxed, 872.73)
 
-        p_specific_product = self.env['sale.coupon.program'].create({
+        p_specific_product = self.env['coupon.program'].create({
             'name': '20% reduction on large cabinet in cart',
             'promo_code_usage': 'no_code_needed',
             'reward_type': 'discount',

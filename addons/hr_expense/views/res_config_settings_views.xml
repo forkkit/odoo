@@ -10,8 +10,10 @@
                 <xpath expr="//div[hasclass('settings')]" position="inside">
                     <div class="app_settings_block" data-string="Expenses" string="Expenses" data-key="hr_expense" groups="hr_expense.group_hr_expense_manager">
                         <h2>Expenses</h2>
-                        <div class="row mt16 o_settings_container">
-                            <div class="col-xs-12 col-md-6 o_setting_box" title="Send an email to this email alias with the receipt in attachment to create an expense in one click. If the first word of the mail subject contains the product's internal reference or the product name, the corresponding product will automatically be set. Type the expense amount in the mail subject to set it on the expense too.">
+                        <div class="row mt16 o_settings_container" name="expenses_setting_container">
+                            <div class="col-xs-12 col-md-6 o_setting_box"
+                                id="create_expense_setting"
+                                title="Send an email to this email alias with the receipt in attachment to create an expense in one click. If the first word of the mail subject contains the product's internal reference or the product name, the corresponding product will automatically be set. Type the expense amount in the mail subject to set it on the expense too.">
                                 <div class="o_setting_left_pane">
                                     <field name="use_mailgateway"/>
                                 </div>
@@ -45,6 +47,18 @@
                                         Expenses can be reimbursed in payslips.
                                     </div>
                                 </div>
+                            </div>
+                            <div class="col-xs-12 col-md-6 o_setting_box" title="use OCR to fill data from a picture of the bill">
+                                <div class="o_setting_left_pane">
+                                    <field name="module_hr_expense_extract" widget="upgrade_boolean"/>
+                                </div>
+                                <div class="o_setting_right_pane" id="expense_extract_settings">
+                                    <label string="Expense Digitalization (OCR)" for="module_hr_expense_extract"/>
+                                    <span class="fa fa-lg fa-building-o" title="Values set here are company-specific."/>
+                                    <div class="text-muted">
+                                        Digitalize your receipts with OCR and Artificial Intelligence
+                                    </div>
+                                </div>   
                             </div>
                         </div>
                     </div>

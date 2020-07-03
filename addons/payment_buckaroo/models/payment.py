@@ -26,7 +26,9 @@ def normalize_keys_upper(data):
 class AcquirerBuckaroo(models.Model):
     _inherit = 'payment.acquirer'
 
-    provider = fields.Selection(selection_add=[('buckaroo', 'Buckaroo')])
+    provider = fields.Selection(selection_add=[
+        ('buckaroo', 'Buckaroo')
+    ], ondelete={'buckaroo': 'set default'})
     brq_websitekey = fields.Char('WebsiteKey', required_if_provider='buckaroo', groups='base.group_user')
     brq_secretkey = fields.Char('SecretKey', required_if_provider='buckaroo', groups='base.group_user')
 
@@ -82,7 +84,7 @@ class AcquirerBuckaroo(models.Model):
         return shasign
 
     def buckaroo_form_generate_values(self, values):
-        base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
+        base_url = self.get_base_url()
         buckaroo_tx_values = dict(values)
         buckaroo_tx_values.update({
             'Brq_websitekey': self.brq_websitekey,

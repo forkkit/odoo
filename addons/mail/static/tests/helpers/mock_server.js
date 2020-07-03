@@ -31,22 +31,77 @@ MockServer.include({
      * @private
      * @return {Object[]} list of channels previews
      */
-    _mockChannelFetchPreview: function (args) {
-        var self = this;
-        var ids = args.args[0]; // list of channel IDs to fetch preview
-        var model = args.model;
-        var channels = this._getRecords(model, [['id', 'in', ids]]);
-        var previews = _.map(channels, function (channel) {
-            var channelMessages = _.filter(self.data['mail.message'].records, function (message) {
-                return _.contains(message.channel_ids, channel.id);
-            });
-            var lastMessage = _.max(channelMessages, function (message) {
-                return message.id;
-            });
-            channel.last_message = lastMessage;
+    _mockChannelFetchPreview(args) {
+        const ids = args.args[0]; // list of channel IDs to fetch preview
+        const model = args.model;
+        const channels = this._getRecords(model, [['id', 'in', ids]]);
+        return channels.map(channel => {
+            if (!channel.last_message) {
+                const channelMessages = this.data['mail.message'].records.filter(
+                    message => message.channel_ids.includes(channel.id)
+                );
+                if (channelMessages.length > 0) {
+                    const lastMessageId = Math.max(...channelMessages.map(message => message.id));
+                    channel.last_message = channelMessages.find(
+                        message => message.id === lastMessageId
+                    );
+                }
+            }
             return channel;
         });
-        return previews;
+    },
+    /**
+     * Simulate the 'channel_fold' route of of mail.channel
+     * In particular sends a notification on the bus
+     *
+     * @private
+     */
+     _mockChannelFold(args) {
+        const { state, uuid } = args.kwargs;
+        const channel = this.data['mail.channel'].records.find(c => c.uuid === uuid);
+        channel.state = state;
+        // Should use something of the form session.partner_id or env.messaging.currentPartner
+        // This is a limitation of the architecture of JS tests
+        const notifConfirmFold = [
+            ["dbName", 'res.partner', undefined],
+            Object.assign({}, channel)
+        ];
+        this._widget.call('bus_service', 'trigger', 'notification', [notifConfirmFold]);
+    },
+    /**
+     * Simulate the 'execute_command' route of mail.channel
+     * In particular sends a notification on the bus
+     *
+     * @private
+     */
+     _mockExecuteCommand(args) {
+        const [ids, commandName] = args.args;
+        const channels = this.data['mail.channel'].records.filter(c => ids.includes(c.id));
+        if (commandName === 'leave') {
+            for (const channel of channels) {
+                channel.is_pinned = false;
+                // Should use something of the form session.partner_id or env.messaging.currentPartner
+                // This is a limitation of the architecture of JS tests
+                const notifConfirmUnpin = [
+                    ["dbName", 'res.partner', undefined],
+                    Object.assign({}, channel, { info: 'unsubscribe' })
+                ];
+                this._widget.call('bus_service', 'trigger', 'notification', [notifConfirmUnpin]);
+            }
+            return;
+        }
+        throw new Error(`mail/mock_server: the route execute_command doesn't implement the command "${commandName}"`);
+    },
+    /**
+     * Simulate the '/mail/read_followers' route
+     *
+     * @private
+     * @return {Object} list of followers
+     */
+    async _mockFollowersRead(args) {
+        const ids = args.follower_ids; // list of followers IDs to read
+        const followers = this._getRecords('mail.followers', [['id', 'in', ids]]);
+        return { followers };
     },
     /**
      * Simulate the 'get_activity_method' on 'mail.activity'
@@ -124,6 +179,76 @@ MockServer.include({
         };
     },
     /**
+     * Simulate the 'get_mention_suggestions' on 'res.partner'.
+     *
+     * @private
+     * @returns {Array[]}
+     */
+    _mockResPartnerGetMentionSuggestions(args) {
+        const search = args.kwargs.search || '';
+        const limit = args.kwargs.limit || 8;
+
+        /**
+         * Returns the given list of partners after filtering it according to
+         * the logic of the Python method `get_mention_suggestions` for the
+         * given search term. The result is truncated to the given limit and
+         * formatted as expected by the original method.
+         *
+         * @param {Object[]} partners
+         * @param {string} search
+         * @param {integer} limit
+         * @returns {Object[]}
+         */
+        const mentionSuggestionsFilter = function (partners, search, limit) {
+            const matchingPartners = partners
+                .filter(partner => {
+                    // avoid inactive
+                    if (partner.active === false) {
+                        return false;
+                    }
+                    // no search term is considered as return all
+                    if (!search) {
+                        return true;
+                    }
+                    // otherwise name or email must match search term
+                    if (partner.name && partner.name.includes(search)) {
+                        return true;
+                    }
+                    if (partner.email && partner.email.includes(search)) {
+                        return true;
+                    }
+                    return false;
+                }).map(partner => {
+                    // expected format
+                    return {
+                        email: partner.email,
+                        id: partner.id,
+                        name: partner.name,
+                    };
+                });
+            // reduce results to max limit
+            matchingPartners.length = Math.min(matchingPartners.length, limit);
+            return matchingPartners;
+        };
+
+        // add main suggestions based on users
+        const partnersFromUsers = this.data['res.users'].records
+            .map(user => this.data['res.partner'].records[user.partner_id])
+            .filter(partner => partner);
+        const mainMatchingPartners = mentionSuggestionsFilter(partnersFromUsers, search, limit);
+
+        let extraMatchingPartners = [];
+        // if not enough results add extra suggestions based on partners
+        if (mainMatchingPartners.length < limit) {
+            const partners = this.data['res.partner'].records.filter(partner =>
+                // avoid duplicates in extra
+                !partnersFromUsers.includes(partner)
+            );
+            extraMatchingPartners = mentionSuggestionsFilter(partners, search, limit);
+        }
+        return [mainMatchingPartners, extraMatchingPartners];
+    },
+    /**
      * Simulate the '/mail/init_messaging' route
      *
      * @private
@@ -131,14 +256,24 @@ MockServer.include({
      */
     _mockInitMessaging: function () {
         return _.defaults(this.initMessagingData || {}, {
-            'needaction_inbox_counter': 0,
-            'starred_counter': 0,
-            'channel_slots': [],
-            'commands': [],
-            'mention_partner_suggestions': [],
-            'shortcodes': [],
-            'menu_id': false,
-            'mail_failures': [],
+            channel_slots: [],
+            commands: [],
+            mail_failures: [],
+            mention_partner_suggestions: [],
+            menu_id: false,
+            needaction_inbox_counter: 0,
+            partner_root: {
+                active: false,
+                display_name: "OdooBot",
+                id: 2,
+            },
+            public_partner: {
+                active: false,
+                display_name: "Public user",
+                id: 4,
+            },
+            shortcodes: [],
+            starred_counter: 0,
         });
     },
     /**
@@ -166,7 +301,10 @@ MockServer.include({
             return m1.id < m2.id ? 1 : -1;
         });
         // pick at most 'limit' messages
-        return messages.slice(0, args.kwargs.limit);
+        if (args.kwargs.limit) {
+            return messages.slice(0, args.kwargs.limit);
+        }
+        return messages;
     },
     /**
      * Simulate the 'message_format' Python method
@@ -184,6 +322,29 @@ MockServer.include({
             return m1.id < m2.id ? 1 : -1;
         });
         return messages;
+    },
+    /**
+     * Simulate the 'message_post' Python method
+     *
+     * @private
+     * @return {integer}
+     */
+    _mockMessagePost(args) {
+        const {
+            args: [res_id],
+            model: res_model,
+            kwargs: postData,
+        } = args;
+        const records = this.data['mail.message'].records;
+        const messageIds = records.map(message => message.id);
+        const id = Math.max(...messageIds, 0) + 1;
+        const record = Object.assign({
+            id,
+            res_id,
+            model: res_model,
+        }, postData);
+        records.push(record);
+        return id;
     },
     /**
      * Simulate the 'moderate' Python method
@@ -219,7 +380,7 @@ MockServer.include({
                 var dbName = undefined; // useless for tests
                 var messageData = message;
                 message.moderation_status = 'accepted';
-                var metaData = [dbName, 'mail.channel'];
+                var metaData = [dbName, 'mail.channel', message.res_id];
                 var notification = [metaData, messageData];
                 notifications.push(notification);
             });
@@ -255,7 +416,7 @@ MockServer.include({
     /**
      * @override
      */
-    _performRpc: function (route, args) {
+    async _performRpc(route, args) {
         // routes
         if (route === '/mail/init_messaging') {
             return Promise.resolve(this._mockInitMessaging(args));
@@ -267,6 +428,9 @@ MockServer.include({
         if (args.method === 'channel_fetch_preview') {
             return Promise.resolve(this._mockChannelFetchPreview(args));
         }
+        if (args.method === 'channel_fold') {
+            return this._mockChannelFold(args);
+        }
         if (args.method === 'channel_minimize') {
             return Promise.resolve();
         }
@@ -276,14 +440,28 @@ MockServer.include({
         if (args.method === 'channel_fetched') {
             return Promise.resolve();
         }
+        if (args.method === 'execute_command') {
+            return this._mockExecuteCommand(args);
+        }
         if (args.method === 'get_activity_data') {
             return Promise.resolve(this._mockGetActivityData(args));
+        }
+        if (args.method === 'get_mention_suggestions') {
+            if (args.model === 'res.partner') {
+                return this._mockResPartnerGetMentionSuggestions(args);
+            }
         }
         if (args.method === 'message_fetch') {
             return Promise.resolve(this._mockMessageFetch(args));
         }
         if (args.method === 'message_format') {
             return Promise.resolve(this._mockMessageFormat(args));
+        }
+        if (args.method === 'message_post') {
+            return Promise.resolve(this._mockMessagePost(args));
+        }
+        if (route === '/mail/read_followers') {
+            return this._mockFollowersRead(args);
         }
         if (args.method === 'activity_format') {
             var res = this._mockRead(args.model, args.args, args.kwargs);

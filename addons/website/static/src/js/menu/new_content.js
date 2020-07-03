@@ -94,8 +94,9 @@ var NewContentMenu = websiteNavbarData.WebsiteNavbarActionWidget.extend({
                 return;
             }
             var url = '/website/add/' + encodeURIComponent(val);
-            if ($dialog.find('input[type="checkbox"]').is(':checked')) url +='?add_menu=1';
-            document.location = url;
+            const res = wUtils.sendRequest(url, {
+                add_menu: $dialog.find('input[type="checkbox"]').is(':checked') || '',
+            });
             return new Promise(function () {});
         });
     },
@@ -132,6 +133,7 @@ var NewContentMenu = websiteNavbarData.WebsiteNavbarActionWidget.extend({
      * @private
      */
     _hideMenu: function () {
+        this.shown = false;
         this.$newContentMenuChoices.addClass('o_hidden');
         $('body').removeClass('o_new_content_open');
     },
@@ -168,6 +170,7 @@ var NewContentMenu = websiteNavbarData.WebsiteNavbarActionWidget.extend({
             });
         }).then(function () {
             self.firstTab = true;
+            self.shown = true;
             self.$newContentMenuChoices.removeClass('o_hidden');
             $('body').addClass('o_new_content_open');
             self.$('> a').focus();
@@ -203,9 +206,13 @@ var NewContentMenu = websiteNavbarData.WebsiteNavbarActionWidget.extend({
      * @param {Event} ev
      */
     _onBackgroundKeydown: function (ev) {
+        if (!this.shown) {
+            return;
+        }
         switch (ev.which) {
             case $.ui.keyCode.ESCAPE:
                 this._hideMenu();
+                ev.stopPropagation();
                 break;
             case $.ui.keyCode.TAB:
                 if (ev.shiftKey) {
@@ -267,7 +274,10 @@ var NewContentMenu = websiteNavbarData.WebsiteNavbarActionWidget.extend({
                         }).last();
                     if ($finalPosition) {
                         $el.fadeTo(400, 0, function () {
-                            $el.insertAfter($finalPosition);
+                            // if once installed, button disapeear, don't need to move it.
+                            if (!$el.hasClass('o_new_content_element_once')) {
+                                $el.insertAfter($finalPosition);
+                            }
                             // change style to use spinner
                             $i.removeClass()
                                 .addClass('fa fa-spin fa-spinner fa-pulse');
@@ -278,14 +288,16 @@ var NewContentMenu = websiteNavbarData.WebsiteNavbarActionWidget.extend({
                     }
 
                     self._install(moduleId).then(function () {
-                        window.location.href = window.location.origin + window.location.pathname + '?' + enableFlag;
+                        var origin = window.location.origin;
+                        var redirectURL = $el.find('a').data('url') || (window.location.pathname + '?' + enableFlag);
+                        window.location.href = origin + redirectURL;
                     }, function () {
                         $i.removeClass()
                             .addClass('fa fa-exclamation-triangle');
                         $p.text(_.str.sprintf(self.newContentText.failed, name));
                     });
                 }
-            },{
+            }, {
                 text: _t("Cancel"),
                 close: true,
             }];
@@ -294,7 +306,7 @@ var NewContentMenu = websiteNavbarData.WebsiteNavbarActionWidget.extend({
         new Dialog(this, {
             title: title,
             size: 'medium',
-            $content: $('<p/>', {text: content}),
+            $content: $('<div/>', {text: content}),
             buttons: buttons
         }).open();
     },

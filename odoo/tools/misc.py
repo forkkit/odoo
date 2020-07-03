@@ -5,52 +5,49 @@
 """
 Miscellaneous tools used by OpenERP.
 """
-from functools import wraps
-import babel
-from contextlib import contextmanager
+import cProfile
+import collections
 import datetime
-import math
-import subprocess
+import hmac as hmac_lib
+import hashlib
 import io
 import os
-
-import collections
-import passlib.utils
 import pickle as pickle_
-import pytz
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
+import traceback
 import types
 import unicodedata
-import werkzeug.utils
 import zipfile
-from collections import defaultdict, Iterable, Mapping, MutableMapping, MutableSet, OrderedDict
-from itertools import islice, groupby as itergroupby, repeat
-from lxml import etree
-
-from .which import which
-import traceback
+from collections import defaultdict, OrderedDict
+from collections.abc import Iterable, Mapping, MutableMapping, MutableSet
+from contextlib import contextmanager
+from difflib import HtmlDiff
+from functools import wraps
+from itertools import islice, groupby as itergroupby
 from operator import itemgetter
 
-try:
-    # pylint: disable=bad-python3-import
-    import cProfile
-except ImportError:
-    import profile as cProfile
-
-
-from .config import config
-from .cache import *
-from .parse_version import parse_version
-from . import pycompat
+import babel
+import babel.dates
+import passlib.utils
+import pytz
+import werkzeug.utils
+from lxml import etree
 
 import odoo
+import odoo.addons
 # get_encodings, ustr and exception_to_unicode were originally from tools.misc.
 # There are moved to loglevels until we refactor tools.
 from odoo.loglevels import get_encodings, ustr, exception_to_unicode     # noqa
+from . import pycompat
+from .cache import *
+from .config import config
+from .parse_version import parse_version
+from .which import which
 
 _logger = logging.getLogger(__name__)
 
@@ -156,7 +153,6 @@ def file_open(name, mode="r", subdir='addons', pathinfo=False):
 
     @return fileobject if pathinfo is False else (fileobject, filepath)
     """
-    import odoo.modules as addons
     adps = odoo.addons.__path__
     rtp = os.path.normcase(os.path.abspath(config['root_path']))
 
@@ -204,7 +200,6 @@ def file_open(name, mode="r", subdir='addons', pathinfo=False):
 def _fileopen(path, mode, basedir, pathinfo, basename=None):
     name = os.path.normpath(os.path.normcase(os.path.join(basedir, path)))
 
-    import odoo.modules as addons
     paths = odoo.addons.__path__ + [config['root_path']]
     for addons_path in paths:
         addons_path = os.path.normpath(os.path.normcase(addons_path)) + os.sep
@@ -759,6 +754,8 @@ def remove_accents(input_str):
     """Suboptimal-but-better-than-nothing way to replace accented
     latin letters by an ASCII equivalent. Will obviously change the
     meaning of input_str and work only for some cases"""
+    if not input_str:
+        return input_str
     input_str = ustr(input_str)
     nkfd_form = unicodedata.normalize('NFKD', input_str)
     return u''.join([c for c in nkfd_form if not unicodedata.combining(c)])
@@ -1087,6 +1084,56 @@ class LastOrderedSet(OrderedSet):
         OrderedSet.add(self, elem)
 
 
+class GroupCalls:
+    """ A collection of callbacks with support for aggregated arguments.  Upon
+    call, every registered function is called once with positional arguments.
+    When registering a function, a tuple of positional arguments is returned, so
+    that the caller can modify the arguments in place.  This allows to
+    accumulate some data to process once::
+
+        callbacks = GroupCalls()
+
+        # register print (by default with a list)
+        [args] = callbacks.register(print, list)
+        args.append(42)
+
+        # add an element to the list to print
+        [args] = callbacks.register(print, list)
+        args.append(43)
+
+        # print "[42, 43]"
+        callbacks()
+    """
+    def __init__(self):
+        self._func_args = {}            # {func: args}
+
+    def __call__(self):
+        """ Call all the registered functions (in first addition order) with
+        their respective arguments.  Only recurrent functions remain registered
+        after the call.
+        """
+        func_args = self._func_args
+        while func_args:
+            func = next(iter(func_args))
+            args = func_args.pop(func)
+            func(*args)
+
+    def add(self, func, *types):
+        """ Register the given function, and return the tuple of positional
+        arguments to call the function with.  If the function is not registered
+        yet, the list of arguments is made up by invoking the given types.
+        """
+        try:
+            return self._func_args[func]
+        except KeyError:
+            args = self._func_args[func] = [type_() for type_ in types]
+            return args
+
+    def clear(self):
+        """ Remove all callbacks from self. """
+        self._func_args.clear()
+
+
 class IterableGenerator:
     """ An iterable object based on a generator function, which is called each
         time the object is iterated over.
@@ -1172,9 +1219,14 @@ def get_lang(env, lang_code=False):
     :return res.lang: the first lang found that is installed on the system.
     """
     langs = [code for code, _ in env['res.lang'].get_installed()]
-    for code in [lang_code, env.context.get('lang'), env.user.company_id.partner_id.lang, langs[0]]:
-        if code in langs:
-            return env['res.lang']._lang_get(code)
+    lang = langs[0]
+    if lang_code and lang_code in langs:
+        lang = lang_code
+    elif env.context.get('lang') in langs:
+        lang = env.context.get('lang')
+    elif env.user.company_id.partner_id.lang in langs:
+        lang = env.user.company_id.partner_id.lang
+    return env['res.lang']._lang_get(lang)
 
 
 def formatLang(env, value, digits=None, grouping=True, monetary=False, dp=False, currency_obj=False):
@@ -1330,6 +1382,46 @@ def _format_time_ago(env, time_delta, lang_code=False, add_direction=True):
     return babel.dates.format_timedelta(-time_delta, add_direction=add_direction, locale=locale)
 
 
+def format_decimalized_number(number, decimal=1):
+    """Format a number to display to nearest metrics unit next to it.
+
+    Do not display digits if all visible digits are null.
+    Do not display units higher then "Tera" because most of people don't know what
+    a "Yotta" is.
+
+    >>> format_decimalized_number(123_456.789)
+    123.5k
+    >>> format_decimalized_number(123_000.789)
+    123k
+    >>> format_decimalized_number(-123_456.789)
+    -123.5k
+    >>> format_decimalized_number(0.789)
+    0.8
+    """
+    for unit in ['', 'k', 'M', 'G']:
+        if abs(number) < 1000.0:
+            return "%g%s" % (round(number, decimal), unit)
+        number /= 1000.0
+    return "%g%s" % (round(number, decimal), 'T')
+
+
+def format_decimalized_amount(amount, currency=None):
+    """Format a amount to display the currency and also display the metric unit of the amount.
+
+    >>> format_decimalized_amount(123_456.789, res.currency("$"))
+    $123.5k
+    """
+    formated_amount = format_decimalized_number(amount)
+
+    if not currency:
+        return formated_amount
+
+    if currency.position == 'before':
+        return "%s%s" % (currency.symbol or '', formated_amount)
+
+    return "%s %s" % (formated_amount, currency.symbol or '')
+
+
 def format_amount(env, amount, currency, lang_code=False):
     fmt = "%.{0}f".format(currency.decimal_places)
     lang = get_lang(env, lang_code)
@@ -1350,13 +1442,14 @@ def format_duration(value):
     """ Format a float: used to display integral or fractional values as
         human-readable time spans (e.g. 1.5 as "01:30").
     """
-    sign = math.copysign(1.0, value)
     hours, minutes = divmod(abs(value) * 60, 60)
     minutes = round(minutes)
     if minutes == 60:
         minutes = 0
         hours += 1
-    return '%02d:%02d' % (sign * hours, minutes)
+    if value < 0:
+        return '-%02d:%02d' % (hours, minutes)
+    return '%02d:%02d' % (hours, minutes)
 
 
 def _consteq(str1, str2):
@@ -1418,3 +1511,87 @@ class DotDict(dict):
     def __getattr__(self, attrib):
         val = self.get(attrib)
         return DotDict(val) if type(val) is dict else val
+
+
+def get_diff(data_from, data_to, custom_style=False):
+    """
+    Return, in an HTML table, the diff between two texts.
+
+    :param tuple data_from: tuple(text, name), name will be used as table header
+    :param tuple data_to: tuple(text, name), name will be used as table header
+    :param tuple custom_style: string, style css including <style> tag.
+    :return: a string containing the diff in an HTML table format.
+    """
+    def handle_style(html_diff, custom_style):
+        """ The HtmlDiff lib will add some usefull classes on the DOM to
+        identify elements. Simply append to those classes some BS4 ones.
+        For the table to fit the modal width, some custom style is needed.
+        """
+        to_append = {
+            'diff_header': 'bg-600 text-center align-top px-2',
+            'diff_next': 'd-none',
+            'diff_add': 'bg-success',
+            'diff_chg': 'bg-warning',
+            'diff_sub': 'bg-danger',
+        }
+        for old, new in to_append.items():
+            html_diff = html_diff.replace(old, "%s %s" % (old, new))
+        html_diff = html_diff.replace('nowrap', '')
+        html_diff += custom_style or '''
+            <style>
+                table.diff { width: 100%; }
+                table.diff th.diff_header { width: 50%; }
+                table.diff td.diff_header { white-space: nowrap; }
+                table.diff td { word-break: break-all; }
+            </style>
+        '''
+        return html_diff
+
+    diff = HtmlDiff(tabsize=2).make_table(
+        data_from[0].splitlines(),
+        data_to[0].splitlines(),
+        data_from[1],
+        data_to[1],
+        context=True,  # Show only diff lines, not all the code
+        numlines=3,
+    )
+    return handle_style(diff, custom_style)
+
+
+def traverse_containers(val, type_):
+    """ Yields atoms filtered by specified type_ (or type tuple), traverses
+    through standard containers (non-string mappings or sequences) *unless*
+    they're selected by the type filter
+    """
+    if isinstance(val, type_):
+        yield val
+    elif isinstance(val, (str, bytes)):
+        return
+    elif isinstance(val, Mapping):
+        for k, v in val.items():
+            yield from traverse_containers(k, type_)
+            yield from traverse_containers(v, type_)
+    elif isinstance(val, collections.abc.Sequence):
+        for v in val:
+            yield from traverse_containers(v, type_)
+
+
+def hmac(env, scope, message, hash_function=hashlib.sha256):
+    """Compute HMAC with `database.secret` config parameter as key.
+
+    :param env: sudo environment to use for retrieving config parameter
+    :param message: message to authenticate
+    :param scope: scope of the authentication, to have different signature for the same
+        message in different usage
+    :param hash_function: hash function to use for HMAC (default: SHA-256)
+    """
+    if not scope:
+        raise ValueError('Non-empty scope required')
+
+    secret = env['ir.config_parameter'].get_param('database.secret')
+    message = repr((scope, message))
+    return hmac_lib.new(
+        secret.encode(),
+        message.encode(),
+        hash_function,
+    ).hexdigest()

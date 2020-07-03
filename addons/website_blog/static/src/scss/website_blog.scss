@@ -1,41 +1,8 @@
 // ======= VARIABLES =======
-$o-wblog-read-width: 620px;
-$o-wblog-read-container-sidebar-width :900px;
+$o-wblog-sidebar-width: 280px;
 $o-wblog-loader-size: 50px;
 
-$o-wblog-title-sizes-variants: (
-    tiny: (
-        title: $display4-size*0.6,
-        subtitle: $lead-font-size
-    ),
-    small: (
-        title: $display4-size*0.75,
-        subtitle: $lead-font-size
-    ),
-    big: (
-        title: $display3-size,
-        subtitle: $lead-font-size*1.25
-    ),
-    huge: (
-        title: $display2-size,
-        subtitle: $lead-font-size*1.5
-    ),
-    hero: (
-        title: $display1-size,
-        subtitle: $lead-font-size*1.75
-    )
-) !default;
-
 // ======= ANIMATIONS =======
-// Attention keeper for the "scroll down" top-banner button
-@keyframes o-wblog-anim-heart {
-    0%, 14%, 35% { transform: scale(1); }
-    7%, 21% {
-        transform: scale(1.3);
-        background-color: rgba(theme-color('primary'), 0.8);
-    }
-}
-
 // Generic fade-in
 @keyframes o-wblog-fade-In {
     0%   { opacity: 0; }
@@ -99,12 +66,8 @@ $o-wblog-title-sizes-variants: (
         background-color: rgba(black, 0.005);
     }
 
-    .o_wblog_read {
-        max-width: $o-wblog-read-width;
-    }
-
     .o_wblog_read_with_sidebar {
-        max-width: $o-wblog-read-container-sidebar-width;
+        max-width: map-get($container-max-widths, md) + $o-wblog-sidebar-width;
     }
 
     // This option class is assigned to the post's content using the "Customize"
@@ -196,39 +159,8 @@ $o-wblog-title-sizes-variants: (
                 color: white;
             }
 
-            #o_wblog_post_content_jump {
-                @include size($o-wblog-loader-size);
-                display: none;
-                background-color: rgba(black, 0.5);
-
-                &:hover {
-                    background-color: rgba(black, 0.7);
-                }
-            }
-
             // Cover sizes
             // ==============================================
-            &.cover_full {
-                min-height: 600px;
-                min-height: 100vh;
-            }
-
-            &.cover_mid {
-                min-height: 400px;
-                min-height: 55vh;
-            }
-
-            &.cover_full, &.cover_mid {
-                #o_wblog_post_content_jump {
-                    display: flex;
-                    animation: o-wblog-anim-heart 2.6s ease-in-out 1s infinite;
-
-                    &:hover {
-                        animation-iteration-count: 1;
-                    }
-                }
-            }
-
             &.cover_auto {
                 padding: 3rem 0;
                 // The actual height will always be 'auto'. The following
@@ -243,11 +175,11 @@ $o-wblog-title-sizes-variants: (
                     visibility: hidden;
                 }
 
-                &.cover_full {
+                &.o_full_screen_height {
                     min-height: 350px;
                 }
 
-                &.cover_mid {
+                &.o_half_screen_height {
                     min-height: 250px;
                 }
 
@@ -277,18 +209,6 @@ $o-wblog-title-sizes-variants: (
         }
     }
 
-    // Size variants
-    @each $size, $map in $o-wblog-title-sizes-variants {
-        .o_record_cover_font_#{$size} .o_wblog_post_title {
-            #o_wblog_post_name {
-                @include font-size(map-get($map, title));
-            }
-            #o_wblog_post_subtitle {
-                @include font-size(map-get($map, subtitle));
-            }
-        }
-    }
-
     // Refine multi-lines titles when using 'regular' cover
     .o_wblog_regular_cover_container #o_wblog_post_name {
         line-height: 1;
@@ -310,7 +230,6 @@ $o-wblog-title-sizes-variants: (
 
             div {
                 @include size($o-wblog-loader-size);
-                margin-top: $o-wblog-loader-size * -2;
                 background: rgba(black, 0.15);
                 animation: o-wblog-loader 2.4s cubic-bezier(0, 0.2, 0.8, 1) infinite;
             }
@@ -366,9 +285,7 @@ $o-wblog-title-sizes-variants: (
     body.editor_enable & {
         // Make empty covers visible in edit mode
         .o_record_cover_container.o_wblog_post_page_cover:not(.o_record_has_cover) {
-            background-color: $gray-100;
             padding: 30px 0;
-            border: 1px dashed $gray-500;
         }
 
         // Hide the big "DRAG BUILDING BLOCKS HERE" box when inside a sidebar.
@@ -379,72 +296,12 @@ $o-wblog-title-sizes-variants: (
     }
 }
 
+#o_wblog_post_content_jump {
+    @extend .o_scroll_button;
+    @include size($o-wblog-loader-size);
+    background-color: rgba(black, 0.5);
 
-//------------------------------------------------------------------------------
-// Latest posts snippets
-//------------------------------------------------------------------------------
-.s_latest_posts, .s_latest_posts_big_picture {
-    .s_latest_posts_loader {
-        @include o-position-absolute(0, 0, 0, 0);
-        transform: translateZ(1px);
-
-        > div {
-            animation: o-wblog-loader 2.4s cubic-bezier(0, 0.2, 0.8, 1) infinite;
-            max: {width: 30px; height: 30px;}
-        }
-    }
-
-    .s_latest_posts_post_title  {
-        font-weight: $headings-font-weight;
-        // Tweek line-height to help fit multi-line titles.
-        line-height: 1;
-    }
-
-    .s_latest_posts_post_subtitle {
-        font-size: 1em;
-    }
-}
-
-.s_latest_posts {
-    // Set sizes relative to the container font-size.
-    // (handle parents with, for example, '.small' or '.h1' classes)
-    .s_latest_posts_post_cover {
-        @include size(3.5em);
-        max: {width: 85px; height: 85px}
-    }
-
-    .s_latest_posts_post_title  {
-        font-size: 1.25em;
-    }
-}
-
-.s_latest_posts_big_picture {
-    .s_latest_posts_post {
-        min-height: 150px;
-
-        figcaption {
-            position: relative;
-            justify-content: center;
-        }
-
-        .s_latest_posts_post_cover {
-            min-height: 100%;
-
-            .o_record_cover_container {
-                top: 0;
-            }
-        }
-
-        .s_latest_posts_post_title  {
-            @include font-size($h3-font-size);
-            margin-bottom: 0.5em;
-            word-spacing: -0.15em;
-        }
-
-        @include s-latest-posts-figure-hook;
-    }
-
-    .js_get_posts {
-        @include s-latest-posts-js-get-posts-hook;
+    &:hover {
+        background-color: rgba(black, 0.7);
     }
 }

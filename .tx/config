@@ -17,11 +17,6 @@ file_filter = addons/account_analytic_default/i18n/<lang>.po
 source_file = addons/account_analytic_default/i18n/account_analytic_default.pot
 source_lang = en
 
-[odoo-master.account_bank_statement_import]
-file_filter = addons/account_bank_statement_import/i18n/<lang>.po
-source_file = addons/account_bank_statement_import/i18n/account_bank_statement_import.pot
-source_lang = en
-
 [odoo-master.account_check_printing]
 file_filter = addons/account_check_printing/i18n/<lang>.po
 source_file = addons/account_check_printing/i18n/account_check_printing.pot
@@ -30,6 +25,11 @@ source_lang = en
 [odoo-master.account_facturx]
 file_filter = addons/account_facturx/i18n/<lang>.po
 source_file = addons/account_facturx/i18n/account_facturx.pot
+source_lang = en
+
+[odoo-master.account_lock]
+file_filter = addons/account_lock/i18n/<lang>.po
+source_file = addons/account_lock/i18n/account_lock.pot
 source_lang = en
 
 [odoo-master.account_payment]
@@ -227,6 +227,11 @@ file_filter = addons/fleet/i18n/<lang>.po
 source_file = addons/fleet/i18n/fleet.pot
 source_lang = en
 
+[odoo-master.fleet_account]
+file_filter = addons/fleet_account/i18n/<lang>.po
+source_file = addons/fleet_account/i18n/fleet_account.pot
+source_lang = en
+
 [odoo-master.gamification]
 file_filter = addons/gamification/i18n/<lang>.po
 source_file = addons/gamification/i18n/gamification.pot
@@ -372,11 +377,6 @@ file_filter = addons/im_livechat_mail_bot/i18n/<lang>.po
 source_file = addons/im_livechat_mail_bot/i18n/im_livechat_mail_bot.pot
 source_lang = en
 
-[odoo-master.im_support]
-file_filter = addons/im_support/i18n/<lang>.po
-source_file = addons/im_support/i18n/im_support.pot
-source_lang = en
-
 [odoo-master.l10n_multilang]
 file_filter = addons/l10n_multilang/i18n/<lang>.po
 source_file = addons/l10n_multilang/i18n/l10n_multilang.pot
@@ -457,6 +457,16 @@ file_filter = addons/mrp_account/i18n/<lang>.po
 source_file = addons/mrp_account/i18n/mrp_account.pot
 source_lang = en
 
+[odoo-master.mrp_landed_costs]
+file_filter = addons/mrp_landed_costs/i18n/<lang>.po
+source_file = addons/mrp_landed_costs/i18n/mrp_landed_costs.pot
+source_lang = en
+
+[odoo-master.mrp_product_expiry]
+file_filter = addons/mrp_product_expiry/i18n/<lang>.po
+source_file = addons/mrp_product_expiry/i18n/mrp_product_expiry.pot
+source_lang = en
+
 [odoo-master.mrp_subcontracting]
 file_filter = addons/mrp_subcontracting/i18n/<lang>.po
 source_file = addons/mrp_subcontracting/i18n/mrp_subcontracting.pot
@@ -485,11 +495,6 @@ source_lang = en
 [odoo-master.partner_autocomplete]
 file_filter = addons/partner_autocomplete/i18n/<lang>.po
 source_file = addons/partner_autocomplete/i18n/partner_autocomplete.pot
-source_lang = en
-
-[odoo-master.partner_autocomplete_address_extended]
-file_filter = addons/partner_autocomplete_address_extended/i18n/<lang>.po
-source_file = addons/partner_autocomplete_address_extended/i18n/partner_autocomplete_address_extended.pot
 source_lang = en
 
 [odoo-master.payment]
@@ -567,6 +572,11 @@ file_filter = addons/portal/i18n/<lang>.po
 source_file = addons/portal/i18n/portal.pot
 source_lang = en
 
+[odoo-master.portal_rating]
+file_filter = addons/portal_rating/i18n/<lang>.po
+source_file = addons/portal_rating/i18n/portal_rating.pot
+source_lang = en
+
 [odoo-master.pos_adyen]
 file_filter = addons/pos_adyen/i18n/<lang>.po
 source_file = addons/pos_adyen/i18n/pos_adyen.pot
@@ -615,6 +625,11 @@ source_lang = en
 [odoo-master.pos_sale]
 file_filter = addons/pos_sale/i18n/<lang>.po
 source_file = addons/pos_sale/i18n/pos_sale.pot
+source_lang = en
+
+[odoo-master.pos_six]
+file_filter = addons/pos_six/i18n/<lang>.po
+source_file = addons/pos_six/i18n/pos_six.pot
 source_lang = en
 
 [odoo-master.procurement_jit]
@@ -752,6 +767,11 @@ file_filter = addons/sale_product_matrix/i18n/<lang>.po
 source_file = addons/sale_product_matrix/i18n/sale_product_matrix.pot
 source_lang = en
 
+[odoo-master.sale_project]
+file_filter = addons/sale_project/i18n/<lang>.po
+source_file = addons/sale_project/i18n/sale_project.pot
+source_lang = en
+
 [odoo-master.sale_purchase]
 file_filter = addons/sale_purchase/i18n/<lang>.po
 source_file = addons/sale_purchase/i18n/sale_purchase.pot
@@ -837,9 +857,9 @@ file_filter = addons/survey/i18n/<lang>.po
 source_file = addons/survey/i18n/survey.pot
 source_lang = en
 
-[odoo-master.theme_bootswatch]
-file_filter = addons/theme_bootswatch/i18n/<lang>.po
-source_file = addons/theme_bootswatch/i18n/theme_bootswatch.pot
+[odoo-master.timer]
+file_filter = addons/timer/i18n/<lang>.po
+source_file = addons/timer/i18n/timer.pot
 source_lang = en
 
 [odoo-master.transifex]
@@ -860,11 +880,6 @@ source_lang = en
 [odoo-master.web]
 file_filter = addons/web/i18n/<lang>.po
 source_file = addons/web/i18n/web.pot
-source_lang = en
-
-[odoo-master.web_diagram]
-file_filter = addons/web_diagram/i18n/<lang>.po
-source_file = addons/web_diagram/i18n/web_diagram.pot
 source_lang = en
 
 [odoo-master.web_editor]
@@ -900,6 +915,11 @@ source_lang = en
 [odoo-master.website_crm]
 file_filter = addons/website_crm/i18n/<lang>.po
 source_file = addons/website_crm/i18n/website_crm.pot
+source_lang = en
+
+[odoo-master.website_crm_livechat]
+file_filter = addons/website_crm_livechat/i18n/<lang>.po
+source_file = addons/website_crm_livechat/i18n/website_crm_livechat.pot
 source_lang = en
 
 [odoo-master.website_crm_partner_assign]
@@ -1002,11 +1022,6 @@ file_filter = addons/website_profile/i18n/<lang>.po
 source_file = addons/website_profile/i18n/website_profile.pot
 source_lang = en
 
-[odoo-master.website_rating]
-file_filter = addons/website_rating/i18n/<lang>.po
-source_file = addons/website_rating/i18n/website_rating.pot
-source_lang = en
-
 [odoo-master.website_sale]
 file_filter = addons/website_sale/i18n/<lang>.po
 source_file = addons/website_sale/i18n/website_sale.pot
@@ -1072,9 +1087,9 @@ file_filter = addons/website_slides_survey/i18n/<lang>.po
 source_file = addons/website_slides_survey/i18n/website_slides_survey.pot
 source_lang = en
 
-[odoo-master.website_theme_install]
-file_filter = addons/website_theme_install/i18n/<lang>.po
-source_file = addons/website_theme_install/i18n/website_theme_install.pot
+[odoo-master.website_sms]
+file_filter = addons/website_sms/i18n/<lang>.po
+source_file = addons/website_sms/i18n/website_sms.pot
 source_lang = en
 
 [odoo-master.website_twitter]

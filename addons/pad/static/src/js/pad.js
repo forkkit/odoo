@@ -39,7 +39,6 @@ var FieldPad = AbstractField.extend({
             this.$(".oe_configured").addClass('d-none');
             return Promise.resolve();
         }
-        var defs = [];
         if (this.mode === 'edit' && _.str.startsWith(this.value, 'http')) {
             this.url = this.value;
             // please close your eyes and look elsewhere...
@@ -56,11 +55,10 @@ var FieldPad = AbstractField.extend({
             // Guess what we decided...
             var url = {};
             url.toJSON = _.constant(this.url);
-            defs.push(this._setValue(url, {doNotSetDirty: true}));
+            this._setValue(url, {doNotSetDirty: true});
         }
 
-        defs.push(this._super.apply(this, arguments));
-        return Promise.all(defs);
+        return this._super.apply(this, arguments);
     },
 
     //--------------------------------------------------------------------------
@@ -99,7 +97,7 @@ var FieldPad = AbstractField.extend({
         if (this.url) {
             // here, we have a valid url, so we can simply display an iframe
             // with the correct src attribute
-            var userName = encodeURIComponent(this.getSession().userName);
+            var userName = encodeURIComponent(this.getSession().name);
             var url = this.url + '?showChat=false&userName=' + userName;
             var content = '<iframe width="100%" height="100%" frameborder="0" src="' + url + '"></iframe>';
             this.$('.oe_pad_content').html(content);

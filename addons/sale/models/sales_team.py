@@ -10,19 +10,19 @@ class CrmTeam(models.Model):
     _inherit = 'crm.team'
 
     use_quotations = fields.Boolean(string='Quotations', help="Check this box if you send quotations to your customers rather than confirming orders straight away.")
-    invoiced = fields.Integer(
+    invoiced = fields.Float(
         compute='_compute_invoiced',
         string='Invoiced This Month', readonly=True,
         help="Invoice revenue for the current month. This is the amount the sales "
                 "channel has invoiced this month. It is used to compute the progression ratio "
                 "of the current and target revenue on the kanban view.")
-    invoiced_target = fields.Integer(
+    invoiced_target = fields.Float(
         string='Invoicing Target',
         help="Revenue target for the current month (untaxed total of confirmed invoices).")
     quotations_count = fields.Integer(
         compute='_compute_quotations_to_invoice',
         string='Number of quotations to invoice', readonly=True)
-    quotations_amount = fields.Integer(
+    quotations_amount = fields.Float(
         compute='_compute_quotations_to_invoice',
         string='Amount of quotations to invoice', readonly=True)
     sales_to_invoice_count = fields.Integer(
@@ -76,11 +76,11 @@ class CrmTeam(models.Model):
         query = '''
             SELECT
                 move.team_id         AS team_id,
-                SUM(line.balance)    AS amount_untaxed_signed
+                SUM(-line.balance)   AS amount_untaxed_signed
             FROM account_move move
             LEFT JOIN account_move_line line ON line.move_id = move.id
-            WHERE move.type IN ('out_invoice', 'out_refund', 'in_invoice', 'in_refund')
-            AND move.invoice_payment_state IN ('in_payment', 'paid')
+            WHERE move.move_type IN ('out_invoice', 'out_refund', 'in_invoice', 'in_refund')
+            AND move.payment_state IN ('in_payment', 'paid')
             AND move.state = 'posted'
             AND move.team_id IN %s
             AND move.date BETWEEN %s AND %s
@@ -90,13 +90,13 @@ class CrmTeam(models.Model):
             GROUP BY move.team_id
         '''
         today = fields.Date.today()
-        params = [tuple(self.ids), fields.Date.to_string(today), fields.Date.to_string(today.replace(day=1))]
+        params = [tuple(self.ids), fields.Date.to_string(today.replace(day=1)), fields.Date.to_string(today)]
         self._cr.execute(query, params)
 
         data_map = dict((v[0], v[1]) for v in self._cr.fetchall())
         for team in self:
             team.invoiced = data_map.get(team.id, 0.0)
-    
+
     def _graph_get_model(self):
         if self._context.get('in_sales_app'):
             return 'sale.report'

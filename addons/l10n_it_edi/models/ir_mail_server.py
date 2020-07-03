@@ -10,14 +10,10 @@ import email.policy
 import dateutil
 import pytz
 import base64
-try:
-    from xmlrpc import client as xmlrpclib
-except ImportError:
-    import xmlrpclib
-
 
 from lxml import etree
 from datetime import datetime
+from xmlrpc import client as xmlrpclib
 
 from odoo import api, fields, models, tools, _
 from odoo.exceptions import ValidationError, UserError
@@ -144,7 +140,7 @@ class FetchmailServer(models.Model):
         except Exception:
             raise UserError(_('The xml file is badly formatted : {}').format(att_name))
 
-        invoice = self.env['account.move']._import_xml_invoice(tree)
+        invoice = self.env.ref('l10n_it_edi.edi_fatturaPA')._create_invoice_from_xml_tree(att_name, tree)
         invoice.l10n_it_send_state = "new"
         invoice.source_email = from_address
         self._cr.commit()
@@ -181,7 +177,7 @@ class FetchmailServer(models.Model):
                         _logger.info('Error in decoding new receipt file: %s', attachment_name)
                         return
 
-                    elements = tree.xpath('//NomeFile', namespaces=tree.nsmap)
+                    elements = tree.xpath('//NomeFile')
                     if elements and elements[0].text:
                         filename = elements[0].text
                     else:
@@ -207,7 +203,7 @@ class FetchmailServer(models.Model):
             _logger.info('Error in decoding new receipt file: %s', attachment.fname)
             return {}
 
-        elements = tree.xpath('//NomeFile', namespaces=tree.nsmap)
+        elements = tree.xpath('//NomeFile')
         if elements and elements[0].text:
             filename = elements[0].text
         else:
@@ -244,11 +240,10 @@ class FetchmailServer(models.Model):
             related_invoice.message_post(
                 body=(_("Errors in the E-Invoice :<br/>%s") % (error))
             )
-            activity_vals = {
-                'activity_type_id': self.env.ref('mail.mail_activity_data_todo').id,
-                'invoice_user_id': related_invoice.invoice_user_id.id if related_invoice.invoice_user_id else self.env.user.id
-            }
-            related_invoice.activity_schedule(summary='Rejection notice', **activity_vals)
+            related_invoice.activity_schedule(
+                'mail.mail_activity_data_todo',
+                summary='Rejection notice',
+                user_id=related_invoice.invoice_user_id.id if related_invoice.invoice_user_id else self.env.user.id)
 
         elif receipt_type == 'MC':
             # Failed delivery notice
@@ -285,7 +280,7 @@ class FetchmailServer(models.Model):
             if not related_invoice:
                 _logger.info('Error: invoice not found for receipt file: %s', attachment.fname)
                 return
-            elements = tree.xpath('//Esito', namespaces=tree.nsmap)
+            elements = tree.xpath('//Esito')
             if elements and elements[0].text:
                 if elements[0].text == 'EC01':
                     related_invoice.l10n_it_send_state = 'delivered_accepted'
@@ -304,11 +299,10 @@ class FetchmailServer(models.Model):
                 body=(_("Outcome notice: %s<br/>%s") % (related_invoice.l10n_it_send_state, info))
             )
             if related_invoice.l10n_it_send_state == 'delivered_refused':
-                activity_vals = {
-                    'activity_type_id': self.env.ref('mail.mail_activity_data_todo').id,
-                    'invoice_user_id': related_invoice.invoice_user_id.id if related_invoice.invoice_user_id else self.env.user.id
-                }
-                related_invoice.activity_schedule(summary='Outcome notice: Refused', **activity_vals)
+                related_invoice.activity_schedule(
+                    'mail.mail_activity_todo',
+                    user_id=related_invoice.invoice_user_id.id if related_invoice.invoice_user_id else self.env.user.id,
+                    summary='Outcome notice: Refused')
 
         # elif receipt_type == 'MT':
             # Metadata file
@@ -341,7 +335,7 @@ class FetchmailServer(models.Model):
         output_str = "<ul>"
 
         for element_tag in element_tags:
-            elements = tree.xpath(element_tag, namespaces=tree.nsmap)
+            elements = tree.xpath(element_tag)
             if not elements:
                 continue
             for element in elements:
@@ -353,7 +347,7 @@ class FetchmailServer(models.Model):
     def _return_error_xml(self, tree):
         output_str = "<ul>"
 
-        elements = tree.xpath('//Errore', namespaces=tree.nsmap)
+        elements = tree.xpath('//Errore')
         if not elements:
             return
         for element in elements:
@@ -370,8 +364,8 @@ class IrMailServer(models.Model):
                 attachments=None, message_id=None, references=None, object_id=False, subtype='plain', headers=None,
                 body_alternative=None, subtype_alternative='plain'):
 
-        if self.env.context.get('wo_return_path') and headers:
-            headers.pop('Return-Path', False)
+        if self.env.context.get('wo_bounce_return_path') and headers:
+            headers['Return-Path'] = email_from
         return super(IrMailServer, self).build_email(email_from, email_to, subject, body, email_cc=email_cc, email_bcc=email_bcc, reply_to=reply_to,
                 attachments=attachments, message_id=message_id, references=references, object_id=object_id, subtype=subtype, headers=headers,
                 body_alternative=body_alternative, subtype_alternative=subtype_alternative)

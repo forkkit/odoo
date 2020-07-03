@@ -174,9 +174,12 @@ class CustomerPortal(Controller):
             if not error:
                 values = {key: post[key] for key in self.MANDATORY_BILLING_FIELDS}
                 values.update({key: post[key] for key in self.OPTIONAL_BILLING_FIELDS if key in post})
+                for field in set(['country_id', 'state_id']) & set(values.keys()):
+                    try:
+                        values[field] = int(values[field])
+                    except:
+                        values[field] = False
                 values.update({'zip': values.pop('zipcode', '')})
-                if values.get('state_id') == '':
-                    values.update({'state_id': False})
                 partner.sudo().write(values)
                 if redirect:
                     return request.redirect(redirect)
@@ -270,10 +273,10 @@ class CustomerPortal(Controller):
             raise UserError(_("The attachment does not exist or you do not have the rights to access it."))
 
         if attachment_sudo.res_model != 'mail.compose.message' or attachment_sudo.res_id != 0:
-            raise UserError(_("The attachment %s cannot be removed because it is not in a pending state.") % attachment_sudo.name)
+            raise UserError(_("The attachment %s cannot be removed because it is not in a pending state.", attachment_sudo.name))
 
         if attachment_sudo.env['mail.message'].search([('attachment_ids', 'in', attachment_sudo.ids)]):
-            raise UserError(_("The attachment %s cannot be removed because it is linked to a message.") % attachment_sudo.name)
+            raise UserError(_("The attachment %s cannot be removed because it is linked to a message.", attachment_sudo.name))
 
         return attachment_sudo.unlink()
 
@@ -361,14 +364,14 @@ class CustomerPortal(Controller):
 
     def _show_report(self, model, report_type, report_ref, download=False):
         if report_type not in ('html', 'pdf', 'text'):
-            raise UserError(_("Invalid report type: %s") % report_type)
+            raise UserError(_("Invalid report type: %s", report_type))
 
         report_sudo = request.env.ref(report_ref).sudo()
 
         if not isinstance(report_sudo, type(request.env['ir.actions.report'])):
-            raise UserError(_("%s is not the reference of a report") % report_ref)
+            raise UserError(_("%s is not the reference of a report", report_ref))
 
-        method_name = 'render_qweb_%s' % (report_type)
+        method_name = '_render_qweb_%s' % (report_type)
         report = getattr(report_sudo, method_name)([model.id], data={'report_type': report_type})[0]
         reporthttpheaders = [
             ('Content-Type', 'application/pdf' if report_type == 'pdf' else 'text/html'),

@@ -2,15 +2,14 @@ odoo.define('wysiwyg.widgets.media', function (require) {
 'use strict';
 
 var concurrency = require('web.concurrency');
-var config = require('web.config');
 var core = require('web.core');
 var Dialog = require('web.Dialog');
 var dom = require('web.dom');
 var fonts = require('wysiwyg.fonts');
-var ImageOptimizeDialog = require('wysiwyg.widgets.image_optimize_dialog').ImageOptimizeDialog;
 var utils = require('web.utils');
 var Widget = require('web.Widget');
 var session = require('web.session');
+const {removeOnImageChangeAttrs} = require('web_editor.image_processing');
 
 var QWeb = core.qweb;
 var _t = core._t;
@@ -88,6 +87,18 @@ var SearchableMediaWidget = MediaWidget.extend({
     search: function (needle) {},
 
     //--------------------------------------------------------------------------
+    // Private
+    //--------------------------------------------------------------------------
+
+    /**
+     * Renders thumbnails for the attachments.
+     *
+     * @abstract
+     * @returns {Promise}
+     */
+    _renderThumbnails: function () {},
+
+    //--------------------------------------------------------------------------
     // Handlers
     //--------------------------------------------------------------------------
 
@@ -95,7 +106,7 @@ var SearchableMediaWidget = MediaWidget.extend({
      * @private
      */
     _onSearchInput: function (ev) {
-        this.search($(ev.currentTarget).val() || '');
+        this.search($(ev.currentTarget).val() || '').then(() => this._renderThumbnails());
         this.hasSearched = true;
     },
 });
@@ -106,28 +117,17 @@ var SearchableMediaWidget = MediaWidget.extend({
 var FileWidget = SearchableMediaWidget.extend({
     events: _.extend({}, SearchableMediaWidget.prototype.events || {}, {
         'click .o_upload_media_button': '_onUploadButtonClick',
-        'click .o_we_quick_upload': '_onQuickUploadClick',
         'change .o_file_input': '_onFileInputChange',
         'click .o_upload_media_url_button': '_onUploadURLButtonClick',
         'input .o_we_url_input': '_onURLInputChange',
         'click .o_existing_attachment_cell': '_onAttachmentClick',
-        'dblclick .o_existing_attachment_cell': '_onAttachmentDblClick',
         'click .o_existing_attachment_remove': '_onRemoveClick',
-        'click .o_existing_attachment_optimize': '_onExistingOptimizeClick',
         'click .o_load_more': '_onLoadMoreClick',
     }),
     existingAttachmentsTemplate: undefined,
 
     IMAGE_MIMETYPES: ['image/gif', 'image/jpe', 'image/jpeg', 'image/jpg', 'image/gif', 'image/png', 'image/svg+xml'],
     NUMBER_OF_ATTACHMENTS_TO_DISPLAY: 30,
-
-    // This factor is used to take into account that an image displayed in a BS
-    // column might get bigger when displayed on a smaller breakpoint if that
-    // breakpoint leads to have less columns.
-    // Eg. col-lg-6 -> 480px per column -> col-md-12 -> 720px per column -> 1.5
-    // However this will not be enough if going from 3 or more columns to 1, but
-    // in that case, we consider it a snippet issue.
-    OPTIMIZE_SIZE_FACTOR: 1.5,
 
     /**
      * @constructor
@@ -139,26 +139,13 @@ var FileWidget = SearchableMediaWidget.extend({
         this.numberOfAttachmentsToDisplay = this.NUMBER_OF_ATTACHMENTS_TO_DISPLAY;
 
         this.options = _.extend({
-            firstFilters: [],
-            lastFilters: [],
-            showQuickUpload: config.isDebug(),
+            mediaWidth: media && media.parentElement && $(media.parentElement).width(),
         }, options || {});
 
         this.attachments = [];
         this.selectedAttachments = [];
 
         this._onUploadURLButtonClick = dom.makeAsyncHandler(this._onUploadURLButtonClick);
-    },
-    /**
-     * Loads all the existing images related to the target media.
-     *
-     * @override
-     */
-    willStart: function () {
-        return Promise.all([
-            this._super.apply(this, arguments),
-            this.search('', true)
-        ]);
     },
     /**
      * @override
@@ -176,8 +163,6 @@ var FileWidget = SearchableMediaWidget.extend({
         this.$urlError = this.$('.o_we_url_error');
         this.$errorText = this.$('.o_we_error_text');
 
-        this._renderImages();
-
         // If there is already an attachment on the target, select by default
         // that attachment if it is among the loaded images.
         var o = {
@@ -190,13 +175,16 @@ var FileWidget = SearchableMediaWidget.extend({
             o.url = this.$media.attr('href').replace(/[?].*/, '');
             o.id = +o.url.match(/\/web\/content\/(\d+)/, '')[1];
         }
-        if (o.url) {
-            self._selectAttachement(_.find(self.attachments, function (attachment) {
-                return attachment.url === o.url;
-            }) || o);
-        }
 
-        return def;
+        return this.search('').then(async () => {
+            await this._renderThumbnails();
+            if (o.url) {
+                self._selectAttachement(_.find(self.attachments, function (attachment) {
+                    return o.url === attachment.image_src;
+                }) || o);
+            }
+            return def;
+        });
     },
 
     //--------------------------------------------------------------------------
@@ -214,42 +202,33 @@ var FileWidget = SearchableMediaWidget.extend({
     },
     /**
      * @override
-     * @param {boolean} noRender: if true, do not render the found attachments
      */
-    search: function (needle, noRender) {
-        var self = this;
-
+    search: function (needle) {
+        this.attachments = [];
+        this.needle = needle;
+        return this.fetchAttachments(this.NUMBER_OF_ATTACHMENTS_TO_DISPLAY, 0);
+    },
+    /**
+     * @param {Number} number - the number of attachments to fetch
+     * @param {Number} offset - from which result to start fetching
+     */
+    fetchAttachments: function (number, offset) {
         return this._rpc({
             model: 'ir.attachment',
             method: 'search_read',
             args: [],
             kwargs: {
-                domain: this._getAttachmentsDomain(needle),
-                fields: ['name', 'mimetype', 'checksum', 'url', 'type', 'res_id', 'res_model', 'public', 'access_token', 'image_src', 'image_width', 'image_height'],
+                domain: this._getAttachmentsDomain(this.needle),
+                fields: ['name', 'mimetype', 'description', 'checksum', 'url', 'type', 'res_id', 'res_model', 'public', 'access_token', 'image_src', 'image_width', 'image_height', 'original_id'],
                 order: [{name: 'id', asc: false}],
                 context: this.options.context,
+                // Try to fetch first record of next page just to know whether there is a next page.
+                limit: number + 1,
+                offset: offset,
             },
-        }).then(function (attachments) {
-            self.attachments = _.chain(attachments)
-                .sortBy(function (r) {
-                    if (_.any(self.options.firstFilters, function (filter) {
-                        var regex = new RegExp(filter, 'i');
-                        return r.name && r.name.match(regex);
-                    })) {
-                        return -1;
-                    }
-                    if (_.any(self.options.lastFilters, function (filter) {
-                        var regex = new RegExp(filter, 'i');
-                        return r.name && r.name.match(regex);
-                    })) {
-                        return 1;
-                    }
-                    return 0;
-                })
-                .value();
-            if (!noRender) {
-                self._renderImages();
-            }
+        }).then(attachments => {
+            this.attachments = this.attachments.slice();
+            Array.prototype.splice.apply(this.attachments, [offset, attachments.length].concat(attachments));
         });
     },
 
@@ -270,20 +249,6 @@ var FileWidget = SearchableMediaWidget.extend({
             .replace('o_we_custom_image', '')
             .replace(allImgClasses, ' ')
             .replace(allImgClassModifiers, ' ');
-    },
-    /**
-     * Computes and returns the width that a new attachment should have to
-     * ideally occupy the space where it will be inserted.
-     * Only relevant for images.
-     *
-     * @see options.mediaWidth
-     * @see OPTIMIZE_SIZE_FACTOR
-     *
-     * @private
-     * @returns {integer}
-     */
-    _computeOptimizedWidth: function () {
-        return Math.min(1920, parseInt(this.options.mediaWidth * this.OPTIMIZE_SIZE_FACTOR));
     },
     /**
      * Returns the domain for attachments used in media dialog.
@@ -337,7 +302,8 @@ var FileWidget = SearchableMediaWidget.extend({
         var self = this;
         this.$('.o_existing_attachment_cell.o_we_attachment_selected').removeClass("o_we_attachment_selected");
         _.each(this.selectedAttachments, function (attachment) {
-            self.$('.o_existing_attachment_cell[data-id=' + attachment.id + ']').addClass("o_we_attachment_selected");
+            self.$('.o_existing_attachment_cell[data-id=' + attachment.id + ']')
+                .addClass("o_we_attachment_selected").css('display', '');
         });
     },
     /**
@@ -345,8 +311,9 @@ var FileWidget = SearchableMediaWidget.extend({
      * @param {object} attachment
      */
     _handleNewAttachment: function (attachment) {
+        this.attachments = this.attachments.filter(att => att.id !== attachment.id);
         this.attachments.unshift(attachment);
-        this._renderImages();
+        this._renderThumbnails();
         this._selectAttachement(attachment);
     },
     /**
@@ -354,54 +321,15 @@ var FileWidget = SearchableMediaWidget.extend({
      * @returns {Promise}
      */
     _loadMoreImages: function (forceSearch) {
-        this.numberOfAttachmentsToDisplay += 10;
-        if (!forceSearch) {
-            this._renderImages();
-            return Promise.resolve();
-        } else {
-            return this.search(this.$('.o_we_search').val() || '');
-        }
-    },
-    /**
-     * Opens the image optimize dialog for the given attachment.
-     *
-     * Hides the media dialog while the optimize dialog is open to avoid an
-     * overlap of modals.
-     *
-     * @private
-     * @param {object} attachment
-     * @param {boolean} isExisting: whether this is a new attachment that was
-     *  just uploaded, or an existing attachment
-     * @returns {Promise} resolved with the updated attachment object when the
-     *  optimize dialog is saved. Rejected if the dialog is otherwise closed.
-     */
-    _openImageOptimizeDialog: function (attachment, isExisting) {
-        var self = this;
-        var promise = new Promise(function (resolve, reject) {
-            self.trigger_up('hide_parent_dialog_request');
-            var optimizeDialog = new ImageOptimizeDialog(self, {
-                attachment: attachment,
-                isExisting: isExisting,
-                optimizedWidth: self._computeOptimizedWidth(),
-            }).open();
-            optimizeDialog.on('attachment_updated', self, function (ev) {
-                optimizeDialog.off('closed');
-                resolve(ev.data);
-            });
-            optimizeDialog.on('closed', self, function () {
-                self.noSave = true;
-                if (isExisting) {
-                    reject();
-                } else {
-                    resolve(attachment);
-                }
-            });
+        return this.fetchAttachments(10, this.numberOfAttachmentsToDisplay).then(() => {
+            this.numberOfAttachmentsToDisplay += 10;
+            if (!forceSearch) {
+                this._renderThumbnails();
+                return Promise.resolve();
+            } else {
+                return this.search(this.$('.o_we_search').val() || '');
+            }
         });
-        var always = function () {
-            self.trigger_up('show_parent_dialog_request');
-        };
-        promise.then(always).guardedCatch(always);
-        return promise;
     },
     /**
      * Renders the existing attachments and returns the result as a string.
@@ -418,7 +346,7 @@ var FileWidget = SearchableMediaWidget.extend({
     /**
      * @private
      */
-    _renderImages: function () {
+    _renderThumbnails: function () {
         var attachments = this.attachments.slice(0, this.numberOfAttachmentsToDisplay);
 
         // Render menu & content
@@ -438,21 +366,18 @@ var FileWidget = SearchableMediaWidget.extend({
      * @private
      * @returns {Promise}
      */
-    _save: function () {
-        var self = this;
-
+    _save: async function () {
         if (this.options.multiImages) {
-            return Promise.resolve(this.selectedAttachments);
+            return this.selectedAttachments;
         }
 
         var img = this.selectedAttachments[0];
         if (!img || !img.id) {
-            return Promise.resolve(this.media);
+            return this.media;
         }
 
-        var prom;
         if (!img.public && !img.access_token) {
-            prom = this._rpc({
+            await this._rpc({
                 model: 'ir.attachment',
                 method: 'generate_access_token',
                 args: [[img.id]]
@@ -461,52 +386,48 @@ var FileWidget = SearchableMediaWidget.extend({
             });
         }
 
-        return Promise.resolve(prom).then(function () {
-            if (img.image_src) {
-                var src = img.image_src;
-                if (!img.public && img.access_token) {
-                    src += _.str.sprintf('?access_token=%s', img.access_token);
-                }
-                if (!self.$media.is('img')) {
-
-                    // Note: by default the images receive the bootstrap opt-in
-                    // img-fluid class. We cannot make them all responsive
-                    // by design because of libraries and client databases img.
-                    self.$media = $('<img/>', {class: 'img-fluid o_we_custom_image'});
-                    self.media = self.$media[0];
-                }
-                self.$media.attr('src', src);
-            } else {
-                if (!self.$media.is('a')) {
-                    $('.note-control-selection').hide();
-                    self.$media = $('<a/>');
-                    self.media = self.$media[0];
-                }
-                var href = '/web/content/' + img.id + '?';
-                if (!img.public && img.access_token) {
-                    href += _.str.sprintf('access_token=%s&', img.access_token);
-                }
-                href += 'unique=' + img.checksum + '&download=true';
-                self.$media.attr('href', href);
-                self.$media.addClass('o_image').attr('title', img.name).attr('data-mimetype', img.mimetype);
+        if (img.image_src) {
+            var src = img.image_src;
+            if (!img.public && img.access_token) {
+                src += _.str.sprintf('?access_token=%s', img.access_token);
             }
+            if (!this.$media.is('img')) {
 
-            self.$media.attr('alt', img.alt);
-            var style = self.style;
-            if (style) {
-                self.$media.css(style);
+                // Note: by default the images receive the bootstrap opt-in
+                // img-fluid class. We cannot make them all responsive
+                // by design because of libraries and client databases img.
+                this.$media = $('<img/>', {class: 'img-fluid o_we_custom_image'});
+                this.media = this.$media[0];
             }
+            this.$media.attr('src', src);
+        } else {
+            if (!this.$media.is('a')) {
+                $('.note-control-selection').hide();
+                this.$media = $('<a/>');
+                this.media = this.$media[0];
+            }
+            var href = '/web/content/' + img.id + '?';
+            if (!img.public && img.access_token) {
+                href += _.str.sprintf('access_token=%s&', img.access_token);
+            }
+            href += 'unique=' + img.checksum + '&download=true';
+            this.$media.attr('href', href);
+            this.$media.addClass('o_image').attr('title', img.name).attr('data-mimetype', img.mimetype);
+        }
 
-            // Remove crop related attributes
-            if (self.$media.attr('data-aspect-ratio')) {
-                var attrs = ['aspect-ratio', 'x', 'y', 'width', 'height', 'rotate', 'scale-x', 'scale-y'];
-                _.each(attrs, function (attr) {
-                    self.$media.removeData(attr);
-                    self.$media.removeAttr('data-' + attr);
-                });
-            }
-            return self.media;
+        this.$media.attr('alt', img.alt || img.description || '');
+        var style = this.style;
+        if (style) {
+            this.$media.css(style);
+        }
+
+        // Remove image modification attributes
+        removeOnImageChangeAttrs.forEach(attr => {
+            delete this.media.dataset[attr];
         });
+        this.media.classList.remove('o_modified_image_to_save');
+        this.$media.trigger('image_changed');
+        return this.media;
     },
     /**
      * @param {object} attachment
@@ -559,29 +480,10 @@ var FileWidget = SearchableMediaWidget.extend({
     /**
      * @private
      */
-    _onAttachmentClick: function (ev, save) {
+    _onAttachmentClick: function (ev) {
         var $attachment = $(ev.currentTarget);
         var attachment = _.find(this.attachments, {id: $attachment.data('id')});
-        this._selectAttachement(attachment, save);
-    },
-    /**
-     * @private
-     */
-    _onAttachmentDblClick: function (ev) {
-        this._onAttachmentClick(ev, true);
-    },
-    /**
-     * @private
-     */
-    _onExistingOptimizeClick: function (ev) {
-        var self = this;
-        var $a = $(ev.currentTarget).closest('.o_existing_attachment_cell');
-        var id = parseInt($a.data('id'), 10);
-        var attachment = _.findWhere(this.attachments, {id: id});
-        ev.stopPropagation();
-        return this._openImageOptimizeDialog(attachment, true).then(function (newAttachment) {
-            self._handleNewAttachment(newAttachment);
-        });
+        this._selectAttachement(attachment, !this.options.multiImages);
     },
     /**
      * Handles change of the file input: create attachments with the new files
@@ -606,7 +508,6 @@ var FileWidget = SearchableMediaWidget.extend({
     _addData: function () {
         var self = this;
         var uploadMutex = new concurrency.Mutex();
-        var optimizeMutex = new concurrency.Mutex();
 
         // Upload the smallest file first to block the user the least possible.
         var files = _.sortBy(this.$fileInput[0].files, 'size');
@@ -616,54 +517,29 @@ var FileWidget = SearchableMediaWidget.extend({
             // limited by bandwidth.
             uploadMutex.exec(function () {
                 return utils.getDataURLFromFile(file).then(function (result) {
-                    var params = {
-                        'name': file.name,
-                        'data': result.split(',')[1],
-                        'res_id': self.options.res_id,
-                        'res_model': self.options.res_model,
-                        'filters': self.options.firstFilters.join('_'),
-                    };
-                    if (self.quickUpload) {
-                        params['width'] = self._computeOptimizedWidth();
-                        params['quality'] = 80;
-                    } else {
-                        params['width'] = 0;
-                        params['quality'] = 0;
-                    }
                     return self._rpc({
                         route: '/web_editor/attachment/add_data',
-                        params: params,
+                        params: {
+                            'name': file.name,
+                            'data': result.split(',')[1],
+                            'res_id': self.options.res_id,
+                            'res_model': self.options.res_model,
+                            'width': 0,
+                            'quality': 0,
+                        },
                     }).then(function (attachment) {
-                        if (attachment.image_src && !self.quickUpload) {
-                            optimizeMutex.exec(function () {
-                                return self._openImageOptimizeDialog(attachment).then(function (updatedAttachment) {
-                                    self._handleNewAttachment(updatedAttachment);
-                                });
-                            });
-                        } else {
-                            self._handleNewAttachment(attachment);
-                        }
+                        self._handleNewAttachment(attachment);
                     });
                 });
             });
         });
 
         return uploadMutex.getUnlockedDef().then(function () {
-            return optimizeMutex.getUnlockedDef().then(function () {
-                self.quickUpload = false;
-                if (!self.options.multiImages && !self.noSave) {
-                    self.trigger_up('save_request');
-                }
-                self.noSave = false;
-            });
+            if (!self.options.multiImages && !self.noSave) {
+                self.trigger_up('save_request');
+            }
+            self.noSave = false;
         });
-    },
-    /**
-     * @private
-     */
-    _onQuickUploadClick: function () {
-        this.quickUpload = true;
-        this.$uploadButton.trigger('click');
     },
     /**
      * @private
@@ -684,8 +560,9 @@ var FileWidget = SearchableMediaWidget.extend({
                 }).then(function (prevented) {
                     if (_.isEmpty(prevented)) {
                         self.attachments = _.without(self.attachments, attachment);
+                        self.attachments.filter(at => at.original_id[0] === attachment.id).forEach(at => delete at.original_id);
                         if (!self.attachments.length) {
-                            self._renderImages(); //render the message and image if empty
+                            self._renderThumbnails(); //render the message and image if empty
                         } else {
                             $a.closest('.o_existing_attachment_cell').remove();
                         }
@@ -723,6 +600,11 @@ var FileWidget = SearchableMediaWidget.extend({
      * @private
      */
     _onUploadURLButtonClick: function () {
+        if (this.$urlInput.is('.o_we_horizontal_collapse')) {
+            this.$urlInput.removeClass('o_we_horizontal_collapse');
+            this.$addUrlButton.attr('disabled', 'disabled');
+            return;
+        }
         return this._mutex.exec(this._addUrl.bind(this));
     },
     /**
@@ -737,7 +619,6 @@ var FileWidget = SearchableMediaWidget.extend({
                 'url': this.$urlInput.val(),
                 'res_id': this.options.res_id,
                 'res_model': this.options.res_model,
-                'filters': this.options.firstFilters.join('_'),
             },
         }).then(function (attachment) {
             self.$urlInput.val('');
@@ -769,6 +650,10 @@ var FileWidget = SearchableMediaWidget.extend({
 var ImageWidget = FileWidget.extend({
     template: 'wysiwyg.widgets.image',
     existingAttachmentsTemplate: 'wysiwyg.widgets.image.existing.attachments',
+    events: Object.assign({}, FileWidget.prototype.events, {
+        'change input.o_we_show_optimized': '_onShowOptimizedChange',
+    }),
+    MIN_ROW_HEIGHT: 128,
 
     /**
      * @constructor
@@ -778,7 +663,23 @@ var ImageWidget = FileWidget.extend({
             accept: 'image/*',
             mimetypeDomain: [['mimetype', 'in', this.IMAGE_MIMETYPES]],
         }, options || {});
+        // Binding so we can add/remove it as an addEventListener
+        this._onAttachmentImageLoad = this._onAttachmentImageLoad.bind(this);
         this._super(parent, media, options);
+    },
+    /**
+     * @override
+     */
+    start: async function () {
+        await this._super(...arguments);
+        this.el.addEventListener('load', this._onAttachmentImageLoad, true);
+    },
+    /**
+     * @override
+     */
+    destroy: function () {
+        this.el.removeEventListener('load', this._onAttachmentImageLoad, true);
+        return this._super(...arguments);
     },
 
     //--------------------------------------------------------------------------
@@ -791,7 +692,79 @@ var ImageWidget = FileWidget.extend({
     _updateAddUrlUi: function (emptyValue, isURL, isImage) {
         this._super.apply(this, arguments);
         this.$addUrlButton.text((isURL && !isImage) ? _t("Add as document") : _t("Add image"));
-        this.$urlWarning.toggleClass('d-none', !isURL || isImage);
+        const warning = isURL && !isImage;
+        this.$urlWarning.toggleClass('d-none', !warning);
+        if (warning) {
+            this.$urlSuccess.addClass('d-none');
+        }
+    },
+    /**
+     * @override
+     */
+    _renderThumbnails: function () {
+        const alreadyLoaded = this.$('.o_existing_attachment_cell[data-loaded="true"]');
+        this._super(...arguments);
+        // Hide images until they're loaded
+        this.$('.o_existing_attachment_cell').addClass('d-none');
+        // Replace images that had been previously loaded if any to prevent scroll resetting to top
+        alreadyLoaded.each((index, el) => {
+            const toReplace = this.$(`.o_existing_attachment_cell[data-id="${el.dataset.id}"]`);
+            if (toReplace.length) {
+                toReplace.replaceWith(el);
+            }
+        });
+        this._toggleOptimized(this.$('input.o_we_show_optimized')[0].checked);
+        // Placeholders have a 3:2 aspect ratio like most photos.
+        const placeholderWidth = 3 / 2 * this.MIN_ROW_HEIGHT;
+        this.$('.o_we_attachment_placeholder').css({
+            flexGrow: placeholderWidth,
+            flexBasis: placeholderWidth,
+        });
+    },
+    /**
+     * @override
+     */
+    _renderExisting: function (attachments) {
+        return QWeb.render(this.existingAttachmentsTemplate, {
+            attachments: attachments,
+            widget: this,
+        });
+    },
+    /**
+     * @private
+     *
+     * @param {boolean} value whether to toggle optimized attachments on or off
+     */
+    _toggleOptimized: function (value) {
+        this.$('.o_we_attachment_optimized').each((i, cell) => cell.style.setProperty('display', value ? null : 'none', 'important'));
+    },
+
+    //--------------------------------------------------------------------------
+    // Handlers
+    //--------------------------------------------------------------------------
+
+    /**
+     * @override
+     */
+    _onAttachmentImageLoad: function (ev) {
+        const img = ev.target;
+        const cell = img.closest('.o_existing_attachment_cell');
+        if (!cell) {
+            return;
+        }
+        const aspectRatio = img.naturalWidth / img.naturalHeight;
+        const width = aspectRatio * this.MIN_ROW_HEIGHT;
+        cell.style.flexGrow = width;
+        cell.style.flexBasis = `${width}px`;
+        cell.classList.remove('d-none');
+        cell.classList.add('d-flex');
+        cell.dataset.loaded = 'true';
+    },
+    /**
+     * @override
+     */
+    _onShowOptimizedChange: function (ev) {
+        this._toggleOptimized(ev.target.checked);
     },
 });
 
@@ -824,7 +797,11 @@ var DocumentWidget = FileWidget.extend({
     _updateAddUrlUi: function (emptyValue, isURL, isImage) {
         this._super.apply(this, arguments);
         this.$addUrlButton.text((isURL && isImage) ? _t("Add as image") : _t("Add document"));
-        this.$urlWarning.toggleClass('d-none', !isURL || !isImage);
+        const warning = isURL && isImage;
+        this.$urlWarning.toggleClass('d-none', !warning);
+        if (warning) {
+            this.$urlSuccess.addClass('d-none');
+        }
     },
     /**
      * @override
@@ -844,7 +821,6 @@ var IconWidget = SearchableMediaWidget.extend({
     template: 'wysiwyg.widgets.font-icons',
     events: _.extend({}, SearchableMediaWidget.prototype.events || {}, {
         'click .font-icons-icon': '_onIconClick',
-        'dblclick .font-icons-icon': '_onIconDblClick',
     }),
 
     /**
@@ -986,11 +962,6 @@ var IconWidget = SearchableMediaWidget.extend({
 
         this.selectedIcon = $(ev.currentTarget).data('id');
         this._highlightSelectedIcon();
-    },
-    /**
-     * @private
-     */
-    _onIconDblClick: function () {
         this.trigger_up('save_request');
     },
 });
@@ -1056,7 +1027,7 @@ var VideoWidget = MediaWidget.extend({
                 '<div class="media_iframe_video" data-oe-expression="' + this.$content.attr('src') + '">' +
                     '<div class="css_editable_mode_display">&nbsp;</div>' +
                     '<div class="media_iframe_video_size" contenteditable="false">&nbsp;</div>' +
-                    '<iframe src="' + this.$content.attr('src') + '" frameborder="0" contenteditable="false"></iframe>' +
+                    '<iframe src="' + this.$content.attr('src') + '" frameborder="0" contenteditable="false" allowfullscreen="allowfullscreen"></iframe>' +
                 '</div>'
             );
             this.media = this.$media[0];
@@ -1101,82 +1072,19 @@ var VideoWidget = MediaWidget.extend({
      */
     _createVideoNode: function (url, options) {
         options = options || {};
-
-        // Video url patterns(youtube, instagram, vimeo, dailymotion, youku, ...)
-        var ytRegExp = /^(?:(?:https?:)?\/\/)?(?:www\.)?(?:youtu\.be\/|youtube(-nocookie)?\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))((?:\w|-){11})(?:\S+)?$/;
-        var ytMatch = url.match(ytRegExp);
-
-        var insRegExp = /(.*)instagram.com\/p\/(.[a-zA-Z0-9]*)/;
-        var insMatch = url.match(insRegExp);
-
-        var vinRegExp = /\/\/vine.co\/v\/(.[a-zA-Z0-9]*)/;
-        var vinMatch = url.match(vinRegExp);
-
-        var vimRegExp = /\/\/(player.)?vimeo.com\/([a-z]*\/)*([0-9]{6,11})[?]?.*/;
-        var vimMatch = url.match(vimRegExp);
-
-        var dmRegExp = /.+dailymotion.com\/(video|hub|embed)\/([^_]+)[^#]*(#video=([^_&]+))?/;
-        var dmMatch = url.match(dmRegExp);
-
-        var ykuRegExp = /(.*).youku\.com\/(v_show\/id_|embed\/)(.+)/;
-        var ykuMatch = url.match(ykuRegExp);
-
-        var $video = $('<iframe>').width(1280).height(720).attr('frameborder', 0).addClass('o_video_dialog_iframe');
-        var videoType = 'yt';
-
-        if (!/^(http:\/\/|https:\/\/|\/\/)[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,5}(:[0-9]{1,5})?(\/.*)?$/i.test(url)){
+        const videoData = this._getVideoURLData(url, options);
+        if (videoData.error) {
             return {errorCode: 0};
         }
-
-        var autoplay = options.autoplay ? '?autoplay=1&mute=1' : '?autoplay=0';
-
-        if (ytMatch && ytMatch[2].length === 11) {
-            $video.attr('src', '//www.youtube' + (ytMatch[1] || '') + '.com/embed/' + ytMatch[2] + autoplay);
-        } else if (insMatch && insMatch[2].length) {
-            $video.attr('src', '//www.instagram.com/p/' + insMatch[2] + '/embed/');
-            videoType = 'ins';
-        } else if (vinMatch && vinMatch[0].length) {
-            $video.attr('src', vinMatch[0] + '/embed/simple');
-            videoType = 'vin';
-        } else if (vimMatch && vimMatch[3].length) {
-            $video.attr('src', '//player.vimeo.com/video/' + vimMatch[3] + autoplay.replace('mute', 'muted'));
-            videoType = 'vim';
-        } else if (dmMatch && dmMatch[2].length) {
-            var justId = dmMatch[2].replace('video/', '');
-            $video.attr('src', '//www.dailymotion.com/embed/video/' + justId + autoplay);
-            videoType = 'dm';
-        } else if (ykuMatch && ykuMatch[3].length) {
-            var ykuId = ykuMatch[3].indexOf('.html?') >= 0 ? ykuMatch[3].substring(0, ykuMatch[3].indexOf('.html?')) : ykuMatch[3];
-            $video.attr('src', '//player.youku.com/embed/' + ykuId);
-            videoType = 'yku';
-        } else {
+        if (!videoData.type) {
             return {errorCode: 1};
         }
+        const $video = $('<iframe>').width(1280).height(720)
+            .attr('frameborder', 0)
+            .attr('src', videoData.embedURL)
+            .addClass('o_video_dialog_iframe');
 
-        if (ytMatch) {
-            $video.attr('src', $video.attr('src') + '&rel=0');
-        }
-        if (options.loop && (ytMatch || vimMatch)) {
-            var videoSrc = _.str.sprintf('%s&loop=1', $video.attr('src'));
-            $video.attr('src', ytMatch ? _.str.sprintf('%s&playlist=%s', videoSrc, ytMatch[2]) : videoSrc);
-        }
-        if (options.hide_controls && (ytMatch || dmMatch)) {
-            $video.attr('src', $video.attr('src') + '&controls=0');
-        }
-        if (options.hide_fullscreen && ytMatch) {
-            $video.attr('src', $video.attr('src') + '&fs=0');
-        }
-        if (options.hide_yt_logo && ytMatch) {
-            $video.attr('src', $video.attr('src') + '&modestbranding=1');
-        }
-        if (options.hide_dm_logo && dmMatch) {
-            $video.attr('src', $video.attr('src') + '&ui-logo=0');
-        }
-        if (options.hide_dm_share && dmMatch) {
-            $video.attr('src', $video.attr('src') + '&sharing-enable=0');
-        }
-
-        return {$video: $video, type: videoType};
+        return {$video: $video, type: videoData.type};
     },
     /**
      * Updates the video preview according to video code and enabled options.
@@ -1286,6 +1194,63 @@ var VideoWidget = MediaWidget.extend({
      */
     _onVideoCodeInput: function () {
         this._updateVideo();
+    },
+    /**
+     * Parses a URL and returns the provider type and an emebedable URL.
+     *
+     * @private
+     */
+    _getVideoURLData: function (url, options) {
+        if (!url.match(/^(http:\/\/|https:\/\/|\/\/)[a-z0-9]+([-.]{1}[a-z0-9]+)*\.[a-z]{2,5}(:[0-9]{1,5})?(\/.*)?$/i)) {
+            return {
+                error: true,
+                message: 'The provided url is invalid',
+            };
+        }
+        const regexes = {
+            youtube: /^(?:(?:https?:)?\/\/)?(?:www\.)?(?:youtu\.be\/|youtube(-nocookie)?\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))((?:\w|-){11})(?:\S+)?$/,
+            instagram: /(.*)instagram.com\/p\/(.[a-zA-Z0-9]*)/,
+            vine: /\/\/vine.co\/v\/(.[a-zA-Z0-9]*)/,
+            vimeo: /\/\/(player.)?vimeo.com\/([a-z]*\/)*([0-9]{6,11})[?]?.*/,
+            dailymotion: /.+dailymotion.com\/(video|hub|embed)\/([^_?]+)[^#]*(#video=([^_&]+))?/,
+            youku: /(.*).youku\.com\/(v_show\/id_|embed\/)(.+)/,
+        };
+        const matches = _.mapObject(regexes, regex => url.match(regex));
+        const autoplay = options.autoplay ? '?autoplay=1&mute=1' : '?autoplay=0';
+        const controls = options.hide_controls ? '&controls=0' : '';
+        const loop = options.loop ? '&loop=1' : '';
+
+        let embedURL;
+        let type;
+        if (matches.youtube && matches.youtube[2].length === 11) {
+            const fullscreen = options.hide_fullscreen ? '&fs=0' : '';
+            const ytLoop = loop ? loop + `&playlist=${matches.youtube[2]}` : '';
+            const logo = options.hide_yt_logo ? '&modestbranding=1' : '';
+            embedURL = `//www.youtube${matches.youtube[1] || ''}.com/embed/${matches.youtube[2]}${autoplay}&rel=0${ytLoop}${controls}${fullscreen}${logo}`;
+            type = 'youtube';
+        } else if (matches.instagram && matches.instagram[2].length) {
+            embedURL = `//www.instagram.com/p/${matches.instagram[2]}/embed/`;
+            type = 'instagram';
+        } else if (matches.vine && matches.vine[0].length) {
+            embedURL = `${matches.vine[0]}/embed/simple`;
+            type = 'vine';
+        } else if (matches.vimeo && matches.vimeo[3].length) {
+            const vimeoAutoplay = autoplay.replace('mute', 'muted');
+            embedURL = `//player.vimeo.com/video/${matches.vimeo[3]}${vimeoAutoplay}${loop}`;
+            type = 'vimeo';
+        } else if (matches.dailymotion && matches.dailymotion[2].length) {
+            const videoId = matches.dailymotion[2].replace('video/', '');
+            const logo = options.hide_dm_logo ? '&ui-logo=0' : '';
+            const share = options.hide_dm_share ? '&sharing-enable=0' : '';
+            embedURL = `//www.dailymotion.com/embed/video/${videoId}${autoplay}${controls}${logo}${share}`;
+            type = 'dailymotion';
+        } else if (matches.youku && matches.youku[3].length) {
+            const videoId = matches.youku[3].indexOf('.html?') >= 0 ? matches.youku[3].substring(0, matches.youku[3].indexOf('.html?')) : matches.youku[3];
+            embedURL = `//player.youku.com/embed/${videoId}`;
+            type = 'youku';
+        }
+
+        return {type: type, embedURL: embedURL};
     },
 });
 

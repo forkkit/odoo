@@ -2,13 +2,13 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from odoo.addons.survey.tests import common
-from odoo.tests.common import HttpCase
 from psycopg2 import IntegrityError
 from odoo.exceptions import AccessError
 from odoo.tools import mute_logger
 
 
-class TestCertificationBadge(common.SurveyCase, HttpCase):
+class TestCertificationBadge(common.TestSurveyCommon):
+
     def setUp(self):
         super(TestCertificationBadge, self).setUp()
         self.certification_survey = self.env['survey.survey'].with_user(self.survey_manager).create({
@@ -16,7 +16,7 @@ class TestCertificationBadge(common.SurveyCase, HttpCase):
             'access_mode': 'public',
             'users_login_required': True,
             'scoring_type': 'scoring_with_answers',
-            'certificate': True,
+            'certification': True,
             'state': 'open',
         })
 
@@ -25,7 +25,7 @@ class TestCertificationBadge(common.SurveyCase, HttpCase):
             'access_mode': 'public',
             'users_login_required': True,
             'scoring_type': 'scoring_with_answers',
-            'certificate': True,
+            'certification': True,
             'state': 'open',
         })
 
@@ -49,6 +49,21 @@ class TestCertificationBadge(common.SurveyCase, HttpCase):
             'rule_auth': 'nobody',
             'level': None,
         })
+
+    def test_archive(self):
+        """ Archive status of survey is propagated to its badges. """
+        self.certification_survey.write({
+            'certification_give_badge': True,
+            'certification_badge_id': self.certification_badge.id
+        })
+
+        self.certification_survey.action_archive()
+        self.assertFalse(self.certification_survey.active)
+        self.assertFalse(self.certification_badge.active)
+
+        self.certification_survey.action_unarchive()
+        self.assertTrue(self.certification_survey.active)
+        self.assertTrue(self.certification_badge.active)
 
     def test_give_badge_without_badge(self):
         with mute_logger('odoo.sql_db'):
@@ -168,7 +183,7 @@ class TestCertificationBadge(common.SurveyCase, HttpCase):
             'access_mode': 'public',
             'users_login_required': True,
             'scoring_type': 'scoring_with_answers',
-            'certificate': True,
+            'certification': True,
             'certification_give_badge': True,
             'certification_badge_id': self.certification_badge.id,
             'state': 'open'

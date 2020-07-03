@@ -1,24 +1,24 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
-from odoo.addons.account.tests.account_test_classes import AccountingTestCase
+from odoo.addons.account.tests.common import AccountTestCommon
 from odoo.tests import Form, tagged
 
 
 @tagged('post_install', '-at_install')
-class TestPurchaseOrder(AccountingTestCase):
+class TestPurchaseOrder(AccountTestCommon):
 
     def setUp(self):
         super(TestPurchaseOrder, self).setUp()
         # Useful models
         self.PurchaseOrder = self.env['purchase.order']
         self.PurchaseOrderLine = self.env['purchase.order.line']
-        self.partner_id = self.env.ref('base.res_partner_1')
-        self.product_id_1 = self.env.ref('product.product_product_8')
-        self.product_id_2 = self.env.ref('product.product_product_11')
+        self.partner_id = self.env['res.partner'].create({'name': 'Wood Corner Partner'})
+        self.product_id_1 = self.env['product.product'].create({'name': 'Large Desk'})
+        self.product_id_2 = self.env['product.product'].create({'name': 'Conference Chair'})
 
         (self.product_id_1 | self.product_id_2).write({'purchase_method': 'purchase'})
         self.po_vals = {
@@ -76,7 +76,7 @@ class TestPurchaseOrder(AccountingTestCase):
         self.picking.button_validate()
         self.assertEqual(self.po.order_line.mapped('qty_received'), [5.0, 5.0], 'Purchase: all products should be received"')
 
-        move_form = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        move_form = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         move_form.partner_id = self.partner_id
         move_form.purchase_id = self.po
         self.invoice = move_form.save()
@@ -108,7 +108,7 @@ class TestPurchaseOrder(AccountingTestCase):
         self.assertEqual(self.po.order_line.mapped('qty_received'), [5.0, 5.0], 'Purchase: all products should be received"')
 
         #After Receiving all products create vendor bill.
-        move_form = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        move_form = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         move_form.partner_id = self.partner_id
         move_form.purchase_id = self.po
         self.invoice = move_form.save()
@@ -138,7 +138,7 @@ class TestPurchaseOrder(AccountingTestCase):
         # Check Received quantity
         self.assertEqual(self.po.order_line[0].qty_received, 3.0, 'Purchase: delivered quantity should be 3.0 instead of "%s" after picking return' % self.po.order_line[0].qty_received)
         #Create vendor bill for refund qty
-        move_form = Form(self.env['account.move'].with_context(default_type='in_refund'))
+        move_form = Form(self.env['account.move'].with_context(default_move_type='in_refund'))
         move_form.partner_id = self.partner_id
         move_form.purchase_id = self.po
         self.invoice = move_form.save()
@@ -151,3 +151,110 @@ class TestPurchaseOrder(AccountingTestCase):
         self.invoice.post()
 
         self.assertEqual(self.po.order_line.mapped('qty_invoiced'), [3.0, 3.0], 'Purchase: Billed quantity should be 3.0')
+
+    def test_03_po_return_and_modify(self):
+        """Change the picking code of the delivery to internal. Make a PO for 10 units, go to the
+        picking and return 5, edit the PO line to 15 units.
+        The purpose of the test is to check the consistencies across the received quantities and the
+        procurement quantities.
+        """
+        # Change the code of the picking type delivery
+        self.env['stock.picking.type'].search([('code', '=', 'outgoing')]).write({'code': 'internal'})
+
+        # Sell and deliver 10 units
+        item1 = self.product_id_1
+        uom_unit = self.env.ref('uom.product_uom_unit')
+        po1 = self.env['purchase.order'].create({
+            'partner_id': self.partner_id.id,
+            'order_line': [
+                (0, 0, {
+                    'name': item1.name,
+                    'product_id': item1.id,
+                    'product_qty': 10,
+                    'product_uom': uom_unit.id,
+                    'price_unit': 123.0,
+                    'date_planned': datetime.today().strftime(DEFAULT_SERVER_DATETIME_FORMAT),
+                }),
+            ],
+        })
+        po1.button_confirm()
+
+        picking = po1.picking_ids
+        wiz_act = picking.button_validate()
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save()
+        wiz.process()
+
+        # Return 5 units
+        stock_return_picking_form = Form(self.env['stock.return.picking'].with_context(
+            active_ids=picking.ids,
+            active_id=picking.ids[0],
+            active_model='stock.picking'
+        ))
+        return_wiz = stock_return_picking_form.save()
+        for return_move in return_wiz.product_return_moves:
+            return_move.write({
+                'quantity': 5,
+                'to_refund': True
+            })
+        res = return_wiz.create_returns()
+        return_pick = self.env['stock.picking'].browse(res['res_id'])
+        wiz_act = return_pick.button_validate()
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save()
+        wiz.process()
+
+        self.assertEqual(po1.order_line.qty_received, 5)
+
+        # Deliver 15 instead of 10.
+        po1.write({
+            'order_line': [
+                (1, po1.order_line[0].id, {'product_qty': 15}),
+            ]
+        })
+
+        # A new move of 10 unit (15 - 5 units)
+        self.assertEqual(po1.order_line.qty_received, 5)
+        self.assertEqual(po1.picking_ids[-1].move_lines.product_qty, 10)
+
+    def test_propagate_date_of_move(self):
+        """ Propagate date of move should be assigned as per value of mto
+            buy route if PO is created manually (not from mto route).
+        """
+        warehouse = self.env.ref('stock.warehouse0')
+        self.po = self.env['purchase.order'].create(self.po_vals)
+        self.po.button_confirm()
+        self.assertFalse(self.po.order_line.mapped('move_dest_ids'))
+        self.assertEqual(self.po.picking_ids.move_lines[0].propagate_date, warehouse.buy_pull_id.propagate_date)
+
+    def test_update_date_planned(self):
+        po = self.PurchaseOrder.create(self.po_vals)
+        po.button_confirm()
+
+        today = datetime.today().replace(microsecond=0)
+        tomorrow = datetime.today().replace(microsecond=0) + timedelta(days=1)
+        # update first line
+        po._update_date_planned_for_lines([(po.order_line[0], tomorrow)])
+        self.assertEqual(po.order_line[0].date_planned, tomorrow)
+        activity = self.env['mail.activity'].search([
+            ('summary', '=', 'Date Updated'),
+            ('res_model_id', '=', 'purchase.order'),
+            ('res_id', '=', po.id),
+        ])
+        self.assertTrue(activity)
+        self.assertEqual(
+            activity.note,
+            '<p> Wood Corner Partner modified receipt dates for the following products:</p><p> \xa0 - Large Desk from %s to %s </p><p>Those dates have been updated accordingly on the receipt %s.</p>' % (today.date(), tomorrow.date(), po.picking_ids.name)
+        )
+
+        # receive products
+        wiz_act = po.picking_ids.button_validate()
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save()
+        wiz.process()
+
+        # update second line
+        old_date = po.order_line[1].date_planned
+        po._update_date_planned_for_lines([(po.order_line[1], tomorrow)])
+        self.assertEqual(po.order_line[1].date_planned, old_date)
+        self.assertEqual(
+            activity.note,
+            '<p> Wood Corner Partner modified receipt dates for the following products:</p><p> \xa0 - Large Desk from %s to %s </p><p> \xa0 - Conference Chair from %s to %s </p><p>Those dates couldn’t be modified accordingly on the receipt %s which had already been validated.</p>' % (today.date(), tomorrow.date(), today.date(), tomorrow.date(), po.picking_ids.name)
+        )

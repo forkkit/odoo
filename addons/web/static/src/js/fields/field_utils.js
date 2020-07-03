@@ -200,10 +200,16 @@ function formatFloatFactor(value, field, options) {
  * instead of 0.25.
  *
  * @param {float} value
+ * @param {Object} [field]
+ *        a description of the field (note: this parameter is ignored)
+ * @param {Object} [options]
+ * @param {boolean} [options.noLeadingZeroHour] if true, format like 1:30
+ *        otherwise, format like 01:30
  * @returns {string}
  */
-function formatFloatTime(value) {
-    var pattern = '%02d:%02d';
+function formatFloatTime(value, field, options) {
+    options = options || {};
+    var pattern = options.noLeadingZeroHour ? '%1d:%02d' : '%02d:%02d';
     if (value < 0) {
         value = Math.abs(value);
         pattern = '-' + pattern;
@@ -252,7 +258,7 @@ function formatInteger(value, field, options) {
  * return an empty string.  Note that it accepts two types of input parameters:
  * an array, in that case we assume that the many2one value is of the form
  * [id, nameget], and we return the nameget, or it can be an object, and in that
- * case, we assume that it is a record from a BasicModel.
+ * case, we assume that it is a record datapoint from a BasicModel.
  *
  * @param {Array|Object|false} value
  * @param {Object} [field]
@@ -262,7 +268,18 @@ function formatInteger(value, field, options) {
  * @returns {string}
  */
 function formatMany2one(value, field, options) {
-    value = value && (_.isArray(value) ? value[1] : value.data.display_name) || '';
+    if (!value) {
+        value = '';
+    } else if (_.isArray(value)) {
+        // value is a pair [id, nameget]
+        value = value[1];
+    } else {
+        // value is a datapoint, so we read its display_name field, which
+        // may in turn be a datapoint (if the name field is a many2one)
+        while (value.data) {
+            value = value.data.display_name || '';
+        }
+    }
     if (options && options.escape) {
         value = _.escape(value);
     }
@@ -312,13 +329,16 @@ function formatX2Many(value) {
  *        the number of digits that should be used, instead of the default
  *        digits precision in the field. Note: if the currency defines a
  *        precision, the currency's one is used.
+ * @param {boolean} [options.html=true]
+ *        if true, returns a string encoding the html formatted value (with
+ *        whitespace encoded as '&nbsp;')
  * @returns {string}
  */
 function formatMonetary(value, field, options) {
     if (value === false) {
         return "";
     }
-    options = options || {};
+    options = Object.assign({ html: true }, options);
 
     var currency = options.currency;
     if (!currency) {
@@ -341,10 +361,11 @@ function formatMonetary(value, field, options) {
     if (!currency || options.noSymbol) {
         return formatted_value;
     }
+    const ws = options.html ? '&nbsp;' : ' ';
     if (currency.position === "after") {
-        return formatted_value += '&nbsp;' + currency.symbol;
+        return formatted_value + ws + currency.symbol;
     } else {
-        return currency.symbol + '&nbsp;' + formatted_value;
+        return currency.symbol + ws + formatted_value;
     }
 }
 /**
@@ -359,11 +380,11 @@ function formatMonetary(value, field, options) {
  */
 function formatPercentage(value, field, options) {
     options = options || {};
-    var result = formatFloat(value * 100, field, options) || '0';
-    if (options.humanReadable && options.humanReadable(value * 100)) {
-        return result + "%";
+    let result = formatFloat(value * 100, field, options) || '0';
+    if (!options.humanReadable || !options.humanReadable(value * 100)) {
+        result = parseFloat(result).toString().replace('.', _t.database.parameters.decimal_point);
     }
-    return (parseFloat(result) + "%").replace('.', _t.database.parameters.decimal_point);
+    return result + (options.noSymbol ? '' : '%');
 }
 /**
  * Returns a string representing the value of the selection.
@@ -587,8 +608,8 @@ function parseFloatTime(value) {
 }
 
 /**
- * Parse a String containing a percentage and convert it to float.
- * The percentage can be a regular xx.xx float or a xx%.
+ * Parse a String containing float and unconvert it with a conversion factor
+ * of 100. The percentage can be a regular xx.xx float or a xx%.
  *
  * @param {string} value
  *                The string to be parsed
@@ -596,10 +617,7 @@ function parseFloatTime(value) {
  * @throws {Error} if the value couldn't be converted to float
  */
 function parsePercentage(value) {
-    if (value.slice(-1) === '%') {
-        return parseFloat(value.slice(0, -1)) / 100;
-    }
-    return parseFloat(value);
+    return parseFloat(value) / 100;
 }
 
 /**
@@ -683,6 +701,7 @@ return {
         integer: parseInteger,
         many2many: _.identity, // todo
         many2one: parseMany2one,
+        many2one_reference: parseInteger,
         monetary: parseMonetary,
         one2many: _.identity,
         percentage: parsePercentage,

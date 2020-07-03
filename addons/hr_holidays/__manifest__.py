@@ -40,10 +40,12 @@ A synchronization with an internal agenda (Meetings of the CRM module) is also p
         'views/mail_activity_views.xml',
 
         'wizard/hr_holidays_summary_employees_views.xml',
+        'wizard/hr_departure_wizard_views.xml',
 
         'report/hr_holidays_templates.xml',
         'report/hr_holidays_reports.xml',
         'report/hr_leave_reports.xml',
+        'report/hr_leave_report_calendar.xml',
 
         'views/hr_views.xml',
         'views/hr_leave_template.xml',
@@ -53,6 +55,10 @@ A synchronization with an internal agenda (Meetings of the CRM module) is also p
         'data/hr_holidays_demo.xml',
     ],
     'qweb': [
+        'static/src/bugfix/bugfix.xml',
+        'static/src/components/partner_im_status_icon/partner_im_status_icon.xml',
+        'static/src/components/thread_icon/thread_icon.xml',
+        'static/src/components/thread_viewer/thread_viewer.xml',
         'static/src/xml/*.xml',
     ],
     'installable': True,

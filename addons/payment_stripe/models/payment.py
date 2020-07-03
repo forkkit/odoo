@@ -24,7 +24,9 @@ INT_CURRENCIES = [
 class PaymentAcquirerStripe(models.Model):
     _inherit = 'payment.acquirer'
 
-    provider = fields.Selection(selection_add=[('stripe', 'Stripe')])
+    provider = fields.Selection(selection_add=[
+        ('stripe', 'Stripe')
+    ], ondelete={'stripe': 'set default'})
     stripe_secret_key = fields.Char(required_if_provider='stripe', groups='base.group_user')
     stripe_publishable_key = fields.Char(required_if_provider='stripe', groups='base.group_user')
     stripe_image_url = fields.Char(
@@ -38,7 +40,7 @@ class PaymentAcquirerStripe(models.Model):
 
         base_url = self.get_base_url()
         stripe_session_data = {
-            'payment_method_types[]': 'card',
+            'payment_method_types[0]': 'card',
             'line_items[][amount]': int(tx_values['amount'] if tx_values['currency'].name in INT_CURRENCIES else float_round(tx_values['amount'] * 100, 2)),
             'line_items[][currency]': tx_values['currency'].name,
             'line_items[][quantity]': 1,
@@ -46,8 +48,13 @@ class PaymentAcquirerStripe(models.Model):
             'client_reference_id': tx_values['reference'],
             'success_url': urls.url_join(base_url, StripeController._success_url) + '?reference=%s' % tx_values['reference'],
             'cancel_url': urls.url_join(base_url, StripeController._cancel_url) + '?reference=%s' % tx_values['reference'],
-            'customer_email': tx_values['partner_email'],
+            'payment_intent_data[description]': tx_values['reference'],
+            'customer_email': tx_values.get('partner_email') or tx_values.get('billing_partner_email'),
         }
+        if tx_values.get('billing_partner_country').code and tx_values.get('billing_partner_country').code.lower() == 'nl' and \
+           tx_values.get('currency').name and tx_values.get('currency').name.lower() == 'eur':
+            # enable iDEAL for NL-based customers (€ payments only)
+            stripe_session_data['payment_method_types[1]'] = 'ideal'
         tx_values['session_id'] = self._create_stripe_session(stripe_session_data)
 
         return tx_values
@@ -60,15 +67,23 @@ class PaymentAcquirerStripe(models.Model):
             'Stripe-Version': '2019-05-16', # SetupIntent need a specific version
             }
         resp = requests.request(method, url, data=data, headers=headers)
-        try:
-            resp.raise_for_status()
-        except HTTPError:
-            _logger.error("Here are some more information for the "
-                          "following HTTP error on %s:\n"
-                          "Request data:\n%s\n"
-                          "Response body:\n%s",
-                          url, pprint.pformat(data), resp.text)
-            raise
+        # Stripe can send 4XX errors for payment failure (not badly-formed requests)
+        # check if error `code` is present in 4XX response and raise only if not
+        # cfr https://stripe.com/docs/error-codes
+        # these can be made customer-facing, as they usually indicate a problem with the payment
+        # (e.g. insufficient funds, expired card, etc.)
+        # if the context key `stripe_manual_payment` is set then these errors will be raised as ValidationError,
+        # otherwise, they will be silenced, and the will be returned no matter the status.
+        # This key should typically be set for payments in the present and unset for automated payments
+        # (e.g. through crons)
+        if not resp.ok and self._context.get('stripe_manual_payment') and (400 <= resp.status_code < 500 and resp.json().get('error', {}).get('code')):
+            try:
+                resp.raise_for_status()
+            except HTTPError:
+                _logger.error(resp.text)
+                stripe_error = resp.json().get('error', {}).get('message', '')
+                error_msg = " " + (_("Stripe gave us the following info about the problem: '%s'", stripe_error))
+                raise ValidationError(error_msg)
         return resp.json()
 
     def _create_stripe_session(self, kwargs):
@@ -97,6 +112,13 @@ class PaymentAcquirerStripe(models.Model):
 
     @api.model
     def stripe_s2s_form_process(self, data):
+        if 'card' in data and not data.get('card'):
+            # coming back from a checkout payment and iDeal (or another non-card pm)
+            # can't save the token if it's not a card
+            # note that in the case of a s2s payment, 'card' wont be
+            # in the data dict because we need to fetch it from the stripe server
+            _logger.info('unable to save card info from Stripe since the payment was not done with a card')
+            return self.env['payment.token']
         last4 = data.get('card', {}).get('last4')
         if not last4:
             # PM was created with a setup intent, need to get last4 digits through
@@ -227,11 +249,11 @@ class PaymentTransactionStripe(models.Model):
 
         tx = self.search([('reference', '=', reference)])
         if not tx:
-            error_msg = (_('Stripe: no order found for reference %s') % reference)
+            error_msg = _('Stripe: no order found for reference %s', reference)
             _logger.error(error_msg)
             raise ValidationError(error_msg)
         elif len(tx) > 1:
-            error_msg = (_('Stripe: %s orders found for reference %s') % (len(tx), reference))
+            error_msg = _('Stripe: %(count)s orders found for reference %(reference)s', count=len(tx), reference=reference)
             _logger.error(error_msg)
             raise ValidationError(error_msg)
         return tx[0]
@@ -272,12 +294,13 @@ class PaymentTransactionStripe(models.Model):
             self.write(vals)
             self._set_transaction_pending()
             return True
-        else:
-            error = tree.get('failure_message')
-            _logger.warning(error)
-            vals.update({'state_message': error})
-            self.write(vals)
+        if status == 'requires_payment_method':
             self._set_transaction_cancel()
+            self.acquirer_id._stripe_request('payment_intents/%s/cancel' % self.stripe_payment_intent)
+            return False
+        else:
+            error = tree.get("failure_message") or tree.get('error', {}).get('message')
+            self._set_transaction_error(error)
             return False
 
     def _stripe_form_get_invalid_parameters(self, data):

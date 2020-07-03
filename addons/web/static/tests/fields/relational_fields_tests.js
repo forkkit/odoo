@@ -8,6 +8,7 @@ var RamStorage = require('web.RamStorage');
 var relationalFields = require('web.relational_fields');
 var testUtils = require('web.test_utils');
 
+const cpHelpers = testUtils.controlPanel;
 var createView = testUtils.createView;
 
 QUnit.module('fields', {}, function () {
@@ -153,24 +154,10 @@ QUnit.module('relational_fields', {
 
     QUnit.test('search more pager is reset when doing a new search', async function (assert) {
         assert.expect(6);
-        for(var i = 10; i < 180; i++) {
-            this.data.partner.records.push({
-                id: i,
-                display_name: "Partner " + i,
-            });
-        }
 
-        async function stringToEvent ($element, string) {
-            for (var i = 0; i < string.length; i++) {
-                var keyAscii = string.charCodeAt(i);
-                $element.val($element.val()+string[i]);
-                $element.trigger($.Event('keyup', {which: keyAscii, keyCode:keyAscii}));
-                await testUtils.nextTick();
-            }
-            $element.trigger($.Event('keyup', {which: $.ui.keyCode.ENTER, keyCode:$.ui.keyCode.ENTER}));
-            await testUtils.nextTick();
-        }
-
+        this.data.partner.records.push(
+            ...new Array(170).fill().map((_, i) => ({ id: i + 10, name: "Partner " + i }))
+        );
         this.data.partner.fields.datetime.searchable = true;
         var form = await createView({
             View: FormView,
@@ -192,7 +179,6 @@ QUnit.module('relational_fields', {
 
         await testUtils.form.clickEdit(form);
 
-
         await testUtils.fields.many2one.clickOpenDropdown('trululu');
         await testUtils.fields.many2one.clickItem('trululu','Search');
         await testUtils.dom.click($('.modal .o_pager_next'));
@@ -201,7 +187,8 @@ QUnit.module('relational_fields', {
         assert.strictEqual($('.o_pager_value').text(), "181-160", "should display the second page");
         assert.strictEqual($('tr.o_data_row').length, 80, "should display 80 record");
 
-        await stringToEvent($('.modal .o_searchview_input'), 'first');
+        await cpHelpers.editSearch('.modal', "first");
+        await cpHelpers.validateSearch('.modal');
 
         assert.strictEqual($('.o_pager_limit').text(), "11", "there should be 1 record");
         assert.strictEqual($('.o_pager_value').text(), "11-1", "should display the first page");
@@ -815,20 +802,65 @@ QUnit.module('relational_fields', {
         assert.expect(2);
 
         this.data.product.records = [];
-        var form = await createView({
+        const form = await createView({
             View: FormView,
             model: 'partner',
             data: this.data,
-            arch:'<form string="Partners">' +
-                    '<header><field name="product_id" widget="statusbar"/></header>' +
-                '</form>',
+            arch: `<form string="Partners">
+                    <header><field name="product_id" widget="statusbar"/></header>
+                </form>`,
             res_id: 1,
             config: {device: {isMobile: false}},
         });
 
-        assert.hasClass(form.$('.o_statusbar_status'), 'o_field_empty');
+        assert.doesNotHaveClass(form.$('.o_statusbar_status'), 'o_field_empty');
         assert.strictEqual(form.$('.o_statusbar_status').children().length, 0,
             'statusbar widget should be empty');
+        form.destroy();
+    });
+
+    QUnit.test('statusbar with required modifier', async function (assert) {
+        assert.expect(2);
+
+        const form = await createView({
+            View: FormView,
+            model: 'partner',
+            data: this.data,
+            arch: `<form string="Partners">
+                    <header><field name="product_id" widget="statusbar" required="1"/></header>
+                </form>`,
+            config: {device: {isMobile: false}},
+        });
+        testUtils.intercept(form, 'call_service', function (ev) {
+            assert.strictEqual(ev.data.service, 'notification',
+                "should display an 'invalid fields' notification");
+        }, true);
+
+        testUtils.form.clickSave(form);
+
+        assert.containsOnce(form, '.o_form_editable', 'view should still be in edit');
+
+        form.destroy();
+    });
+
+    QUnit.test('statusbar with no value in readonly', async function (assert) {
+        assert.expect(2);
+
+        const form = await createView({
+            View: FormView,
+            model: 'partner',
+            data: this.data,
+            arch: `
+                <form>
+                    <header><field name="product_id" widget="statusbar"/></header>
+                </form>`,
+            res_id: 1,
+            config: {device: {isMobile: false}},
+        });
+
+        assert.doesNotHaveClass(form.$('.o_statusbar_status'), 'o_field_empty');
+        assert.containsN(form, '.o_statusbar_status button:visible', 2);
+
         form.destroy();
     });
 
@@ -1338,8 +1370,8 @@ QUnit.module('relational_fields', {
         // add an other existing tag
         var $input = form.$('.o_field_many2manytags input');
         await testUtils.fields.many2one.clickOpenDropdown('timmy');
-        assert.strictEqual($input.autocomplete('widget').find('li').length, 1,
-            "autocomplete dropdown should have 1 entry");
+        assert.strictEqual($input.autocomplete('widget').find('li').length, 2,
+            "autocomplete dropdown should have 2 entry");
         assert.strictEqual($input.autocomplete('widget').find('li a:contains("red")').length, 1,
             "autocomplete dropdown should contain 'red'");
         await testUtils.fields.many2one.clickHighlightedItem('timmy');
@@ -1447,8 +1479,8 @@ QUnit.module('relational_fields', {
         // add an other existing tag
         var $input = form.$('.o_field_many2manytags input');
         await testUtils.fields.many2one.clickOpenDropdown('timmy');
-        assert.strictEqual($input.autocomplete('widget').find('li').length, 1,
-        "autocomplete dropdown should have 1 entry");
+        assert.strictEqual($input.autocomplete('widget').find('li').length, 2,
+        "autocomplete dropdown should have 2 entry");
         assert.strictEqual($input.autocomplete('widget').find('li a:contains("silver")').length, 1,
         "autocomplete dropdown should contain 'silver'");
         await testUtils.fields.many2one.clickHighlightedItem('timmy');
@@ -1541,6 +1573,28 @@ QUnit.module('relational_fields', {
         await testUtils.nextTick();
         assert.strictEqual(form.$('.badge:first()').data('color'), color,
             'should have correctly updated the color (in edit)');
+
+        form.destroy();
+    });
+
+    QUnit.test('fieldmany2many tags with no_edit_color option', async function (assert) {
+        assert.expect(1);
+
+        this.data.partner.records[0].timmy = [12];
+
+        var form = await createView({
+            View: FormView,
+            model: 'partner',
+            data: this.data,
+            arch:'<form string="Partners">' +
+                    '<field name="timmy" widget="many2many_tags" options="{\'color_field\': \'color\', \'no_edit_color\': 1}"/>' +
+                '</form>',
+            res_id: 1,
+        });
+
+        // Click to try to open colorpicker
+        await testUtils.dom.click(form.$('.badge:first() .dropdown-toggle'));
+        assert.containsNone(document.body, '.o_colorpicker');
 
         form.destroy();
     });
@@ -1641,8 +1695,8 @@ QUnit.module('relational_fields', {
         });
         await testUtils.fields.many2one.clickOpenDropdown('trululu');
         await testUtils.fields.many2one.clickItem('trululu', 'Search');
-        await testUtils.dom.click($('.modal .o_search_options .fa-bars'));
-        await testUtils.dom.click($('.modal .o_search_options .o_group_by_menu a:contains(Bar)'));
+        await cpHelpers.toggleGroupByMenu('.modal');
+        await cpHelpers.toggleMenuItem('.modal', "Bar");
 
         await testUtils.dom.click($('.modal .o_group_header:first'));
 
@@ -1675,6 +1729,32 @@ QUnit.module('relational_fields', {
         });
         assert.containsN(form, '.o_field_widget[name="partner_ids"] .badge', 100,
             'should have rendered 100 tags');
+        form.destroy();
+    });
+
+    QUnit.test('many2many_tags loads records according to limit defined on widget prototype', async function (assert) {
+        assert.expect(1);
+
+        const M2M_LIMIT = relationalFields.FieldMany2ManyTags.prototype.limit;
+        relationalFields.FieldMany2ManyTags.prototype.limit = 30;
+        this.data.partner.fields.partner_ids = {string: "Partner", type: "many2many", relation: 'partner'};
+        this.data.partner.records[0].partner_ids = [];
+        for (var i = 15; i < 50; i++) {
+            this.data.partner.records.push({id: i, display_name: 'walter' + i});
+            this.data.partner.records[0].partner_ids.push(i);
+        }
+        const form = await createView({
+            View: FormView,
+            model: 'partner',
+            data: this.data,
+            arch: '<form><field name="partner_ids" widget="many2many_tags"/></form>',
+            res_id: 1,
+        });
+
+        assert.strictEqual(form.$('.o_field_widget[name="partner_ids"] .badge').length, 30,
+            'should have rendered 30 tags even though 35 records linked');
+
+        relationalFields.FieldMany2ManyTags.prototype.limit = M2M_LIMIT;
         form.destroy();
     });
 
@@ -1888,6 +1968,29 @@ QUnit.module('relational_fields', {
         assert.containsN(form, '.o_field_many2manytags.avatar.o_field_widget .badge', 2, "should have 2 records");
         assert.strictEqual(form.$('.o_field_many2manytags.avatar.o_field_widget .badge:first img').data('src'), '/web/image/partner/2/image_128',
             "should have correct avatar image");
+
+        form.destroy();
+    });
+
+    QUnit.test('fieldmany2many tags: quick create a new record', async function (assert) {
+        assert.expect(3);
+
+        const form = await createView({
+            View: FormView,
+            model: 'partner',
+            data: this.data,
+            arch: `<form><field name="timmy" widget="many2many_tags"/></form>`,
+        });
+
+        assert.containsNone(form, '.o_field_many2manytags .badge');
+
+        await testUtils.fields.many2one.searchAndClickItem('timmy', {search: 'new value'});
+
+        assert.containsOnce(form, '.o_field_many2manytags .badge');
+
+        await testUtils.form.clickSave(form);
+
+        assert.strictEqual(form.el.querySelector('.o_field_many2manytags').innerText.trim(), "new value");
 
         form.destroy();
     });
@@ -2292,10 +2395,39 @@ QUnit.module('relational_fields', {
         form.destroy();
     });
 
+    QUnit.test('widget many2many_checkboxes: values are updated when domain changes', async function (assert) {
+        assert.expect(5);
+
+        const form = await createView({
+            View: FormView,
+            model: 'partner',
+            data: this.data,
+            arch: `<form>
+                    <field name="int_field"/>
+                    <field name="timmy" widget="many2many_checkboxes" domain="[['id', '>', int_field]]"/>
+                </form>`,
+            res_id: 1,
+            viewOptions: {
+                mode: 'edit',
+            },
+        });
+
+        assert.strictEqual(form.$('.o_field_widget[name=int_field]').val(), '10');
+        assert.containsN(form, '.o_field_widget[name=timmy] .custom-checkbox', 2);
+        assert.strictEqual(form.$('.o_field_widget[name=timmy] .o_form_label').text(), 'goldsilver');
+
+        await testUtils.fields.editInput(form.$('.o_field_widget[name=int_field]'), 13);
+
+        assert.containsOnce(form, '.o_field_widget[name=timmy] .custom-checkbox');
+        assert.strictEqual(form.$('.o_field_widget[name=timmy] .o_form_label').text(), 'silver');
+
+        form.destroy();
+    });
+
     QUnit.module('FieldMany2ManyBinaryMultiFiles');
 
     QUnit.test('widget many2many_binary', async function (assert) {
-        assert.expect(15);
+        assert.expect(16);
         this.data['ir.attachment'] = {
             fields: {
                 name: {string:"Name", type: "char"},
@@ -2319,7 +2451,7 @@ QUnit.module('relational_fields', {
             model: 'turtle',
             data: this.data,
             arch:'<form string="Turtles">' +
-                    '<group><field name="picture_ids" widget="many2many_binary"/></group>' +
+                    '<group><field name="picture_ids" widget="many2many_binary" options="{\'accepted_file_extensions\': \'image/*\'}"/></group>' +
                 '</form>',
             archs: {
                 'ir.attachment,false,list': '<tree string="Pictures"><field name="name"/></tree>',
@@ -2351,6 +2483,9 @@ QUnit.module('relational_fields', {
             "the button should be correctly named");
         assert.containsOnce(form, 'div.o_field_widget.oe_fileupload .o_hidden_input_file form',
             "there should be a hidden form to upload attachments");
+
+        assert.strictEqual(form.$('input.o_input_file').attr('accept'), 'image/*',
+            "there should be an attribute \"accept\" on the input")
 
         // TODO: add an attachment
         // no idea how to test this
@@ -3317,6 +3452,7 @@ QUnit.module('relational_fields', {
         relationalFields.FieldMany2One.prototype.AUTOCOMPLETE_DELAY = 0;
         await testUtils.dom.click(form.$el.find('.o_input_dropdown>input'));
 
+        await testUtils.fields.editInput(form.$('.o_field_many2one input'), 'ABC');
         // click create and edit
         await testUtils.dom.click($('.ui-autocomplete .ui-menu-item a:contains(Create and)').trigger('mouseenter'));
 

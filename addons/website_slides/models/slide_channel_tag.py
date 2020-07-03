@@ -6,11 +6,11 @@ from odoo import fields, models
 
 class SlideChannelTagGroup(models.Model):
     _name = 'slide.channel.tag.group'
-    _description = 'Channel/Course tags'
+    _description = 'Channel/Course Groups'
     _inherit = 'website.published.mixin'
     _order = 'sequence asc'
 
-    name = fields.Char('Name', required=True, translate=True)
+    name = fields.Char('Group Name', required=True, translate=True)
     sequence = fields.Integer('Sequence', default=10, index=True, required=True)
     tag_ids = fields.One2many('slide.channel.tag', 'group_id', string='Tags')
 
@@ -20,7 +20,7 @@ class SlideChannelTagGroup(models.Model):
 
 class SlideChannelTag(models.Model):
     _name = 'slide.channel.tag'
-    _description = 'Channel/Course tags'
+    _description = 'Channel/Course Tag'
     _order = 'group_sequence asc, sequence asc'
 
     name = fields.Char('Name', required=True, translate=True)
@@ -29,4 +29,5 @@ class SlideChannelTag(models.Model):
     group_sequence = fields.Integer(
         'Group sequence', related='group_id.sequence',
         index=True, readonly=True, store=True)
-    channel_ids = fields.Many2many('slide.channel.tag', 'slide_channel_tag_rel', 'tag_id', 'channel_id', string='Channels')
+    channel_ids = fields.Many2many('slide.channel', 'slide_channel_tag_rel', 'tag_id', 'channel_id', string='Channels')
+    color = fields.Integer(string='Color Index', help="Color to apply to this tag (including in website).")

@@ -6,14 +6,12 @@ import logging.handlers
 import os
 import platform
 import pprint
-from . import release
 import sys
 import threading
 import time
+import warnings
 
-import psycopg2
-
-import odoo
+from . import release
 from . import sql_db
 from . import tools
 
@@ -25,8 +23,6 @@ def log(logger, level, prefix, msg, depth=None):
     for line in (prefix + pprint.pformat(msg, depth=depth)).split('\n'):
         logger.log(level, indent+line)
         indent=indent_after
-
-path_prefix = os.path.realpath(os.path.dirname(os.path.dirname(__file__)))
 
 class PostgreSQLHandler(logging.Handler):
     """ PostgreSQL Logging Handler will store logs in the database, by default
@@ -50,7 +46,7 @@ class PostgreSQLHandler(logging.Handler):
             # we do not use record.levelname because it may have been changed by ColoredFormatter.
             levelname = logging.getLevelName(record.levelno)
 
-            val = ('server', ct_db, record.name, levelname, msg, record.pathname[len(path_prefix)+1:], record.lineno, record.funcName)
+            val = ('server', ct_db, record.name, levelname, msg, record.pathname, record.lineno, record.funcName)
             cr.execute("""
                 INSERT INTO ir_logging(create_date, type, dbname, name, level, message, path, line, func)
                 VALUES (NOW() at time zone 'UTC', %s, %s, %s, %s, %s, %s, %s, %s)
@@ -127,8 +123,19 @@ def init_logger():
         return record
     logging.setLogRecordFactory(record_factory)
 
-    logging.addLevelName(25, "INFO")
-    logging.captureWarnings(True)
+    # enable deprecation warnings (disabled by default)
+    warnings.filterwarnings('default', category=DeprecationWarning)
+    # ignore deprecation warnings from invalid escape (there's a ton and it's
+    # pretty likely a super low-value signal)
+    warnings.filterwarnings('ignore', r'^invalid escape sequence \\.', category=DeprecationWarning)
+    # ignore a bunch of warnings we can't really fix ourselves
+    for module in [
+        'setuptools.depends',# older setuptools version using imp
+        'zeep.loader',# zeep using defusedxml.lxml
+        'reportlab.lib.rl_safe_eval',# reportlab importing ABC from collections
+        'xlrd/xlsx',# xlrd mischecks iter() on trees or something so calls deprecated getiterator() instead of iter()
+    ]:
+        warnings.filterwarnings('ignore', category=DeprecationWarning, module=module)
 
     from .tools.translate import resetlocale
     resetlocale()
@@ -200,7 +207,7 @@ def init_logger():
 
     logging_configurations = DEFAULT_LOG_CONFIGURATION + pseudo_config + logconfig
     for logconfig_item in logging_configurations:
-        loggername, level = logconfig_item.split(':')
+        loggername, level = logconfig_item.strip().split(':')
         level = getattr(logging, level, logging.INFO)
         logger = logging.getLogger(loggername)
         logger.setLevel(level)
@@ -220,7 +227,16 @@ PSEUDOCONFIG_MAPPER = {
     'debug': ['odoo:DEBUG', 'odoo.sql_db:INFO'],
     'debug_sql': ['odoo.sql_db:DEBUG'],
     'info': [],
+    'runbot': ['odoo:RUNBOT', 'werkzeug:WARNING'],
     'warn': ['odoo:WARNING', 'werkzeug:WARNING'],
     'error': ['odoo:ERROR', 'werkzeug:ERROR'],
     'critical': ['odoo:CRITICAL', 'werkzeug:CRITICAL'],
 }
+
+logging.RUNBOT = 25
+logging.addLevelName(logging.RUNBOT, "INFO") # displayed as info in log
+logging.captureWarnings(True)
+
+def runbot(self, message, *args, **kws):
+    self.log(logging.RUNBOT, message, *args, **kws)
+logging.Logger.runbot = runbot

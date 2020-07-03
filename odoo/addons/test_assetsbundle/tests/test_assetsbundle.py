@@ -12,7 +12,7 @@ from odoo import api
 from odoo.addons.base.models.assetsbundle import AssetsBundle
 from odoo.addons.base.models.ir_attachment import IrAttachment
 from odoo.modules.module import get_resource_path
-from odoo.tests import HttpCase
+from odoo.tests import HttpCase, tagged
 from odoo.tests.common import TransactionCase
 
 GETMTINE = os.path.getmtime
@@ -33,7 +33,7 @@ class TestJavascriptAssetsBundle(FileTouchable):
         super(TestJavascriptAssetsBundle, self).setUp()
         self.jsbundle_xmlid = 'test_assetsbundle.bundle1'
         self.cssbundle_xmlid = 'test_assetsbundle.bundle2'
-        self.env['res.lang'].load_lang('ar_SY')
+        self.env['res.lang']._activate_lang('ar_SY')
 
 
     def _get_asset(self, xmlid, env=None):
@@ -471,7 +471,7 @@ class TestJavascriptAssetsBundle(FileTouchable):
         self.assertEqual(len(css_bundle), 1)
 
     def test_20_exteral_lib_assets(self):
-        html = self.env['ir.ui.view'].render_template('test_assetsbundle.template2')
+        html = self.env['ir.ui.view']._render_template('test_assetsbundle.template2')
         attachments = self.env['ir.attachment'].search([('url', '=like', '/web/content/%-%/test_assetsbundle.bundle4.%')])
         self.assertEqual(len(attachments), 2)
         self.assertEqual(html.strip(), ("""<!DOCTYPE html>
@@ -490,7 +490,7 @@ class TestJavascriptAssetsBundle(FileTouchable):
 </html>""" % {"js": attachments[0].url, "css": attachments[1].url}).encode('utf8'))
 
     def test_21_exteral_lib_assets_debug_mode(self):
-        html = self.env['ir.ui.view'].render_template('test_assetsbundle.template2', {"debug": "assets"})
+        html = self.env['ir.ui.view']._render_template('test_assetsbundle.template2', {"debug": "assets"})
         attachments = self.env['ir.attachment'].search([('url', '=like', '/web/content/%-%/test_assetsbundle.bundle4.%')])
         self.assertEqual(len(attachments), 0)
         self.assertEqual(html.strip(), ("""<!DOCTYPE html>
@@ -512,11 +512,12 @@ class TestJavascriptAssetsBundle(FileTouchable):
 </html>""").encode('utf8'))
 
 
+@tagged('-at_install', 'post_install')
 class TestAssetsBundleInBrowser(HttpCase):
     def test_01_js_interpretation(self):
         """ Checks that the javascript of a bundle is correctly interpreted.
         """
-        self.phantom_js(
+        self.browser_js(
             "/test_assetsbundle/js",
             "a + b + c === 6 ? console.log('test successful') : console.log('error')",
             login="admin"
@@ -542,7 +543,7 @@ class TestAssetsBundleInBrowser(HttpCase):
         })
         self.env.user.flush()
 
-        self.phantom_js(
+        self.browser_js(
             "/test_assetsbundle/js",
             "a + b + c + d === 10 ? console.log('test successful') : console.log('error')",
             login="admin",

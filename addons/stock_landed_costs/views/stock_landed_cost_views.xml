@@ -7,6 +7,7 @@
             <field name="model">stock.landed.cost</field>
             <field name="arch" type="xml">
                 <form string="Landed Costs">
+                    <field name="stock_valuation_layer_ids" invisible="1"/>
                     <header>
                         <button name="button_validate" string="Validate" states="draft" class="oe_highlight" type="object"/>
                         <button name="button_cancel" string="Cancel" states="draft" type="object"/>
@@ -17,7 +18,7 @@
                             <button string="Valuation" type="object"
                                 name="action_view_stock_valuation_layers"
                                 class="oe_stat_button" icon="fa-dollar" groups="stock.group_stock_manager"
-                                attrs="{'invisible': [('state', 'not in', ['done'])]}" />
+                                attrs="{'invisible': ['|' , ('state', 'not in', ['done']), ('stock_valuation_layer_ids', '=', [])]}"/>
                         </div>
                         <div class="oe_title">
                             <label for="name" class="oe_edit_only" string="Landed Cost"/>
@@ -28,7 +29,9 @@
                         <group>
                             <group>
                                 <field name="date"/>
-                                <field name="picking_ids" widget="many2many_tags" options="{'no_create_edit': True}" domain="[('state', '=', 'done'), ('picking_type_code', '!=', 'internal')]"/>
+                                <field name="allowed_picking_ids" invisible="1"/>
+                                <field name="target_model" widget="radio" invisible="1"/>
+                                <field name="picking_ids" widget="many2many_tags" options="{'no_create_edit': True}" domain="[('id', 'in', allowed_picking_ids)]" attrs="{'invisible': [('target_model', '!=', 'picking')]}"/>
                             </group>
                             <group>
                                 <label for="account_journal_id" string="Journal"/>
@@ -39,7 +42,7 @@
                             </group>
                         </group>
                         <notebook>
-                            <page string="Additional Costs">
+                            <page string="Additional Costs" name="additional_costs">
                                 <field name="cost_lines">
                                     <form string="Cost Lines">
                                         <group>
@@ -48,6 +51,7 @@
                                                     domain="[('landed_cost_ok', '=', True)]"
                                                     context="{'default_landed_cost_ok': True}"/>
                                                 <field name="price_unit"/>
+                                                <field name="currency_id" invisible="1"/>
                                             </group>
                                             <group>
                                                 <field name="split_method"/>
@@ -59,19 +63,22 @@
                                     </form>
                                     <tree string="Cost Lines" editable="bottom">
                                         <field name="product_id"
+                                            domain="[('landed_cost_ok', '=', True)]"
                                             context="{'default_landed_cost_ok': True, 'default_type': 'service'}"/>
                                         <field name="name"/>
                                         <field name="account_id" options="{'no_create': True}"/>
                                         <field name="split_method"/>
                                         <field name="price_unit"/>
+                                        <field name="currency_id" invisible="1"/>
                                     </tree>
                                 </field>
                                 <group class="oe_subtotal_footer oe_right">
-                                    <field name="amount_total" widget="monetary"/>
+                                    <field name="currency_id" invisible="1"/>
+                                    <field name="amount_total"/>
                                     <button colspan="2" name="compute_landed_cost" string="Compute" type="object" class="oe_right btn-secondary" states='draft'/>
                                 </group>
                             </page>
-                            <page string="Valuation Adjustments">
+                            <page string="Valuation Adjustments" name="valuation_adjustments">
                                 <field name="valuation_adjustment_lines">
                                     <form string="Valuation Adjustments">
                                         <group>
@@ -80,6 +87,7 @@
                                                 <field name="quantity"/>
                                             </group>
                                             <group>
+                                                <field name="currency_id" invisible="1"/>
                                                 <field name="former_cost"/>
                                                 <field name="additional_landed_cost"/>
                                             </group>
@@ -92,17 +100,18 @@
                                         <field name="volume" readonly="1" optional="hide"/>
                                         <field name="quantity" readonly="1"/>
                                         <field name="currency_id" invisible="1"/>
-                                        <field name="former_cost" readonly="1" widget="monetary"/>
-                                        <field name="final_cost" readonly="1" widget="monetary"/>
+                                        <field name="former_cost" readonly="1"/>
+                                        <field name="final_cost" readonly="1"/>
+                                        <field name="additional_landed_cost"/>
                                     </tree>
                                 </field>
                             </page>
                         </notebook>
                     </sheet>
                     <div class="oe_chatter">
-                        <field name="message_follower_ids" widget="mail_followers"/>
-                        <field name="activity_ids" widget="mail_activity"/>
-                        <field name="message_ids" widget="mail_thread"/>
+                        <field name="message_follower_ids"/>
+                        <field name="activity_ids"/>
+                        <field name="message_ids"/>
                     </div>
                 </form>
             </field>
@@ -113,10 +122,10 @@
             <field name="model">stock.landed.cost</field>
             <field name="arch" type="xml">
                 <tree string="Landed Costs">
-                    <field name="name"/>
+                    <field name="name" decoration-bf="1"/>
                     <field name="date"/>
-                    <field name="state"/>
                     <field name="company_id" groups="base.group_multi_company"/>
+                    <field name="state" widget="badge" decoration-success="state == 'done'" decoration-info="state == 'draft'"/>
                     <field name="activity_exception_decoration" widget="activity_exception"/>
                 </tree>
             </field>

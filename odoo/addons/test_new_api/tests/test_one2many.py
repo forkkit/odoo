@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from odoo.tests.common import TransactionCase
+from odoo.exceptions import ValidationError
 
 
 class One2manyCase(TransactionCase):
@@ -170,7 +171,7 @@ class One2manyCase(TransactionCase):
     def test_cache_invalidation(self):
         """ Cache invalidation for one2many with integer inverse. """
         record0 = self.env['test_new_api.attachment.host'].create({})
-        with self.assertQueryCount(2):
+        with self.assertQueryCount(0):
             self.assertFalse(record0.attachment_ids, "inconsistent cache")
 
         # creating attachment must compute name and invalidate attachment_ids
@@ -179,10 +180,10 @@ class One2manyCase(TransactionCase):
             'res_id': record0.id,
         })
         attachment.flush()
-        with self.assertQueryCount(1):
+        with self.assertQueryCount(0):
             self.assertEqual(attachment.name, record0.display_name,
                              "field should be computed")
-        with self.assertQueryCount(2):
+        with self.assertQueryCount(1):
             self.assertEqual(record0.attachment_ids, attachment, "inconsistent cache")
 
         # creating a host should not attempt to recompute attachment.name
@@ -191,18 +192,18 @@ class One2manyCase(TransactionCase):
         with self.assertQueryCount(0):
             # field res_id should not have been invalidated
             attachment.res_id
-        with self.assertQueryCount(2):
+        with self.assertQueryCount(0):
             self.assertFalse(record1.attachment_ids, "inconsistent cache")
 
         # writing on res_id must recompute name and invalidate attachment_ids
         attachment.res_id = record1.id
         attachment.flush()
-        with self.assertQueryCount(1):
+        with self.assertQueryCount(0):
             self.assertEqual(attachment.name, record1.display_name,
                              "field should be recomputed")
-        with self.assertQueryCount(2):
+        with self.assertQueryCount(1):
             self.assertEqual(record1.attachment_ids, attachment, "inconsistent cache")
-        with self.assertQueryCount(2):
+        with self.assertQueryCount(1):
             self.assertFalse(record0.attachment_ids, "inconsistent cache")
 
     def test_recompute(self):
@@ -226,3 +227,23 @@ class One2manyCase(TransactionCase):
         # self.assertIn(message, discussion.messages)
         # discussion.with_context(compute_name='Y').write({'messages': [(4, message.id)]})
         # self.assertEqual(message.name, 'X')
+
+    def test_dont_write_the_existing_childs(self):
+        """ test that the existing child should not be changed when adding a new child to the parent.
+        This is the behaviour of the form view."""
+        parent = self.env['test_new_api.model_parent_m2o'].create({
+            'name': 'parent',
+            'child_ids': [(0, 0, {'name': 'A'})],
+        })
+        a = parent.child_ids[0]
+        parent.write({'child_ids': [(4, a.id), (0, 0, {'name': 'B'})]})
+
+    def test_recomputation_ends(self):
+        """ Regression test for neverending recomputation. """
+        parent = self.env['test_new_api.model_parent_m2o'].create({'name': 'parent'})
+        child = self.env['test_new_api.model_child_m2o'].create({'name': 'A', 'parent_id': parent.id})
+        self.assertEqual(child.size1, 6)
+
+        # delete parent, and check that recomputation ends
+        parent.unlink()
+        parent.flush()

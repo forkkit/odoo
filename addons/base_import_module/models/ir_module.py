@@ -5,6 +5,7 @@ import logging
 import lxml
 import os
 import sys
+import tempfile
 import zipfile
 from os.path import join as opj
 
@@ -13,7 +14,6 @@ from odoo import api, fields, models, _
 from odoo.exceptions import UserError
 from odoo.modules import load_information_from_description_file
 from odoo.tools import convert_file, exception_to_unicode
-from odoo.tools.osutil import tempdir
 
 _logger = logging.getLogger(__name__)
 
@@ -121,9 +121,9 @@ class IrModule(models.Model):
         with zipfile.ZipFile(module_file, "r") as z:
             for zf in z.filelist:
                 if zf.file_size > MAX_FILE_SIZE:
-                    raise UserError(_("File '%s' exceed maximum allowed file size") % zf.filename)
+                    raise UserError(_("File '%s' exceed maximum allowed file size", zf.filename))
 
-            with tempdir() as module_dir:
+            with tempfile.TemporaryDirectory() as module_dir:
                 import odoo.modules.module as module
                 try:
                     odoo.addons.__path__.append(module_dir)
@@ -145,6 +145,19 @@ class IrModule(models.Model):
         for mod, error in errors.items():
             r.append("Error while importing module '%s'.\n\n %s \n Make sure those modules are installed and try again." % (mod, error))
         return '\n'.join(r), module_names
+
+    def module_uninstall(self):
+        # Delete an ir_module_module record completely if it was an imported
+        # one. The rationale behind this is that an imported module *cannot* be
+        # reinstalled anyway, as it requires the data files. Any attempt to
+        # install it again will simply fail without trace.
+        res = super().module_uninstall()
+        modules_to_delete = self.filtered('imported')
+        if modules_to_delete:
+            _logger.info("deleting imported modules upon uninstallation: %s",
+                         ", ".join(modules_to_delete.mapped('name')))
+            modules_to_delete.unlink()
+        return res
 
 
 def _is_studio_custom(path):

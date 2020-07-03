@@ -5,11 +5,9 @@ import re
 
 from collections import Counter
 from contextlib import contextmanager
-from functools import partial
 
-from odoo.tests import common, new_test_user
-
-survey_new_test_user = partial(new_test_user, context={'mail_create_nolog': True, 'mail_create_nosubscribe': True, 'mail_notrack': True, 'no_reset_password': True})
+from odoo.addons.mail.tests.common import mail_new_test_user
+from odoo.tests import common
 
 
 class SurveyCase(common.SavepointCase):
@@ -22,84 +20,18 @@ class SurveyCase(common.SavepointCase):
             value: (answer type, answer field_name)
         """
         self._type_match = {
-            'free_text': ('free_text', 'value_free_text'),
-            'textbox': ('text', 'value_text'),
-            'numerical_box': ('number', 'value_number'),
+            'text_box': ('text_box', 'value_text_box'),
+            'char_box': ('char_box', 'value_char_box'),
+            'numerical_box': ('numerical_box', 'value_numerical_box'),
             'date': ('date', 'value_date'),
-            'simple_choice': ('suggestion', 'value_suggested'),  # TDE: still unclear
-            'multiple_choice': ('suggestion', 'value_suggested'),  # TDE: still unclear
-            'matrix': ('suggestion', ('value_suggested', 'value_suggested_row')),  # TDE: still unclear
+            'simple_choice': ('suggestion', 'suggested_answer_id'),  # TDE: still unclear
+            'multiple_choice': ('suggestion', 'suggested_answer_id'),  # TDE: still unclear
+            'matrix': ('suggestion', ('suggested_answer_id', 'matrix_row_id')),  # TDE: still unclear
         }
 
-        """ Create test data: a survey with some pre-defined questions and various test users for ACL """
-        self.survey_manager = survey_new_test_user(
-            self.env, name='Gustave Doré', login='survey_manager', email='survey.manager@example.com',
-            groups='survey.group_survey_manager,base.group_user'
-        )
-
-        self.survey_user = survey_new_test_user(
-            self.env, name='Lukas Peeters', login='survey_user', email='survey.user@example.com',
-            groups='survey.group_survey_user,base.group_user'
-        )
-
-        self.user_emp = survey_new_test_user(
-            self.env, name='Eglantine Employee', login='user_emp', email='employee@example.com',
-            groups='base.group_user', password='user_emp'
-        )
-
-        self.user_portal = survey_new_test_user(
-            self.env, name='Patrick Portal', login='user_portal', email='portal@example.com',
-            groups='base.group_portal'
-        )
-
-        self.user_public = survey_new_test_user(
-            self.env, name='Pauline Public', login='user_public', email='public@example.com',
-            groups='base.group_public'
-        )
-
-        self.customer = self.env['res.partner'].create({
-            'name': 'Caroline Customer',
-            'email': 'customer@example.com',
-        })
-
-        self.survey = self.env['survey.survey'].with_user(self.survey_manager).create({
-            'title': 'Test Survey',
-            'access_mode': 'public',
-            'users_login_required': True,
-            'users_can_go_back': False,
-            'state': 'open',
-        })
-        self.page_0 = self.env['survey.question'].with_user(self.survey_manager).create({
-            'title': 'First page',
-            'survey_id': self.survey.id,
-            'sequence': 1,
-            'is_page': True,
-        })
-        self.question_ft = self.env['survey.question'].with_user(self.survey_manager).create({
-            'title': 'Test Free Text',
-            'survey_id': self.survey.id,
-            'sequence': 2,
-            'question_type': 'free_text',
-        })
-        self.question_num = self.env['survey.question'].with_user(self.survey_manager).create({
-            'title': 'Test NUmerical Box',
-            'survey_id': self.survey.id,
-            'sequence': 3,
-            'question_type': 'numerical_box',
-        })
-
-    @contextmanager
-    def with_user(self, user):
-        """ Quick with_user environment """
-        old_uid = self.uid
-        try:
-            self.uid = user.id
-            self.env = self.env(user=self.uid)
-            yield
-        finally:
-            # back
-            self.uid = old_uid
-            self.env = self.env(user=self.uid)
+    # ------------------------------------------------------------
+    # ASSERTS
+    # ------------------------------------------------------------
 
     def assertAnswer(self, answer, state, page):
         self.assertEqual(answer.state, state)
@@ -137,12 +69,19 @@ class SurveyCase(common.SavepointCase):
             else:
                 [value] = user_input['value']
                 answer_fname = self._type_match[question.question_type][1]
-                self.assertEqual(getattr(answer_lines, answer_fname), value)
+                if question.question_type == 'numerical_box':
+                    self.assertEqual(getattr(answer_lines, answer_fname), float(value))
+                else:
+                    self.assertEqual(getattr(answer_lines, answer_fname), value)
 
     def assertResponse(self, response, status_code, text_bits=None):
         self.assertEqual(response.status_code, status_code)
         for text in text_bits or []:
             self.assertIn(text, response.text)
+
+    # ------------------------------------------------------------
+    # DATA CREATION
+    # ------------------------------------------------------------
 
     def _add_question(self, page, name, qtype, **kwargs):
         constr_mandatory = kwargs.pop('constr_mandatory', True)
@@ -160,7 +99,7 @@ class SurveyCase(common.SavepointCase):
             'constr_error_msg': constr_error_msg,
         }
         if qtype in ('simple_choice', 'multiple_choice'):
-            base_qvalues['labels_ids'] = [
+            base_qvalues['suggested_answer_ids'] = [
                 (0, 0, {
                     'value': label['value'],
                     'answer_score': label.get('answer_score', 0),
@@ -169,11 +108,11 @@ class SurveyCase(common.SavepointCase):
             ]
         elif qtype == 'matrix':
             base_qvalues['matrix_subtype'] = kwargs.pop('matrix_subtype', 'simple')
-            base_qvalues['labels_ids'] = [
+            base_qvalues['suggested_answer_ids'] = [
                 (0, 0, {'value': label['value'], 'answer_score': label.get('answer_score', 0)})
                 for label in kwargs.pop('labels')
             ]
-            base_qvalues['labels_ids_2'] = [
+            base_qvalues['matrix_row_ids'] = [
                 (0, 0, {'value': label['value'], 'answer_score': label.get('answer_score', 0)})
                 for label in kwargs.pop('labels_2')
             ]
@@ -188,7 +127,6 @@ class SurveyCase(common.SavepointCase):
             'survey_id': survey.id,
             'partner_id': partner.id if partner else False,
             'email': kwargs.pop('email', False),
-            'input_type': 'manually',
         }
         base_avals.update(kwargs)
         return self.env['survey.user_input'].create(base_avals)
@@ -206,17 +144,126 @@ class SurveyCase(common.SavepointCase):
         }
         base_alvals[answer_fname] = answer_value
         base_alvals.update(kwargs)
-        return self.env['survey.user_input_line'].create(base_alvals)
+        return self.env['survey.user_input.line'].create(base_alvals)
+
+    # ------------------------------------------------------------
+    # UTILS
+    # ------------------------------------------------------------
 
     def _access_start(self, survey):
         return self.url_open('/survey/start/%s' % survey.access_token)
 
     def _access_page(self, survey, token):
-        return self.url_open('/survey/fill/%s/%s' % (survey.access_token, token))
+        return self.url_open('/survey/%s/%s' % (survey.access_token, token))
+
+    def _access_begin(self, survey, token):
+        base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
+        url = base_url + '/survey/begin/%s/%s' % (survey.access_token, token)
+        return self.opener.post(url=url, json={})
 
     def _access_submit(self, survey, token, post_data):
-        return self.url_open('/survey/submit/%s/%s' % (survey.access_token, token), data=post_data)
+        base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
+        url = base_url + '/survey/submit/%s/%s' % (survey.access_token, token)
+        return self.opener.post(url=url, json={'params': post_data})
 
     def _find_csrf_token(self, text):
         csrf_token_re = re.compile("(input.+csrf_token.+value=\")([_a-zA-Z0-9]{51})", re.MULTILINE)
         return csrf_token_re.search(text).groups()[1]
+
+    def _prepare_post_data(self, question, answers, post_data):
+        values = answers if isinstance(answers, list) else [answers]
+        if question.question_type == 'multiple_choice':
+            for value in values:
+                value = str(value)
+                if question.id in post_data:
+                    if isinstance(post_data[question.id], list):
+                        post_data[question.id].append(value)
+                    else:
+                        post_data[question.id] = [post_data[question.id], value]
+                else:
+                    post_data[question.id] = value
+        else:
+            [values] = values
+            post_data[question.id] = str(values)
+        return post_data
+
+    def _answer_question(self, question, answer, answer_token, csrf_token, button_submit='next'):
+        # Employee submits the question answer
+        post_data = self._format_submission_data(question, answer, {'csrf_token': csrf_token, 'token': answer_token, 'button_submit': button_submit})
+        response = self._access_submit(question.survey_id, answer_token, post_data)
+        self.assertResponse(response, 200)
+
+        # Employee is redirected on next question
+        response = self._access_page(question.survey_id, answer_token)
+        self.assertResponse(response, 200)
+
+    def _format_submission_data(self, question, answer, additional_post_data):
+        post_data = {}
+        post_data['question_id'] = question.id
+        post_data.update(self._prepare_post_data(question, answer, post_data))
+        if question.page_id:
+            post_data['page_id'] = question.page_id.id
+        post_data.update(**additional_post_data)
+        return post_data
+
+
+class TestSurveyCommon(SurveyCase):
+    def setUp(self):
+        super(TestSurveyCommon, self).setUp()
+
+        """ Create test data: a survey with some pre-defined questions and various test users for ACL """
+        self.survey_manager = mail_new_test_user(
+            self.env, name='Gustave Doré', login='survey_manager', email='survey.manager@example.com',
+            groups='survey.group_survey_manager,base.group_user'
+        )
+
+        self.survey_user = mail_new_test_user(
+            self.env, name='Lukas Peeters', login='survey_user', email='survey.user@example.com',
+            groups='survey.group_survey_user,base.group_user'
+        )
+
+        self.user_emp = mail_new_test_user(
+            self.env, name='Eglantine Employee', login='user_emp', email='employee@example.com',
+            groups='base.group_user', password='user_emp'
+        )
+
+        self.user_portal = mail_new_test_user(
+            self.env, name='Patrick Portal', login='user_portal', email='portal@example.com',
+            groups='base.group_portal'
+        )
+
+        self.user_public = mail_new_test_user(
+            self.env, name='Pauline Public', login='user_public', email='public@example.com',
+            groups='base.group_public'
+        )
+
+        self.customer = self.env['res.partner'].create({
+            'name': 'Caroline Customer',
+            'email': 'customer@example.com',
+        })
+
+        self.survey = self.env['survey.survey'].with_user(self.survey_manager).create({
+            'title': 'Test Survey',
+            'access_mode': 'public',
+            'users_login_required': True,
+            'users_can_go_back': False,
+            'state': 'open',
+        })
+        self.page_0 = self.env['survey.question'].with_user(self.survey_manager).create({
+            'title': 'First page',
+            'survey_id': self.survey.id,
+            'sequence': 1,
+            'is_page': True,
+        })
+        self.question_ft = self.env['survey.question'].with_user(self.survey_manager).create({
+            'title': 'Test Free Text',
+            'survey_id': self.survey.id,
+            'sequence': 2,
+            'question_type': 'text_box',
+        })
+        self.question_num = self.env['survey.question'].with_user(self.survey_manager).create({
+            'title': 'Test NUmerical Box',
+            'survey_id': self.survey.id,
+            'sequence': 3,
+            'question_type': 'numerical_box',
+        })

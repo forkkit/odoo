@@ -45,7 +45,7 @@ class SMSComposer(models.TransientModel):
             trace_values['ignored'] = fields.Datetime.now()
         else:
             if self.mass_sms_allow_unsubscribe:
-                sms_values['body'] = '%s\n%s' % (sms_values['body'] or '', _('STOP SMS : %s') % self._get_unsubscribe_url(record.id, trace_code, sms_values['number']))
+                sms_values['body'] = '%s\n%s' % (sms_values['body'] or '', _('STOP SMS : %s', self._get_unsubscribe_url(record.id, trace_code, sms_values['number'])))
         return trace_values
 
     def _get_blacklist_record_ids(self, records, recipients_info):
@@ -70,7 +70,7 @@ class SMSComposer(models.TransientModel):
         if self.mailing_id:
             tracker_values = self.mailing_id._get_link_tracker_values()
             for sms_id, body in all_bodies.items():
-                body = self.env['link.tracker'].sudo()._convert_links_text(body, tracker_values)
+                body = self.env['mail.render.mixin'].sudo()._shorten_links_text(body, tracker_values)
                 all_bodies[sms_id] = body
         return all_bodies
 

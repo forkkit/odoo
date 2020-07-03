@@ -6,6 +6,8 @@ var rpc = require('web.rpc');
 var WysiwygMultizone = require('web_editor.wysiwyg.multizone');
 var options = require('web_editor.snippets.options');
 var wUtils = require('website.utils');
+
+const qweb = core.qweb;
 var _t = core._t;
 
 
@@ -36,6 +38,12 @@ options.registry.mailing_list_subscribe = options.Class.extend({
                     context: self.options.recordInfo.context,
                 }).then(function (data) {
                     $(dialog).find('.btn-primary').prop('disabled', !data.length);
+                    var list_id = self.$target.attr("data-list-id");
+                    $(dialog).on('show.bs.modal', function () {
+                        if (list_id !== "0"){
+                            $(dialog).find('select').val(list_id);
+                        };
+                    });
                     return data;
                 });
             },
@@ -57,6 +65,39 @@ options.registry.mailing_list_subscribe = options.Class.extend({
     },
 });
 
+options.registry.recaptchaSubscribe = options.Class.extend({
+    xmlDependencies: ['/google_recaptcha/static/src/xml/recaptcha.xml'],
+
+    /**
+     * Toggle the recaptcha legal terms
+     */
+    toggleRecaptchaLegal: function (previewMode, value, params) {
+        const recaptchaLegalEl = this.$target[0].querySelector('.o_recaptcha_legal_terms');
+        if (recaptchaLegalEl) {
+            recaptchaLegalEl.remove();
+        } else {
+            const template = document.createElement('template');
+            template.innerHTML = qweb.render("google_recaptcha.recaptcha_legal_terms");
+            this.$target[0].appendChild(template.content.firstElementChild);
+        }
+    },
+
+    //----------------------------------------------------------------------
+    // Private
+    //----------------------------------------------------------------------
+
+    /**
+     * @override
+     */
+    _computeWidgetState: function (methodName, params) {
+        switch (methodName) {
+            case 'toggleRecaptchaLegal':
+                return !this.$target[0].querySelector('.o_recaptcha_legal_terms') || '';
+        }
+        return this._super(...arguments);
+    },
+});
+
 options.registry.newsletter_popup = options.registry.mailing_list_subscribe.extend({
     popup_template_id: "editor_new_mailing_list_subscribe_popup",
     popup_title: _t("Add a Newsletter Subscribe Popup"),
@@ -65,18 +106,28 @@ options.registry.newsletter_popup = options.registry.mailing_list_subscribe.exte
      * @override
      */
     start: function () {
-        var self = this;
-        this.$target.on('click.newsletter_popup_option', '.o_edit_popup', function (ev) {
-            // So that the snippet is not enabled again by the editor
-            ev.stopPropagation();
-            self.$target.data('quick-open', true);
-            self._refreshPublicWidgets();
+        this.$target.on('hidden.bs.modal.newsletter_popup_option', () => {
+            this.trigger_up('snippet_option_visibility_update', {show: false});
         });
-        this.$target.on('shown.bs.modal.newsletter_popup_option hide.bs.modal.newsletter_popup_option', function () {
-            self.$target.closest('.o_editable').trigger('content_changed');
-            self.trigger_up('deactivate_snippet');
-        });
-        return this._super.apply(this, arguments);
+        return this._super(...arguments);
+    },
+    /**
+     * @override
+     */
+    onTargetShow: function () {
+        // Open the modal
+        this.$target.data('quick-open', true);
+        return this._refreshPublicWidgets();
+    },
+    /**
+     * @override
+     */
+    onTargetHide: function () {
+        // Close the modal
+        const $modal = this.$('.modal');
+        if ($modal.length && $modal.is('.modal_shown')) {
+            $modal.modal('hide');
+        }
     },
     /**
      * @override
@@ -114,7 +165,7 @@ options.registry.newsletter_popup = options.registry.mailing_list_subscribe.exte
         return this._super.apply(this, arguments).then(function () {
             self.$target.data('quick-open', true);
             self.$target.removeData('content');
-            self._refreshPublicWidgets();
+            return self._refreshPublicWidgets();
         });
     },
 });

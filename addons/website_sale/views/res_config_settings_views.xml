@@ -25,7 +25,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-12 col-lg-6 o_setting_box">
+                    <div class="col-12 col-lg-6 o_setting_box" id="prompt_optional_products">
                         <div class="o_setting_left_pane">
                             <field name="module_sale_product_configurator" string="Optional Products"/>
                         </div>
@@ -146,9 +146,11 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-12 col-lg-6 o_setting_box" title="Boost your sales with two kinds of discount programs: promotions and coupon codes. Specific conditions can be set (products, customers, minimum purchase amount, period). Rewards can be discounts (% or amount) or free products.">
+                    <div class="col-12 col-lg-6 o_setting_box"
+                        id="promotion_coupon_programs"
+                        title="Boost your sales with two kinds of discount programs: promotions and coupon codes. Specific conditions can be set (products, customers, minimum purchase amount, period). Rewards can be discounts (% or amount) or free products.">
                         <div class="o_setting_left_pane">
-                            <field name="module_sale_coupon" widget="upgrade_boolean"/>
+                            <field name="module_sale_coupon" />
                         </div>
                         <div class="o_setting_right_pane">
                             <label for="module_sale_coupon"/>
@@ -268,7 +270,9 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-12 col-lg-6 o_setting_box" attrs="{'invisible': [('default_invoice_policy', '=', 'delivery')]}">
+                        <div class="col-12 col-lg-6 o_setting_box"
+                            id="automatic_invoice_generation"
+                            attrs="{'invisible': [('default_invoice_policy', '=', 'delivery')]}">
                             <div class="o_setting_left_pane">
                                 <field name="automatic_invoice" nolabel="1"/>
                             </div>
@@ -290,10 +294,10 @@
                 <div class="row mt16 o_settings_container" id="sale_checkout_settings">
                     <div class="col-12 col-lg-6 o_setting_box" id="checkout_assignation_setting">
                         <div class="o_setting_right_pane">
-                            <span class="o_form_label">Assignation</span>
+                            <span class="o_form_label">Assignment</span>
                             <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
                             <div class="text-muted">
-                                Assignation of online orders
+                                Assignment of online orders
                             </div>
                             <div class="content-group">
                                 <div class="row mt16">

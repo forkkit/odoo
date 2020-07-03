@@ -13,8 +13,10 @@ class AccountJournal(models.Model):
     _inherit = 'account.journal'
 
     # creation of bank journals by giving the account number, allow craetion of the
-    l10n_ch_postal = fields.Char(related='bank_account_id.l10n_ch_postal', readonly=False)
-    invoice_reference_model = fields.Selection(selection_add=[('ch', 'Switzerland')])
+    l10n_ch_postal = fields.Char('Client Number', related='bank_account_id.l10n_ch_postal', readonly=False)
+    invoice_reference_model = fields.Selection(selection_add=[
+        ('ch', 'Switzerland')
+    ], ondelete={'ch': lambda recs: recs.write({'invoice_reference_model': 'odoo'})})
 
     @api.model
     def create(self, vals):
@@ -30,7 +32,7 @@ class AccountJournal(models.Model):
 
         # The call to super() creates the related bank_account_id field if necessary
         if 'l10n_ch_postal' in vals:
-            for record in self:
+            for record in self.filtered('bank_account_id'):
                 record.bank_account_id.l10n_ch_postal = vals['l10n_ch_postal']
         return rslt
 

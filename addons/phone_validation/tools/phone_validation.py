@@ -17,12 +17,12 @@ try:
         try:
             phone_nbr = phonenumbers.parse(number, region=country_code, keep_raw_input=True)
         except phonenumbers.phonenumberutil.NumberParseException as e:
-            raise UserError(_('Unable to parse %s: %s') % (number, str(e)))
+            raise UserError(_('Unable to parse %(phone)s: %(error)s', phone=number, error=str(e)))
 
         if not phonenumbers.is_possible_number(phone_nbr):
-            raise UserError(_('Impossible number %s: probably invalid number of digits') % number)
+            raise UserError(_('Impossible number %s: probably invalid number of digits.', number))
         if not phonenumbers.is_valid_number(phone_nbr):
-            raise UserError(_('Invalid number %s: probably incorrect prefix') % number)
+            raise UserError(_('Invalid number %s: probably incorrect prefix.', number))
 
         return phone_nbr
 
@@ -48,7 +48,7 @@ try:
             if raise_exception:
                 raise
             else:
-                _logger.warning(_('Unable to format %s:\n%s'), number, e)
+                _logger.warning('Unable to format phone number %s:\n%s', number, e)
                 return number
         if force_format == 'E164':
             phone_fmt = phonenumbers.PhoneNumberFormat.E164
@@ -68,7 +68,7 @@ except ImportError:
     def phone_format(number, country_code, country_phone_code, force_format='INTERNATIONAL', raise_exception=True):
         global _phonenumbers_lib_warning
         if not _phonenumbers_lib_warning:
-            _logger.warning(
+            _logger.info(
                 "The `phonenumbers` Python module is not installed, contact numbers will not be "
                 "verified. Please install the `phonenumbers` Python module."
             )

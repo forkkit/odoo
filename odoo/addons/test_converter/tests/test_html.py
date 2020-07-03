@@ -3,6 +3,7 @@
 import base64
 import datetime
 import os
+import re
 
 from odoo.tests import common
 from odoo.tools import html_escape as e
@@ -37,7 +38,14 @@ class TestExport(common.TransactionCase):
         def converter(value, options=None, context=None):
             context = context or {}
             record = self.Model.with_context(context).new({name: value})
-            return model.with_context(context).record_to_html(record, name, options or {})
+            # normalise non-newline spaces: some versions of babel use regular
+            # spaces while others use non-break space when formatting timedeltas
+            # to the french locale
+            return re.sub(
+                r'[^\S\n\r]', # no \p{Zs}
+                ' ',
+                model.with_context(context).record_to_html(record, name, options or {})
+            )
         return converter
 
 
@@ -291,7 +299,7 @@ class TestDurationExport(TestBasicExport):
     def setUp(self):
         super(TestDurationExport, self).setUp()
         # needs to have lang installed otherwise falls back on en_US
-        self.env['res.lang'].load_lang('fr_FR')
+        self.env['res.lang']._activate_lang('fr_FR')
 
     def test_default_unit(self):
         converter = self.get_converter('float', 'duration')
@@ -332,7 +340,7 @@ class TestRelativeDatetime(TestBasicExport):
     def setUp(self):
         super(TestRelativeDatetime, self).setUp()
         # needs to have lang installed otherwise falls back on en_US
-        self.env['res.lang'].load_lang('fr_FR')
+        self.env['res.lang']._activate_lang('fr_FR')
 
     def test_basic(self):
         converter = self.get_converter('datetime', 'relative')

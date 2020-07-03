@@ -2,23 +2,20 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from datetime import datetime
-from odoo.tests import common, Form, tagged
-
+from odoo.tests import Form, tagged
+from odoo.addons.account.tests.common import AccountTestCommon
 
 @tagged('post_install', '-at_install')
-class TestPurchaseOrderReport(common.TransactionCase):
-    def setUp(self):
-        super(TestPurchaseOrderReport, self).setUp()
+class TestPurchaseOrderReport(AccountTestCommon):
 
-        self.partner_id = self.env.ref('base.res_partner_1')
-        self.product1 = self.env.ref('product.product_product_8')
-        self.product2 = self.env.ref('product.product_product_11')
-        self.PurchaseReport = self.env['purchase.report']
-
-        # Create a new company and set CoA
-        self.company_id = self.env['res.company'].create({'name': 'new_company'})
-        self.env.user.company_id = self.company_id
-        self.env.ref('l10n_generic_coa.configurable_chart_template').try_loading()
+    @classmethod
+    def setUpClass(cls):
+        super(TestPurchaseOrderReport, cls).setUpClass()
+        cls.partner_id = cls.env['res.partner'].create({'name': 'A Partner'})
+        cls.product1 = cls.env['product.product'].create({'name': 'A First Product'})
+        cls.product2 = cls.env['product.product'].create({'name': 'A Second Product'})
+        cls.PurchaseReport = cls.env['purchase.report']
+        cls.company_id = cls.env.ref('base.main_company')
 
     def test_00_purchase_order_report(self):
         uom_dozen = self.env.ref('uom.product_uom_dozen')
@@ -43,6 +40,7 @@ class TestPurchaseOrderReport(common.TransactionCase):
                     'product_uom': uom_dozen.id,
                     'price_unit': 100.0,
                     'date_planned': datetime.today(),
+                    'taxes_id': False,
                 }),
                 (0, 0, {
                     'name': self.product2.name,
@@ -51,12 +49,13 @@ class TestPurchaseOrderReport(common.TransactionCase):
                     'product_uom': uom_dozen.id,
                     'price_unit': 200.0,
                     'date_planned': datetime.today(),
+                    'taxes_id': False,
                 }),
             ],
         })
         po.button_confirm()
 
-        f = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        f = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         f.partner_id = po.partner_id
         f.purchase_id = po
         invoice = f.save()

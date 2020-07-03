@@ -5,6 +5,7 @@ from lxml import etree
 from lxml.html import builder as html
 
 from odoo import _, api, fields, models
+from odoo.exceptions import UserError
 
 
 class Invite(models.TransientModel):
@@ -47,7 +48,9 @@ class Invite(models.TransientModel):
     send_mail = fields.Boolean('Send Email', default=True, help="If checked, the partners will receive an email warning they have been added in the document's followers.")
 
     def add_followers(self):
-        email_from = self.env['mail.message']._get_default_from()
+        if not self.env.user.email:
+            raise UserError(_("Unable to post message, please configure the sender's email address."))
+        email_from = self.env.user.email_formatted
         for wizard in self:
             Model = self.env[wizard.res_model]
             document = Model.browse(wizard.res_id)
@@ -61,7 +64,7 @@ class Invite(models.TransientModel):
             # send an email if option checked and if a message exists (do not send void emails)
             if wizard.send_mail and wizard.message and not wizard.message == '<br>':  # when deleting the message, cleditor keeps a <br>
                 message = self.env['mail.message'].create({
-                    'subject': _('Invitation to follow %s: %s') % (model_name, document.display_name),
+                    'subject': _('Invitation to follow %(document_model)s: %(document_name)s', document_model=model_name, document_name=document.display_name),
                     'body': wizard.message,
                     'record_name': document.display_name,
                     'email_from': email_from,
@@ -83,5 +86,11 @@ class Invite(models.TransientModel):
                         partners_data.append(dict(pdata, type='customer'))
 
                 document._notify_record_by_email(message, {'partners': partners_data, 'channels': []}, send_after_commit=False)
+                # in case of failure, the web client must know the message was
+                # deleted to discard the related failure notification
+                self.env['bus.bus'].sendone(
+                    (self._cr.dbname, 'res.partner', self.env.user.partner_id.id),
+                    {'type': 'deletion', 'message_ids': message.ids}
+                )
                 message.unlink()
         return {'type': 'ir.actions.act_window_close'}

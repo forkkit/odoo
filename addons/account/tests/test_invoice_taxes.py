@@ -1,22 +1,25 @@
 # -*- coding: utf-8 -*-
-from odoo.addons.account.tests.account_test_classes import AccountingTestCase
-from odoo.tests.common import Form
+
+from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 from odoo.tests import tagged
 
 
 @tagged('post_install', '-at_install')
-class TestInvoiceTaxes(AccountingTestCase):
+class TestInvoiceTaxes(AccountTestInvoicingCommon):
 
-    def setUp(self):
-        super(TestInvoiceTaxes, self).setUp()
+    @classmethod
+    def setUpClass(cls, chart_template_ref=None):
+        super().setUpClass(chart_template_ref=chart_template_ref)
 
-        self.percent_tax_1 = self.env['account.tax'].create({
+        cls.company_data['company'].country_id = cls.env.ref('base.us')
+
+        cls.percent_tax_1 = cls.env['account.tax'].create({
             'name': '21%',
             'amount_type': 'percent',
             'amount': 21,
             'sequence': 10,
         })
-        self.percent_tax_1_incl = self.env['account.tax'].create({
+        cls.percent_tax_1_incl = cls.env['account.tax'].create({
             'name': '21% incl',
             'amount_type': 'percent',
             'amount': 21,
@@ -24,19 +27,19 @@ class TestInvoiceTaxes(AccountingTestCase):
             'include_base_amount': True,
             'sequence': 20,
         })
-        self.percent_tax_2 = self.env['account.tax'].create({
+        cls.percent_tax_2 = cls.env['account.tax'].create({
             'name': '12%',
             'amount_type': 'percent',
             'amount': 12,
             'sequence': 30,
         })
-        self.group_tax = self.env['account.tax'].create({
+        cls.group_tax = cls.env['account.tax'].create({
             'name': 'group 12% + 21%',
             'amount_type': 'group',
             'amount': 21,
             'children_tax_ids': [
-                (4, self.percent_tax_1_incl.id),
-                (4, self.percent_tax_2.id)
+                (4, cls.percent_tax_1_incl.id),
+                (4, cls.percent_tax_2.id)
             ],
             'sequence': 40,
         })
@@ -46,19 +49,16 @@ class TestInvoiceTaxes(AccountingTestCase):
 
         :param taxes_per_line: A list of tuple (price_unit, account.tax recordset)
         '''
-        self_ctx = self.env['account.move'].with_context(default_type=inv_type)
-        invoice_form = Form(self_ctx)
-        invoice_form.partner_id = self.env.ref('base.partner_demo')
-
-        for amount, taxes in taxes_per_line:
-            with invoice_form.invoice_line_ids.new() as invoice_line_form:
-                invoice_line_form.name = 'xxxx'
-                invoice_line_form.quantity = 1
-                invoice_line_form.price_unit = amount
-                invoice_line_form.tax_ids.clear()
-                for tax in taxes:
-                    invoice_line_form.tax_ids.add(tax)
-        return invoice_form.save()
+        return self.env['account.move'].create({
+            'move_type': inv_type,
+            'partner_id': self.partner_a.id,
+            'invoice_line_ids': [(0, 0, {
+                'name': 'xxxx',
+                'quantity': 1,
+                'price_unit': amount,
+                'tax_ids': [(6, 0, taxes.ids)],
+            }) for amount, taxes in taxes_per_line],
+        })
 
     def test_one_tax_per_line(self):
         ''' Test:
@@ -139,6 +139,7 @@ class TestInvoiceTaxes(AccountingTestCase):
         return self.env['account.account.tag'].create({
             'name': tag_name,
             'applicability': 'taxes',
+            'country_id': self.company_data['company'].country_id.id,
         })
 
     def test_tax_repartition(self):
@@ -208,13 +209,13 @@ class TestInvoiceTaxes(AccountingTestCase):
         inv_base_line = invoice.line_ids.filtered(lambda x: not x.tax_repartition_line_id and x.account_id.user_type_id.type != 'receivable')
         self.assertEqual(len(inv_base_line), 1, "There should be only one base line generated")
         self.assertEqual(abs(inv_base_line.balance), 100, "Base amount should be 100")
-        self.assertEqual(inv_base_line.tag_ids, inv_base_tag, "Base line should have received base tag")
+        self.assertEqual(inv_base_line.tax_tag_ids, inv_base_tag, "Base line should have received base tag")
         inv_tax_lines = invoice.line_ids.filtered(lambda x: x.tax_repartition_line_id.repartition_type == 'tax')
         self.assertEqual(len(inv_tax_lines), 2, "There should be two tax lines, one for each repartition line.")
         self.assertEqual(abs(inv_tax_lines.filtered(lambda x: x.account_id == account_1).balance), 4.2, "Tax line on account 1 should amount to 4.2 (10% of 42)")
-        self.assertEqual(inv_tax_lines.filtered(lambda x: x.account_id == account_1).tag_ids, inv_tax_tag_10, "Tax line on account 1 should have 10% tag")
+        self.assertEqual(inv_tax_lines.filtered(lambda x: x.account_id == account_1).tax_tag_ids, inv_tax_tag_10, "Tax line on account 1 should have 10% tag")
         self.assertAlmostEqual(abs(inv_tax_lines.filtered(lambda x: x.account_id == account_2).balance), 37.8, 2, "Tax line on account 2 should amount to 37.8 (90% of 42)")
-        self.assertEqual(inv_tax_lines.filtered(lambda x: x.account_id == account_2).tag_ids, inv_tax_tag_90, "Tax line on account 2 should have 90% tag")
+        self.assertEqual(inv_tax_lines.filtered(lambda x: x.account_id == account_2).tax_tag_ids, inv_tax_tag_90, "Tax line on account 2 should have 90% tag")
 
         # Test refund repartition
         refund = self._create_invoice([(100, tax)], inv_type='out_refund')
@@ -224,9 +225,9 @@ class TestInvoiceTaxes(AccountingTestCase):
         ref_base_line = refund.line_ids.filtered(lambda x: not x.tax_repartition_line_id and x.account_id.user_type_id.type != 'receivable')
         self.assertEqual(len(ref_base_line), 1, "There should be only one base line generated")
         self.assertEqual(abs(ref_base_line.balance), 100, "Base amount should be 100")
-        self.assertEqual(ref_base_line.tag_ids, ref_base_tag, "Base line should have received base tag")
+        self.assertEqual(ref_base_line.tax_tag_ids, ref_base_tag, "Base line should have received base tag")
         ref_tax_lines = refund.line_ids.filtered(lambda x: x.tax_repartition_line_id.repartition_type == 'tax')
         self.assertEqual(len(ref_tax_lines), 2, "There should be two refund tax lines")
         self.assertEqual(abs(ref_tax_lines.filtered(lambda x: x.account_id == ref_base_line.account_id).balance), 4.2, "Refund tax line on base account should amount to 4.2 (10% of 42)")
         self.assertAlmostEqual(abs(ref_tax_lines.filtered(lambda x: x.account_id == account_1).balance), 37.8, 2, "Refund tax line on account 1 should amount to 37.8 (90% of 42)")
-        self.assertEqual(ref_tax_lines.mapped('tag_ids'), ref_tax_tag, "Refund tax lines should have the right tag")
+        self.assertEqual(ref_tax_lines.mapped('tax_tag_ids'), ref_tax_tag, "Refund tax lines should have the right tag")

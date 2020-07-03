@@ -41,7 +41,7 @@
     <t t-name="website.slide.upload.modal.uploading">
         <div class="text-center" aria-hidden="true" role="status">
             <div class="fa-3x">
-                <i class="fas fa-spinner fa-pulse"></i>
+                <i class="fa fa-spinner fa-pulse"></i>
             </div>
             <h4>Uploading document ...</h4>
         </div>
@@ -73,7 +73,7 @@
         <div class="form-group">
             <label for="duration" class="col-form-label">Duration</label>
             <div class="input-group">
-                <input type="number" id="duration" name="duration" placeholder="Estimated slide completion time" class="form-control"/>
+                <input type="number" id="duration" min="0" name="duration" placeholder="Estimated slide completion time" class="form-control"/>
                     <div class="input-group-prepend">
                     <span class="input-group-text">Minutes</span>
                 </div>

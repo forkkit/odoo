@@ -126,7 +126,7 @@ odoo_mailgate: "|/path/to/odoo-mailgate.py --host=localhost -u %(uid)d -p PASSWO
                 server.write({'state': 'done'})
             except Exception as err:
                 _logger.info("Failed to connect to %s server %s.", server.server_type, server.name, exc_info=True)
-                raise UserError(_("Connection test failed: %s") % tools.ustr(err))
+                raise UserError(_("Connection test failed: %s", tools.ustr(err)))
             finally:
                 try:
                     if connection:
@@ -153,7 +153,6 @@ odoo_mailgate: "|/path/to/odoo-mailgate.py --host=localhost -u %(uid)d -p PASSWO
         for server in self:
             _logger.info('start checking for new emails on %s server %s', server.server_type, server.name)
             additionnal_context['default_fetchmail_server_id'] = server.id
-            additionnal_context['server_type'] = server.server_type
             count, failed = 0, 0
             imap_server = None
             pop_server = None

@@ -2,7 +2,7 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from . import common
-from odoo.exceptions import except_orm
+from odoo.exceptions import UserError
 from odoo.tests import Form
 
 
@@ -10,6 +10,7 @@ class TestWarehouse(common.TestMrpCommon):
     def setUp(self):
         super(TestWarehouse, self).setUp()
 
+        unit = self.env.ref("uom.product_uom_unit")
         self.stock_location = self.env.ref('stock.stock_location_stock')
         self.depot_location = self.env['stock.location'].create({
             'name': 'Depot',
@@ -21,22 +22,35 @@ class TestWarehouse(common.TestMrpCommon):
             "location_out_id": self.depot_location.id,
             'category_id': self.env.ref('product.product_category_all').id,
         })
-
-        self.laptop = self.env.ref("product.product_product_25")
-        graphics_card = self.env.ref("product.product_product_24")
-        unit = self.env.ref("uom.product_uom_unit")
-        mrp_routing = self.env.ref("mrp.mrp_routing_0")
+        mrp_workcenter = self.env['mrp.workcenter'].create({
+            'name': 'Assembly Line 1',
+            'resource_calendar_id': self.env.ref('resource.resource_calendar_std').id,
+        })
+        inventory = self.env['stock.inventory'].create({
+            'name': 'Initial inventory',
+            'line_ids': [(0, 0, {
+                'product_id': self.graphics_card.id,
+                'product_uom_id': self.graphics_card.uom_id.id,
+                'product_qty': 16.0,
+                'location_id': self.stock_location_14.id,
+            })]
+        })
+        inventory.action_start()
+        inventory.action_validate()
 
         self.bom_laptop = self.env['mrp.bom'].create({
             'product_tmpl_id': self.laptop.product_tmpl_id.id,
             'product_qty': 1,
             'product_uom_id': unit.id,
+            'consumption': 'flexible',
             'bom_line_ids': [(0, 0, {
-                'product_id': graphics_card.id,
+                'product_id': self.graphics_card.id,
                 'product_qty': 1,
                 'product_uom_id': unit.id
             })],
-            'routing_id': mrp_routing.id
+            'operation_ids': [
+                (0, 0, {'name': 'Cutting Machine', 'workcenter_id': self.workcenter_1.id, 'time_cycle': 12, 'sequence': 1}),
+            ],
         })
 
     def new_mo_laptop(self):
@@ -102,14 +116,14 @@ class TestWarehouse(common.TestMrpCommon):
             'name': 'Stock Inventory for Stick',
             'product_ids': [(4, self.product_4.id)],
             'line_ids': [
-                (0, 0, {'product_id': self.product_4.id, 'product_uom_id': self.product_4.uom_id.id, 'product_qty': 8, 'prod_lot_id': lot_product_4.id, 'location_id': self.ref('stock.stock_location_14')}),
+                (0, 0, {'product_id': self.product_4.id, 'product_uom_id': self.product_4.uom_id.id, 'product_qty': 8, 'prod_lot_id': lot_product_4.id, 'location_id': self.stock_location_14.id}),
             ]})
 
         stock_inv_product_2 = self.env['stock.inventory'].create({
             'name': 'Stock Inventory for Stone Tools',
             'product_ids': [(4, self.product_2.id)],
             'line_ids': [
-                (0, 0, {'product_id': self.product_2.id, 'product_uom_id': self.product_2.uom_id.id, 'product_qty': 12, 'prod_lot_id': lot_product_2.id, 'location_id': self.ref('stock.stock_location_14')})
+                (0, 0, {'product_id': self.product_2.id, 'product_uom_id': self.product_2.uom_id.id, 'product_qty': 12, 'prod_lot_id': lot_product_2.id, 'location_id': self.stock_location_14.id})
             ]})
         (stock_inv_product_4 | stock_inv_product_2)._action_start()
         stock_inv_product_2.action_validate()
@@ -132,7 +146,7 @@ class TestWarehouse(common.TestMrpCommon):
 
         # Scrap Product Wood without lot to check assert raise ?.
         scrap_id = self.env['stock.scrap'].with_context(active_model='mrp.production', active_id=production_3.id).create({'product_id': self.product_2.id, 'scrap_qty': 1.0, 'product_uom_id': self.product_2.uom_id.id, 'location_id': location_id, 'production_id': production_3.id})
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             scrap_id.do_scrap()
 
         # Scrap Product Wood with lot.
@@ -144,47 +158,6 @@ class TestWarehouse(common.TestMrpCommon):
 #        scrap_move = production_3.move_raw_ids.filtered(lambda x: x.product_id == self.product_2 and x.scrapped)
 #        self.assertTrue(scrap_move, "There are no any scrap move created for production order.")
 
-    def test_putaway_after_manufacturing_1(self):
-        """ This test checks a manufactured product without tracking will go to
-        location defined in putaway strategy.
-        """
-        mo_laptop = self.new_mo_laptop()
-
-        mo_laptop.button_plan()
-        workorder = mo_laptop.workorder_ids[0]
-
-        workorder.button_start()
-        workorder.record_production()
-        mo_laptop.button_mark_done()
-
-        # We check if the laptop go in the depot and not in the stock
-        move = mo_laptop.move_finished_ids
-        location_dest = move.move_line_ids.location_dest_id
-        self.assertEqual(location_dest.id, self.depot_location.id)
-        self.assertNotEqual(location_dest.id, self.stock_location.id)
-
-    def test_putaway_after_manufacturing_2(self):
-        """ This test checks a tracked manufactured product will go to location
-        defined in putaway strategy.
-        """
-        self.laptop.tracking = 'serial'
-        mo_laptop = self.new_mo_laptop()
-
-        mo_laptop.button_plan()
-        workorder = mo_laptop.workorder_ids[0]
-
-        workorder.button_start()
-        serial = self.env['stock.production.lot'].create({'product_id': self.laptop.id, 'company_id': self.env.company.id})
-        workorder.finished_lot_id = serial
-        workorder.record_production()
-        mo_laptop.button_mark_done()
-
-        # We check if the laptop go in the depot and not in the stock
-        move = mo_laptop.move_finished_ids
-        location_dest = move.move_line_ids.location_dest_id
-        self.assertEqual(location_dest.id, self.depot_location.id)
-        self.assertNotEqual(location_dest.id, self.stock_location.id)
-
     def test_putaway_after_manufacturing_3(self):
         """ This test checks a tracked manufactured product will go to location
         defined in putaway strategy when the production is recorded with
@@ -194,14 +167,10 @@ class TestWarehouse(common.TestMrpCommon):
         mo_laptop = self.new_mo_laptop()
         serial = self.env['stock.production.lot'].create({'product_id': self.laptop.id, 'company_id': self.env.company.id})
 
-        product_produce = self.env['mrp.product.produce'].with_context({
-            'active_id': mo_laptop.id,
-            'active_ids': [mo_laptop.id],
-        }).create({
-            "qty_producing": 1.0,
-            "finished_lot_id": serial.id,
-        })
-        product_produce.do_produce()
+        mo_form = Form(mo_laptop)
+        mo_form.qty_producing = 1
+        mo_form.lot_producing_id = serial
+        mo_laptop = mo_form.save()
         mo_laptop.button_mark_done()
 
         # We check if the laptop go in the depot and not in the stock

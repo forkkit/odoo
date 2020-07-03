@@ -18,7 +18,7 @@ class TestProgramWithCodeOperations(TestSaleCouponCommon):
         # In this case, it will generate the coupon for every partner.
         # Thus, we should ensure that if you leave the domain untouched, it generates a coupon for each partner
         # as hinted on the screen ('Match all records (X records)')
-        self.env['sale.coupon.generate'].with_context(active_id=self.code_promotion_program.id).create({
+        self.env['coupon.generate.wizard'].with_context(active_id=self.code_promotion_program.id).create({
             'generation_type': 'nbr_customer',
         }).generate_coupon()
         self.assertEqual(len(self.code_promotion_program.coupon_ids), len(self.env['res.partner'].search([])), "It should have generated a coupon for every partner")
@@ -28,7 +28,7 @@ class TestProgramWithCodeOperations(TestSaleCouponCommon):
 
         self.code_promotion_program.reward_type = 'discount'
 
-        self.env['sale.coupon.generate'].with_context(active_id=self.code_promotion_program.id).create({
+        self.env['coupon.generate.wizard'].with_context(active_id=self.code_promotion_program.id).create({
             'generation_type': 'nbr_customer',
             'partners_domain': "[('id', 'in', [%s])]" % (self.steve.id),
         }).generate_coupon()
@@ -36,7 +36,7 @@ class TestProgramWithCodeOperations(TestSaleCouponCommon):
 
         # Test the valid code on a wrong sales order
         wrong_partner_order = self.env['sale.order'].create({
-            'partner_id': self.env.ref('base.res_partner_1').id,
+            'partner_id': self.env['res.partner'].create({'name': 'My Partner'}).id,
         })
         with self.assertRaises(UserError):
             self.env['sale.coupon.apply.code'].with_context(active_id=wrong_partner_order.id).create({
@@ -69,7 +69,7 @@ class TestProgramWithCodeOperations(TestSaleCouponCommon):
     def test_coupon_code_with_pricelist(self):
         # Test case: Generate a coupon (10% discount) and apply it on an order with a specific pricelist (10% discount)
 
-        self.env['sale.coupon.generate'].with_context(active_id=self.code_promotion_program_with_discount.id).create({
+        self.env['coupon.generate.wizard'].with_context(active_id=self.code_promotion_program_with_discount.id).create({
             'generation_type': 'nbr_coupon',
             'nbr_coupons': 1,
         }).generate_coupon()
@@ -127,7 +127,7 @@ class TestProgramWithCodeOperations(TestSaleCouponCommon):
             'promo_code': 'free_B_on_next_order',
         })
         # 2.
-        self.p1 = self.env['sale.coupon.program'].create({
+        self.p1 = self.env['coupon.program'].create({
             'name': 'Code for 10% on next order',
             'discount_type': 'percentage',
             'discount_percentage': 10.0,
@@ -243,8 +243,3 @@ class TestProgramWithCodeOperations(TestSaleCouponCommon):
         self.assertEqual(len(order_bis.order_line), 2, "You should get 1 regular product_B and 1 free product_B")
         order_bis.recompute_coupon_lines()
         self.assertEqual(len(order_bis.order_line), 2, "Free product from a coupon generated from a promotion program on next order should not dissapear")
-
-def test_on_next_order_reward_promo_program(self):
-    # TODO: remove me in master, this was never executed due to bad indentation (the method is not indented under the class)
-    #       note that this flow did not worked and was not implemented.. now tested with `test_on_next_order_reward_promotion_program()`
-    pass

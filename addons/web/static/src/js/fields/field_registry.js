@@ -3,7 +3,16 @@ odoo.define('web.field_registry', function (require) {
 
 var Registry = require('web.Registry');
 
-return new Registry();
+var FieldRegistry = Registry.extend({
+    add: function (key, value, score) {
+        if (value.prototype instanceof owl.Component) {
+            throw new Error("This registry should not contain any Component. Use 'web.field_registry_owl' instead.");
+        }
+        return this._super(...arguments);
+    },
+});
+
+return new FieldRegistry();
 });
 
 odoo.define('web._field_registry', function (require) {
@@ -25,6 +34,7 @@ registry
     .add('date', basic_fields.FieldDate)
     .add('datetime', basic_fields.FieldDateTime)
     .add('daterange', basic_fields.FieldDateRange)
+    .add('remaining_days', basic_fields.RemainingDays)
     .add('domain', basic_fields.FieldDomain)
     .add('text', basic_fields.FieldText)
     .add('list.text', basic_fields.ListFieldText)
@@ -61,7 +71,9 @@ registry
     .add('toggle_button', basic_fields.FieldToggleBoolean)
     .add('dashboard_graph', basic_fields.JournalDashboardGraph)
     .add('ace', basic_fields.AceEditor)
-    .add('color', basic_fields.FieldColor);
+    .add('color', basic_fields.FieldColor)
+    .add('many2one_reference', basic_fields.FieldInteger)
+    .add('color_picker', basic_fields.FieldColorPicker);
 
 // Relational fields
 registry
@@ -72,6 +84,7 @@ registry
     .add('many2one_barcode', relational_fields.Many2oneBarcode)
     .add('list.many2one', relational_fields.ListFieldMany2One)
     .add('kanban.many2one', relational_fields.KanbanFieldMany2One)
+    .add('many2one_avatar', relational_fields.Many2OneAvatar)
     .add('many2many', relational_fields.FieldMany2Many)
     .add('many2many_binary', relational_fields.FieldMany2ManyBinaryMultiFiles)
     .add('many2many_tags', relational_fields.FieldMany2ManyTags)

@@ -1,7 +1,7 @@
 odoo.define('web_editor.rte', function (require) {
 'use strict';
 
-var base = require('web_editor.base');
+var fonts = require('wysiwyg.fonts');
 var concurrency = require('web.concurrency');
 var core = require('web.core');
 var Widget = require('web.Widget');
@@ -44,7 +44,16 @@ var History = function History($editable) {
         }
 
         $editable.trigger('content_will_be_destroyed');
-        $editable.html(oSnap.contents).scrollTop(oSnap.scrollTop);
+        var $tempDiv = $('<div/>', {html: oSnap.contents});
+        _.each($tempDiv.find('.o_temp_auto_element'), function (el) {
+            var $el = $(el);
+            var originalContent = $el.attr('data-temp-auto-element-original-content');
+            if (originalContent) {
+                $el.after(originalContent);
+            }
+            $el.remove();
+        });
+        $editable.html($tempDiv.html()).scrollTop(oSnap.scrollTop);
         $editable.trigger('content_was_recreated');
 
         $('.oe_overlay').remove();
@@ -262,7 +271,7 @@ var RTEWidget = Widget.extend({
         this._getConfig = params && params.getConfig || this._getDefaultConfig;
         this._saveElement = params && params.saveElement || this._saveElement;
 
-        base.computeFonts();
+        fonts.computeFonts();
     },
     /**
      * @override
@@ -423,6 +432,10 @@ var RTEWidget = Widget.extend({
      * @param {boolean} internal_history
      */
     historyRecordUndo: function ($target, event, internal_history) {
+        const initialActiveElement = document.activeElement;
+        const initialSelectionStart = initialActiveElement && initialActiveElement.selectionStart;
+        const initialSelectionEnd = initialActiveElement && initialActiveElement.selectionEnd;
+
         $target = $($target);
         var rng = range.create();
         var $editable = $(rng && rng.sc).closest('.o_editable');
@@ -442,6 +455,22 @@ var RTEWidget = Widget.extend({
             console.log('error', e);
         }
         history.recordUndo($editable, event, internal_history);
+
+        if (initialActiveElement && initialActiveElement !== document.activeElement) {
+            initialActiveElement.focus();
+            // Range inputs don't support selection
+            if (initialActiveElement.matches('input[type=range]')) {
+                return;
+            }
+            try {
+                initialActiveElement.selectionStart = initialSelectionStart;
+                initialActiveElement.selectionEnd = initialSelectionEnd;
+            } catch (e) {
+                // The active element might be of a type that
+                // does not support selection.
+                console.log('error', e);
+            }
+        }
     },
     /**
      * Searches all the dirty element on the page and saves them one by one. If
@@ -457,7 +486,7 @@ var RTEWidget = Widget.extend({
 
         $('.o_editable')
             .destroy()
-            .removeClass('o_editable o_is_inline_editable');
+            .removeClass('o_editable o_is_inline_editable o_editable_date_field_linked o_editable_date_field_format_changed');
 
         var $dirty = $('.o_dirty');
         $dirty
@@ -478,25 +507,18 @@ var RTEWidget = Widget.extend({
                 return self._saveElement($el, context || weContext.get())
                 .then(function () {
                     $el.removeClass('o_dirty');
-                }, function (response) {
+                }).guardedCatch(function (response) {
                     // because ckeditor regenerates all the dom, we can't just
                     // setup the popover here as everything will be destroyed by
                     // the DOM regeneration. Add markings instead, and returns a
                     // new rejection with all relevant info
                     var id = _.uniqueId('carlos_danger_');
                     $el.addClass('o_dirty oe_carlos_danger ' + id);
-                    var html = (response.data.exception_type === 'except_osv');
-                    if (html) {
-                        var msg = $('<div/>', {text: response.data.message}).html();
-                        var data = msg.substring(3, msg.length  -2).split(/', u'/);
-                        response.data.message = '<b>' + data[0] + '</b>' + data[1];
-                    }
                     $('.o_editable.' + id)
                         .removeClass(id)
                         .popover({
-                            html: html,
                             trigger: 'hover',
-                            content: response.data.message,
+                            content: response.message.data.message || '',
                             placement: 'auto top',
                         })
                         .popover('show');
@@ -506,7 +528,7 @@ var RTEWidget = Widget.extend({
 
         return Promise.all(defs).then(function () {
             window.onbeforeunload = null;
-        }, function (failed) {
+        }).guardedCatch(function (failed) {
             // If there were errors, re-enable edition
             self.cancel();
             self.start();
@@ -525,6 +547,17 @@ var RTEWidget = Widget.extend({
      * @param {jQuery} $editable
      */
     _enableEditableArea: function ($editable) {
+        if ($editable.data('oe-type') === "datetime" || $editable.data('oe-type') === "date") {
+            var selector = '[data-oe-id="' + $editable.data('oe-id') + '"]';
+            selector += '[data-oe-field="' + $editable.data('oe-field') + '"]';
+            selector += '[data-oe-model="' + $editable.data('oe-model') + '"]';
+            var $linkedFieldNodes = this.editable().find(selector).addBack(selector);
+            $linkedFieldNodes.not($editable).addClass('o_editable_date_field_linked');
+            if (!$editable.hasClass('o_editable_date_field_format_changed')) {
+                $linkedFieldNodes.html($editable.data('oe-original-with-format'));
+                $linkedFieldNodes.addClass('o_editable_date_field_format_changed');
+            }
+        }
         if ($editable.data('oe-type') === "monetary") {
             $editable.attr('contenteditable', false);
             $editable.find('.oe_currency_value').attr('contenteditable', true);
@@ -639,6 +672,9 @@ var RTEWidget = Widget.extend({
         var $target = $(ev.target);
         var $editable = $target.closest('.o_editable');
 
+        if (this && this.$last && this.$last.length && this.$last[0] !== $target[0]) {
+            $('.o_editable_date_field_linked').removeClass('o_editable_date_field_linked');
+        }
         if (!$editable.length || $.summernote.core.dom.isContentEditableFalse($target)) {
             return;
         }
@@ -656,6 +692,7 @@ var RTEWidget = Widget.extend({
              * Remove content editable everywhere and add it on the link only so that characters can be added
              * and removed at the start and at the end of it.
              */
+            let hasContentEditable = $target.attr('contenteditable');
             $target.attr('contenteditable', true);
             _.defer(function () {
                 $editable.not($target).attr('contenteditable', false);
@@ -665,7 +702,9 @@ var RTEWidget = Widget.extend({
             // Once clicked outside, remove contenteditable on link and reactive all
             $(document).on('mousedown.reactivate_contenteditable', function (e) {
                 if ($target.is(e.target)) return;
-                $target.removeAttr('contenteditable');
+                if (!hasContentEditable) {
+                    $target.removeAttr('contenteditable');
+                }
                 $editable.attr('contenteditable', true);
                 $(document).off('mousedown.reactivate_contenteditable');
             });
@@ -674,14 +713,21 @@ var RTEWidget = Widget.extend({
         if (this && this.$last && (!$editable.length || this.$last[0] !== $editable[0])) {
             var $destroy = this.$last;
             history.splitNext();
-
-            _.delay(function () {
+            // In some special cases, we need to clear the timeout.
+            var lastTimerId = _.delay(function () {
                 var id = $destroy.data('note-id');
                 $destroy.destroy().removeData('note-id').removeAttr('data-note-id');
                 $('#note-popover-'+id+', #note-handle-'+id+', #note-dialog-'+id+'').remove();
             }, 150); // setTimeout to remove flickering when change to editable zone (re-create an editor)
             this.$last = null;
+            // for modal dialogs (eg newsletter popup), when we close the dialog, the modal is
+            // destroyed immediately and so after the delayed execution due to timeout, dialog will
+            // not be available, leading to trace-back, so we need to clearTimeout for the dialogs.
+            if ($destroy.hasClass('modal-body')) {
+                clearTimeout(lastTimerId);
+            }
         }
+
         if ($editable.length && (!this.$last || this.$last[0] !== $editable[0])) {
             $editable.summernote(this._getConfig($editable));
 
@@ -751,6 +797,7 @@ return {
 odoo.define('web_editor.rte.summernote_custom_colors', function (require) {
 'use strict';
 
+// These colors are already normalized as per normalizeCSSColor in web.Colorpicker
 return [
     ['#000000', '#424242', '#636363', '#9C9C94', '#CEC6CE', '#EFEFEF', '#F7F7F7', '#FFFFFF'],
     ['#FF0000', '#FF9C00', '#FFFF00', '#00FF00', '#00FFFF', '#0000FF', '#9C00FF', '#FF00FF'],

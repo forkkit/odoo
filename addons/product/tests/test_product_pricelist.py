@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
+from datetime import datetime
+
 from odoo.tests.common import TransactionCase
 from odoo.tools import float_compare, test_reports
-from odoo.exceptions import UserError
 
 
 class TestProductPricelist(TransactionCase):
@@ -11,15 +12,74 @@ class TestProductPricelist(TransactionCase):
     def setUp(self):
         super(TestProductPricelist, self).setUp()
         self.ProductPricelist = self.env['product.pricelist']
-        self.res_partner_4 = self.env.ref('base.res_partner_4')
-        self.computer_SC234 = self.env.ref("product.product_product_3")
-        self.ipad_retina_display = self.env.ref('product.product_product_4')
-        self.custom_computer_kit = self.env.ref("product.product_product_5")
-        self.ipad_mini = self.env.ref("product.product_product_6")
-        self.apple_in_ear_headphones = self.env.ref("product.product_product_7")
-        self.laptop_E5023 = self.env.ref('product.product_delivery_01')
-        self.laptop_S3450 = self.env.ref("product.product_product_25")
-        self.category_5_id = self.ref('product.product_category_5')
+        self.res_partner_4 = self.env['res.partner'].create({'name': 'Ready Mat'})
+        self.res_partner_1 = self.env['res.partner'].create({'name': 'Wood Corner'})
+        self.category_5_id = self.env['product.category'].create({
+            'name': 'Office Furniture',
+            'parent_id': self.env.ref('product.product_category_1').id
+        }).id
+        self.computer_SC234 = self.env['product.product'].create({
+            'name': 'Desk Combination',
+            'categ_id': self.category_5_id,
+        })
+        self.ipad_retina_display = self.env['product.product'].create({
+            'name': 'Customizable Desk',
+        })
+        self.custom_computer_kit = self.env['product.product'].create({
+            'name': 'Corner Desk Right Sit',
+            'categ_id': self.category_5_id,
+        })
+        self.ipad_mini = self.env['product.product'].create({
+            'name': 'Large Cabinet',
+            'categ_id': self.category_5_id,
+            'standard_price': 800.0,
+        })
+        self.monitor = self.env['product.product'].create({
+            'name': 'Super nice monitor',
+            'categ_id': self.category_5_id,
+            'list_price': 1000.0,
+        })
+
+        self.env['product.supplierinfo'].create([
+            {
+                'name': self.res_partner_1.id,
+                'product_tmpl_id': self.ipad_mini.product_tmpl_id.id,
+                'delay': 3,
+                'min_qty': 1,
+                'price': 750,
+            }, {
+                'name': self.res_partner_4.id,
+                'product_tmpl_id': self.ipad_mini.product_tmpl_id.id,
+                'delay': 3,
+                'min_qty': 1,
+                'price': 790,
+            }, {
+                'name': self.res_partner_4.id,
+                'product_tmpl_id': self.ipad_mini.product_tmpl_id.id,
+                'delay': 3,
+                'min_qty': 3,
+                'price': 785,
+            }, {
+                'name': self.res_partner_4.id,
+                'product_tmpl_id': self.monitor.product_tmpl_id.id,
+                'delay': 3,
+                'min_qty': 3,
+                'price': 100,
+            }
+        ])
+        self.apple_in_ear_headphones = self.env['product.product'].create({
+            'name': 'Storage Box',
+            'categ_id': self.category_5_id,
+        })
+        self.laptop_E5023 = self.env['product.product'].create({
+            'name': 'Office Chair',
+            'categ_id': self.category_5_id,
+        })
+        self.laptop_S3450 = self.env['product.product'].create({
+            'name': 'Acoustic Bloc Screens',
+            'categ_id': self.category_5_id,
+        })
+
         self.uom_unit_id = self.ref('uom.product_uom_unit')
         self.list0 = self.ref('product.list0')
 
@@ -61,7 +121,16 @@ class TestProductPricelist(TransactionCase):
                 'compute_price': 'formula',
                 'price_discount': 30,
                 'base': 'list_price'
-            })]
+            }), (0, 0, {
+                 'name': 'Fixed on all products',
+                 'applied_on': '1_product',
+                 'product_tmpl_id': self.monitor.product_tmpl_id.id,
+                 'date_start': '2020-04-06 09:00:00',
+                 'date_end': '2020-04-09 12:00:00',
+                 'compute_price': 'formula',
+                 'price_discount': 50,
+                 'base': 'list_price'
+             })]
         })
 
     def test_10_calculation_price_of_products_pricelist(self):
@@ -115,19 +184,21 @@ class TestProductPricelist(TransactionCase):
         msg = "Wrong cost price: LCD Monitor if more than 3 Unit.should be 785 instead of %s" % ipad_mini._select_seller(partner_id=partner, quantity=3.0).price
         self.assertEqual(float_compare(ipad_mini._select_seller(partner_id=partner, quantity=3.0).price, 785, precision_digits=2), 0, msg)
 
-        # I print the sale prices report.
-        ctx = {'active_model': 'product.product', 'date': '2011-12-30', 'active_ids': [self.computer_SC234.id, self.ipad_retina_display.id, self.custom_computer_kit.id, self.ipad_mini.id]}
-        data_dict = {
-            'qty1': 1,
-            'qty2': 5,
-            'qty3': 10,
-            'qty4': 15,
-            'qty5': 30,
-            'price_list': self.customer_pricelist.id,
-        }
+        # Check if the pricelist is applied at precise datetime
+        context.update({'quantity': 1, 'date': datetime.strptime('2020-04-05 08:00:00', '%Y-%m-%d %H:%M:%S')})
+        monitor = self.monitor.with_context(context)
+        partner = self.res_partner_4.with_context(context)
+        msg = "Wrong cost price: LCD Monitor. should be 1000 instead of %s" % monitor._select_seller(
+            partner_id=partner, quantity=1.0).price
+        self.assertEqual(
+            float_compare(monitor.price, monitor.lst_price, precision_digits=2), 0,
+            msg)
+        context.update({'quantity': 1, 'date': datetime.strptime('2020-04-06 10:00:00', '%Y-%m-%d %H:%M:%S')})
+        monitor = self.monitor.with_context(context)
+        msg = "Wrong cost price: LCD Monitor. should be 500 instead of %s" % monitor._select_seller(
+            partner_id=partner, quantity=1.0).price
+        self.assertEqual(
+            float_compare(monitor.price, monitor.lst_price/2, precision_digits=2), 0,
+            msg)
 
-        with self.assertRaises(UserError):
-            test_reports.try_report_action(self.cr, self.uid, 'action_product_price_list', wiz_data=data_dict, context=ctx, our_module='product')
 
-        self.env.company.external_report_layout_id = self.env.ref('web.external_layout_standard').id
-        test_reports.try_report_action(self.cr, self.uid, 'action_product_price_list', wiz_data=data_dict, context=ctx, our_module='product')

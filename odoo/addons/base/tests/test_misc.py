@@ -5,7 +5,7 @@ import datetime
 from dateutil.relativedelta import relativedelta
 import pytz
 
-from odoo.tools import misc, date_utils, merge_sequences
+from odoo.tools import misc, date_utils, merge_sequences, remove_accents
 from odoo.tests.common import TransactionCase, BaseCase
 
 
@@ -190,6 +190,7 @@ class TestDateRangeFunction(BaseCase):
 
 class TestFormatLangDate(TransactionCase):
     def test_00_accepted_types(self):
+        self.env.user.tz = 'Europe/Brussels'
         datetime_str = '2017-01-31 12:00:00'
         date_datetime = datetime.datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
         date_date = date_datetime.date()
@@ -219,7 +220,8 @@ class TestFormatLangDate(TransactionCase):
         lang = self.env['res.lang']
 
         # Activate French and Simplified Chinese (test with non-ASCII characters)
-        lang.search([('active', '=', False), ('code', 'in', ['fr_FR', 'zh_CN'])]).write({'active': True})
+        lang._activate_lang('fr_FR')
+        lang._activate_lang('zh_CN')
 
         # -- test `date`
         # Change a single parameter
@@ -262,9 +264,56 @@ class TestFormatLangDate(TransactionCase):
         self.assertEqual(misc.format_time(lang.with_context(lang='zh_CN').env, time_part, time_format='short'), '\u4e0b\u53484:30')
 
         # Check timezoned time part
-        self.assertEqual(misc.format_time(lang.with_context(lang='fr_FR').env, time_part_tz, time_format='long'), '16:30:22 -0504')
+        self.assertIn(misc.format_time(lang.with_context(lang='fr_FR').env, time_part_tz, time_format='long'), ['16:30:22 -0504', '16:30:22 HNE'])
         self.assertEqual(misc.format_time(lang.with_context(lang='zh_CN').env, time_part_tz, time_format='full'), '\u5317\u7f8e\u4e1c\u90e8\u6807\u51c6\u65f6\u95f4\u0020\u4e0b\u53484:30:22')
 
         # Check given `lang_code` overwites context lang
         self.assertEqual(misc.format_time(lang.with_context(lang='fr_FR').env, time_part, time_format='short', lang_code='zh_CN'), '\u4e0b\u53484:30')
         self.assertEqual(misc.format_time(lang.with_context(lang='zh_CN').env, time_part, time_format='medium', lang_code='fr_FR'), '16:30:22')
+
+
+class TestGroupCalls(BaseCase):
+    def test_callbacks(self):
+        log = []
+
+        def foo():
+            log.append("foo")
+
+        def bar(items):
+            log.extend(items)
+            callbacks.add(baz)
+
+        def baz():
+            log.append("baz")
+
+        callbacks = misc.GroupCalls()
+        callbacks.add(foo)
+        callbacks.add(bar, list)[0].append(1)
+        callbacks.add(bar, list)[0].append(2)
+        self.assertEqual(log, [])
+
+        callbacks()
+        self.assertEqual(log, ["foo", 1, 2, "baz"])
+
+        callbacks()
+        self.assertEqual(log, ["foo", 1, 2, "baz"])
+
+        callbacks.add(bar, list)[0].append(3)
+        callbacks.clear()
+        callbacks()
+        self.assertEqual(log, ["foo", 1, 2, "baz"])
+
+
+class TestRemoveAccents(BaseCase):
+    def test_empty_string(self):
+        self.assertEqual(remove_accents(False), False)
+        self.assertEqual(remove_accents(''), '')
+        self.assertEqual(remove_accents(None), None)
+
+    def test_latin(self):
+        self.assertEqual(remove_accents('Niño Hernández'), 'Nino Hernandez')
+        self.assertEqual(remove_accents('Anaïs Clémence'), 'Anais Clemence')
+
+    def test_non_latin(self):
+        self.assertEqual(remove_accents('العربية'), 'العربية')
+        self.assertEqual(remove_accents('русский алфавит'), 'русскии алфавит')

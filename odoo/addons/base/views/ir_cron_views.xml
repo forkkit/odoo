@@ -8,9 +8,11 @@
             <field name="inherit_id" ref="base.view_server_action_form"/>
             <field name="arch" type="xml">
                 <xpath expr="//button[@name='create_action']" position="replace">
-                    <button name="method_direct_trigger" type="object" string="Run Manually" class="oe_highlight"/>
+                    <button name="method_direct_trigger" type="object" string="Run Manually" class="oe_highlight" attrs="{'invisible': [('state', '!=', 'code')]}"/>
                 </xpath>
                 <xpath expr="//button[@name='unlink_action']" position="replace">
+                </xpath>
+                <xpath expr="//button[@name='run']" position="replace">
                 </xpath>
                 <xpath expr="//group[@name='action_content']" position="inside">
                     <field name="user_id"/>
@@ -19,12 +21,15 @@
                         <field name="interval_number" class="oe_inline"/>
                         <field name="interval_type" class="oe_inline"/>
                     </div>
-                    <field name="active" invisible="1"/>
+                    <field name="active" widget="boolean_toggle"/>
                     <field name="nextcall"/>
                     <field name="numbercall"/>
                     <field name="priority"/>
                     <field name="doall"/>
                 </xpath>
+                <field name="state" position="attributes">
+                    <attribute name="invisible">1</attribute>
+                </field>
             </field>
         </record>
 
@@ -34,6 +39,7 @@
                 <tree string="Scheduled Actions" decoration-muted="(not active)">
                     <field name="priority"/>
                     <field name="name"/>
+                    <field name="model_id"/>
                     <field name="nextcall"/>
                     <field name="interval_number"/>
                     <field name="interval_type"/>
@@ -50,6 +56,7 @@
             <field name="arch" type="xml">
                 <calendar string="Scheduled Actions" date_start="nextcall" color="user_id">
                     <field name="name"/>
+                    <field name="user_id" filters="1" invisible="1"/>
                 </calendar>
             </field>
         </record>
@@ -60,6 +67,7 @@
                 <search string="Scheduled Actions">
                     <field name="name" string="Scheduled Action"/>
                     <field name="user_id"/>
+                    <field name="model_id"/>
                     <field name="nextcall"/>
                     <field name="active"/>
                     <separator/>
@@ -69,6 +77,7 @@
                     <group expand="0" string="Group By">
                         <filter string="User" name="user" domain="[]" context="{'group_by': 'user_id'}"/>
                         <filter string="Execution" name="execution" domain="[]" context="{'group_by': 'nextcall'}" />
+                        <filter string="Model" name="groupby_model_id" domain="[]" context="{'group_by': 'model_id'}"/>
                     </group>
                 </search>
             </field>

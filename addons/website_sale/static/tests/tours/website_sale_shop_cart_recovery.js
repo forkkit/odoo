@@ -26,15 +26,9 @@ tour.register('shop_cart_recovery', {
         content: "check product is in cart, get cart id, logout, go to login",
         trigger: 'td.td-product_name:contains("Acoustic Bloc Screens")',
         run: function () {
-            rpc.query({
-                'model': 'website',
-                'method': 'sale_get_order',
-                'args': [[$('html').data('website-id')]],
-            }).then(function (data) {
-                var orderId = parseInt(data.match(/sale\.order\((\d+),\)/)[1]); 
-                localStorage.setItem(orderIdKey, orderId);
-                window.location.href = "/web/session/logout?redirect=/web/login";
-            });
+            var orderId = $('.my_cart_quantity').data('order-id');
+            localStorage.setItem(orderIdKey, orderId);
+            window.location.href = "/web/session/logout?redirect=/web/login";
         },
     },
     {
@@ -52,7 +46,7 @@ tour.register('shop_cart_recovery', {
     },
     {
         content: "click action",
-        trigger: '.btn:containsExact("Action")',
+        trigger: '.o_dropdown_toggler_btn:contains("Action")',
     },
     {
         content: "click Send a Cart Recovery Email",
@@ -64,9 +58,9 @@ tour.register('shop_cart_recovery', {
     },
     {
         content: "check the mail is sent, grab the recovery link, and logout",
-        trigger: '.o_thread_message_content a:containsExact("Resume order")',
+        trigger: '.o_Message_content a:containsExact("Resume order")',
         run: function () {
-            var link = $('.o_thread_message_content a:containsExact("Resume order")').attr('href');
+            var link = $('.o_Message_content a:containsExact("Resume order")').attr('href');
             localStorage.setItem(recoveryLinkKey, link);
             window.location.href = "/web/session/logout?redirect=/";
         }

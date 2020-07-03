@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
-from odoo.addons.account.tests.account_test_classes import AccountingTestCase
+from odoo.addons.account.tests.common import AccountTestCommon
 from odoo.tests import tagged, Form
 
 
 @tagged('post_install', '-at_install')
-class StockMoveInvoice(AccountingTestCase):
+class StockMoveInvoice(AccountTestCommon):
 
     def setUp(self):
         super(StockMoveInvoice, self).setUp()
@@ -13,12 +13,28 @@ class StockMoveInvoice(AccountingTestCase):
         self.SaleOrder = self.env['sale.order']
         self.AccountJournal = self.env['account.journal']
 
-        self.partner_18 = self.env.ref('base.res_partner_18')
+        self.partner_18 = self.env['res.partner'].create({'name': 'My Test Customer'})
         self.pricelist_id = self.env.ref('product.list0')
-        self.product_11 = self.env.ref('product.product_product_11')
-        self.product_cable_management_box = self.env.ref('stock.product_cable_management_box')
+        self.product_11 = self.env['product.product'].create({'name': 'A product to deliver'})
+        self.product_cable_management_box = self.env['product.product'].create({
+            'name': 'Another product to deliver',
+            'weight': 1.0,
+            'invoice_policy': 'order',
+        })
         self.product_uom_unit = self.env.ref('uom.product_uom_unit')
-        self.normal_delivery = self.env.ref('delivery.normal_delivery_carrier')
+        self.product_delivery_normal = self.env['product.product'].create({
+            'name': 'Normal Delivery Charges',
+            'invoice_policy': 'order',
+            'type': 'service',
+            'list_price': 10.0,
+            'categ_id': self.env.ref('delivery.product_category_deliveries').id,
+        })
+        self.normal_delivery = self.env['delivery.carrier'].create({
+            'name': 'Normal Delivery Charges',
+            'fixed_price': 10,
+            'delivery_type': 'fixed',
+            'product_id': self.product_delivery_normal.id,
+        })
 
     def test_01_delivery_stock_move(self):
         # Test if the stored fields of stock moves are computed with invoice before delivery flow
@@ -65,10 +81,10 @@ class StockMoveInvoice(AccountingTestCase):
         self.invoice.post()
         self.journal = self.AccountJournal.search([('type', '=', 'cash'), ('company_id', '=', self.sale_prepaid.company_id.id)], limit=1)
 
-        register_payments = self.env['account.payment.register'].with_context(active_ids=self.invoice.ids).create({
+        register_payments = self.env['account.payment.register'].with_context(active_model='account.move', active_ids=self.invoice.ids).create({
             'journal_id': self.journal.id,
         })
-        register_payments.create_payments()
+        register_payments._create_payments()
 
         # Check the SO after paying the invoice
         self.assertNotEqual(self.sale_prepaid.invoice_count, 0, 'order not invoiced')
@@ -81,4 +97,4 @@ class StockMoveInvoice(AccountingTestCase):
         self.assertEqual(moves[0].weight, 2.0, 'wrong move weight')
 
         # Ship
-        self.picking = self.sale_prepaid.picking_ids.action_done()
+        self.picking = self.sale_prepaid.picking_ids._action_done()

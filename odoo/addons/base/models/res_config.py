@@ -14,6 +14,8 @@ _logger = logging.getLogger(__name__)
 
 
 class ResConfigModuleInstallationMixin(object):
+    __slots__ = ()
+
     @api.model
     def _install_modules(self, modules):
         """ Install the requested modules.
@@ -375,6 +377,13 @@ class ResConfigSettings(models.TransientModel, ResConfigModuleInstallationMixin)
     _name = 'res.config.settings'
     _description = 'Config Settings'
 
+    def _valid_field_parameter(self, field, name):
+        return (
+            name in ('default_model', 'config_parameter')
+            or field.type in ('boolean', 'selection') and name in ('group', 'implied_group')
+            or super()._valid_field_parameter(field, name)
+        )
+
     def copy(self, values):
         raise UserError(_("Cannot duplicate configuration!"), "")
 
@@ -416,7 +425,7 @@ class ResConfigSettings(models.TransientModel, ResConfigModuleInstallationMixin)
             return {
                 'warning': {
                     'title': _('Warning!'),
-                    'message': _('Disabling this option will also uninstall the following modules \n%s') % message,
+                    'message': _('Disabling this option will also uninstall the following modules \n%s', message),
                 }
             }
         return {}
@@ -536,11 +545,6 @@ class ResConfigSettings(models.TransientModel, ResConfigModuleInstallationMixin)
                     value = bool(value)
             res[name] = value
 
-        # other fields: call the method 'get_values'
-        # The other methods that start with `get_default_` are deprecated
-        for method in dir(self):
-            if method.startswith('get_default_'):
-                _logger.warning(_('Methods that start with `get_default_` are deprecated. Override `get_values` instead(Method %s)') % method)
         res.update(self.get_values())
 
         return res
@@ -594,12 +598,6 @@ class ResConfigSettings(models.TransientModel, ResConfigModuleInstallationMixin)
                 value = value.id
             IrConfigParameter.set_param(icp, value)
 
-        # other fields: execute method 'set_values'
-        # Methods that start with `set_` are now deprecated
-        for method in dir(self):
-            if method.startswith('set_') and method is not 'set_values':
-                _logger.warning(_('Methods that start with `set_` are deprecated. Override `set_values` instead (Method %s)') % method)
-
     def execute(self):
         self.ensure_one()
         if not self.env.is_admin():
@@ -627,10 +625,9 @@ class ResConfigSettings(models.TransientModel, ResConfigModuleInstallationMixin)
         if to_uninstall_modules:
             to_uninstall_modules.button_immediate_uninstall()
 
-        self._install_modules(to_install)
+        installation_status = self._install_modules(to_install)
 
-
-        if to_install or to_uninstall_modules:
+        if installation_status or to_uninstall_modules:
             # After the uninstall/install calls, the registry and environments
             # are no longer valid. So we reset the environment.
             self.env.reset()

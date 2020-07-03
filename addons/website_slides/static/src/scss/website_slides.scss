@@ -29,6 +29,65 @@ $o-wslides-fs-side-width: 300px;
     }
 }
 
+.o_wslides_arrow {
+    position: absolute;
+    height: 24px;
+    margin-left: -5px;
+    margin-top: 10px;
+    line-height: 1.8em;
+    padding-left: 8px;
+    padding-right: 5px;  
+    background: #17A2B8;
+    color: white;
+    box-shadow: 0px 0px 3px  gray;
+    z-index: 1;
+
+    text-decoration: none;
+
+    &:after {
+        // the triangle
+        content: "";
+        position: absolute;
+        height: 0px;
+        width: 0px;
+        right: 0; 
+        margin-right: -15px;
+        border-left: 15px solid #17A2B8;
+        border-bottom: 12px solid transparent;
+        border-top: 12px solid transparent;
+    }
+}
+
+// Color tags according to assigned background color.
+.o_wslides_channel_tag {
+    vertical-align: middle;
+    @for $size from 1 through length($o-colors) {
+        &.o_tag_color_#{$size - 1} {
+            $background-color: white;
+            // no color selected
+            @if $size == 1 {
+                & {
+                    color: black;
+                    background-color: $background-color;
+                    box-shadow: inset 0 0 0 1px nth($o-colors, $size);
+                }
+            } @else {
+                $background-color: nth($o-colors, $size);
+                & {
+                    color: white;
+                    background-color: $background-color;
+                }
+            }
+            @at-root a#{&} {
+                &:hover {
+                    color: color-yiq($background-color);
+                    background-color: darken($background-color, 10%);
+                }
+            }
+        }
+    }
+}
+
 .o_wslides_body {
     background-color: $o-wslides-color-bg;
 
@@ -54,6 +113,16 @@ $o-wslides-fs-side-width: 300px;
         }
     }
 
+    .o_wslides_js_lesson_quiz {
+        i.o_wslides_js_quiz_icon {
+            cursor: pointer;
+        }
+
+        i.o_wslides_js_quiz_icon:hover {
+            color: black !important;
+        }
+    }
+
     .o_wslides_js_lesson_quiz_question {
         .list-group-item  {
             font-size: 1rem;
@@ -70,6 +139,33 @@ $o-wslides-fs-side-width: 300px;
 
         &.completed-disabled{
             pointer-events: none;
+        }
+    }
+
+    a.o_wslides_js_quiz_is_correct {
+        color: black;
+        input:checked + i.fa-check-circle-o {
+            color: $primary !important;
+        }
+    }
+
+    .o_wslides_js_quiz_sequence_highlight {
+        background-color: #1252F3;
+        height: 1px;
+        z-index: 3;
+
+        &:before, &:after {
+            content: "";
+            @include size(6px);
+            display: block;
+            border-radius: 100%;
+            background-color: inherit;
+            @include o-position-absolute(-2px, -2px);
+        }
+
+        &:after {
+            right: auto;
+            left: -2px;
         }
     }
 
@@ -97,7 +193,7 @@ $o-wslides-fs-side-width: 300px;
     @each $limit in $truncate-limits {
         .o_wslides_desc_truncate_#{$limit} {
             $line-height: 1.3;
-            max-height: $limit * $line-height * 1em;
+            max-height: $limit * $line-height * 1.2em;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: normal;
@@ -141,10 +237,41 @@ $o-wslides-fs-side-width: 300px;
     @include media-breakpoint-up(md) {
         border-top-width: 0;
     }
+
+    .o_wslides_js_channel_unsubscribe {
+        > .fa-times {
+            display: none;
+        }
+
+        &:hover {
+            > .fa-check {
+                display: none;
+            }
+
+            > .fa-times {
+                display: inline-block;
+            }
+        }
+    }
+
+    .o_wslides_js_channel_enroll {
+        cursor: pointer;
+
+        &:hover, &:hover .o_wslides_enroll_msg small {
+            font-weight: bold;
+        }
+    }
+
+    .o_wslides_enroll_msg {
+        p {
+            display: inline-block;
+            margin-bottom: 0px;
+        }
+    }
 }
 
 @mixin o-wslides-tabs($tab-active-color: $o-wslides-color-bg) {
-    margin-top: ($o-wslides-tabs-height * -1) + 0.05rem;
+    margin-top: ($o-wslides-tabs-height * -1);
     border-bottom: 0;
 
     .nav-link {
@@ -153,9 +280,12 @@ $o-wslides-fs-side-width: 300px;
         line-height: $line-height-base;
         @include o-hover-text-color(rgba(white, 0.8), white);
 
-        &, &:hover {
-            border-color: #875A7B;
-            background: transparent;
+        & {
+            border-color: transparent;
+        }
+
+        &:hover {
+            background: #3d2938;
         }
 
         &.active {
@@ -371,6 +501,14 @@ $o-wslides-fs-side-width: 300px;
     @include media-breakpoint-up (sm) {
         .modal-body {
             overflow: visible!important;
+
+            .o_wslides_quiz_modal_close_btn {
+                right: 5px;
+            }
+
+            .o_wslides_gradient {
+                width: 42%;
+            }
         }
 
         .modal-content {
@@ -383,8 +521,38 @@ $o-wslides-fs-side-width: 300px;
             }
         }
     }
-}
 
+    .progress {
+        border-radius:0;
+        overflow:visible;
+        height: 8px;
+
+        .progress-bar {
+            transition: width 0.8s ease;
+
+            &.no-transition {
+                transition: none;
+            }
+        }
+    }
+
+    .tooltip > .tooltip-inner {
+        background-color: #875A7B;
+        padding:5px 15px;
+        font-weight:bold;
+        font-size:13px;
+    }
+
+    .tooltip > .arrow {
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-top: 5px solid #875A7B;
+    }
+
+    .tooltip > .arrow::before {
+        display: none;
+    }
+}
 
 // Embed PDFViewer
 // **************************************************

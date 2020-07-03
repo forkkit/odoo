@@ -15,8 +15,6 @@ description into a live application, able to interact with every model and
 records in the database.  It is even possible to use the web client to modify
 the interface of the web client.
 
-.. note:: An html version of all js docstrings in Odoo is available at:
-      :ref:`JS API <api/js>`
 
 Overview
 =========
@@ -1213,6 +1211,10 @@ The notification system in Odoo is designed with the following components:
   destroy notifications whenever a request is done (with a custom_event). Note
   that the web client is a service provider.
 
+- a client action *display_notification*: this allows to trigger the display
+  of a notification from python (e.g. in the method called when the user
+  clicked on a button of type object).
+
 - two helper functions in *ServiceMixin*: *do_notify* and *do_warn*
 
 
@@ -1260,6 +1262,21 @@ Here are two examples on how to use these methods:
 
     this.do_warn(_t("Error"), _t("Filter name is required."));
 
+Here an example in python:
+
+.. code-block:: python
+
+    # note that we call _(string) on the text to make sure it is properly translated.
+    def show_notification(self):
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Success'),
+                'message': _('Your signature request has been sent.'),
+                'sticky': False,
+            }
+        }
 
 Systray
 =======
@@ -1551,6 +1568,15 @@ order.
 
         <field name="int_value" options='{"type": "number", "step": 100}'/>
 
+    - format: should the number be formatted. (true by default)
+
+    By default, numbers are formatted according to locale parameters.
+        This option will prevent the field's value from being formatted.
+
+    .. code-block:: xml
+
+        <field name="int_value" options='{"format": false}'/>
+
 - float (FieldFloat)
     This is the default field type for fields of type *float*.
 
@@ -1582,6 +1608,15 @@ order.
     .. code-block:: xml
 
         <field name="int_value" options='{"type": "number", "step": 0.1}'/>
+
+    - format: should the number be formatted. (true by default)
+
+    By default, numbers are formatted according to locale parameters.
+        This option will prevent the field's value from being formatted.
+
+    .. code-block:: xml
+
+        <field name="int_value" options='{"format": false}'/>
 
 - float_time (FieldFloatTime)
     The goal of this widget is to display properly a float value that represents
@@ -1649,7 +1684,7 @@ order.
         <field name="datetimefield" options='{"datepicker": {"daysOfWeekDisabled": [0, 6]}}'/>
 
 - daterange (FieldDateRange)
-    This widget allow user to select start and end date into single picker.
+    This widget allows the user to select start and end date into a single picker.
 
     - Supported field types: *date*, *datetime*
 
@@ -1664,6 +1699,13 @@ order.
     .. code-block:: xml
 
         <field name="start_date" widget="daterange" options='{"related_end_date": "end_date"}'/>
+
+- remaining_days (RemainingDays)
+    This widget can be used on date and datetime fields. In readonly, it displays
+    the delta (in days) between the value of the field and today. It edit, it
+    behaves like a regular date(time) widget.
+
+    - Supported field types: *date*, *datetime*
 
 - monetary (FieldMonetary)
     This is the default field type for fields of type 'monetary'. It is used to
@@ -1714,8 +1756,6 @@ order.
     This field displays an url (in readonly mode). The main reason to use it is
     that it is rendered as an anchor tag with the proper css classes and href.
 
-    - Supported field types: *char*
-
     Also, the text of the anchor tag can be customized with the *text* attribute
     (it won't change the href value).
 
@@ -1723,6 +1763,13 @@ order.
 
         <field name="foo" widget="url" text="Some URL"/>
 
+    Options:
+
+    - website_path: (default:false) by default, the widget forces (if not already
+      the case) the href value to begin with http:// except if this option is set
+      to true, thus allowing redirections to the database's own website.
+
+    - Supported field types: *char*
 
 - domain (FieldDomain)
     The "Domain" field allows the user to construct a technical-prefix domain
@@ -1758,6 +1805,9 @@ order.
       option is useful to inform the web client that the default field name is
       not the name of the current field, but the name of another field.
 
+    - accepted_file_extensions: the file extension the user can pick from the file input dialog box (default value is `image/\*`)
+      (cf: ``accept`` attribute on <input type="file"/>)
+
     .. code-block:: xml
 
         <field name="image" widget='image' options='{"preview_image":"image_128"}'/>
@@ -1766,6 +1816,11 @@ order.
     Generic widget to allow saving/downloading a binary file.
 
     - Supported field types: *binary*
+
+    Options:
+
+    - accepted_file_extensions: the file extension the user can pick from the file input dialog box
+      (cf: ``accept`` attribute on <input type="file"/>)
 
     Attribute:
 
@@ -1978,6 +2033,19 @@ order.
 
     - Supported field types: *char, text*
 
+- badge (FieldBadge)
+    Displays the value inside a bootstrap badge pill.
+
+    - Supported field types: *char*, *selection*, *many2one*
+
+    By default, the badge has a lightgrey background, but it can be customized
+    by using the decoration-X mechanism. For instance, to display a red badge
+    under a given condition:
+
+    .. code-block:: xml
+
+        <field name="foo" widget"badge" decoration-danger="state == 'cancel'"/>
+
 Relational fields
 -----------------
 
@@ -2030,7 +2098,7 @@ Relational fields
 
     - can_create: allow the creation of related records (take precedence over no_create
       option)
-    - can_write: allow the edition of related records (default: true)
+    - can_write: allow the editing of related records (default: true)
 
     Options:
 
@@ -2069,9 +2137,30 @@ Relational fields
 
     - Supported field types: *many2one*
 
+- many2one_avatar (Many2OneAvatar)
+    This widget is only supported on many2one fields pointing to a model which
+    inherits from 'image.mixin'. In readonly, it displays the image of the
+    related record next to its display_name. Note that the display_name isn't a
+    clickable link in this case. In edit, it behaves exactly like the regular
+    many2one.
+
+    - Supported field types: *many2one*
+
+- many2one_avatar_user (Many2OneAvatarUser)
+    This widget is a specialization of the Many2OneAvatar. When the avatar is
+    clicked, we open a chat window with the corresponding user. This widget can
+    only be set on many2one fields pointing to the 'res.users' model.
+
+    - Supported field types: *many2one* (pointing to 'res.users')
+
+- many2one_avatar_employee (Many2OneAvatarEmployee)
+    Same as Many2OneAvatarUser, but for many2one fields pointing to 'hr.employee'.
+
+    - Supported field types: *many2one* (pointing to 'hr.employee')
+
 - kanban.many2one (KanbanFieldMany2One)
     Default widget for many2one fields (in kanban view). We need to disable all
-    edition in kanban views.
+    editing in kanban views.
 
     - Supported field types: *many2one*
 
@@ -2098,6 +2187,11 @@ Relational fields
 
     - Supported field types: *many2many*
 
+    Options:
+
+    - accepted_file_extensions: the file extension the user can pick from the file input dialog box
+      (cf: ``accept`` attribute on <input type="file"/>)
+
 - many2many_tags (FieldMany2ManyTags)
     Display many2many as a list of tags.
 
@@ -2105,12 +2199,24 @@ Relational fields
 
     Options:
 
+    - create: domain determining whether or not new tags can be created (default: True).
+
+    .. code-block:: xml
+
+        <field name="category_id" widget="many2many_tags" options="{'create': [['some_other_field', '>', 24]]}"/>
+
     - color_field: the name of a numeric field, which should be present in the
       view.  A color will be chosen depending on its value.
 
     .. code-block:: xml
 
         <field name="category_id" widget="many2many_tags" options="{'color_field': 'color'}"/>
+
+    - no_edit_color: set to True to remove the possibility to change the color of the tags (default: False).
+
+    .. code-block:: xml
+
+        <field name="category_id" widget="many2many_tags" options="{'color_field': 'color', 'no_edit_color': True}"/>
 
 - form.many2many_tags (FormFieldMany2ManyTags)
     Specialization of many2many_tags widget for form views. It has some extra
@@ -2137,6 +2243,14 @@ Relational fields
     - Supported field types: *one2many*
 
     Options:
+
+    - create: domain determining whether or not related records can be created (default: True).
+
+    - delete: domain determining whether or not related records can be deleted (default: True).
+
+    .. code-block:: xml
+
+        <field name="turtles" options="{'create': [['some_other_field', '>', 24]]}"/>
 
     - create_text: a string that is used to customize the 'Add' label/text.
 
@@ -2193,16 +2307,12 @@ in the action registry.
 
     .. code-block:: javascript
 
-        var ControlPanelMixin = require('web.ControlPanelMixin');
         var AbstractAction = require('web.AbstractAction');
 
-        var ClientAction = AbstractAction.extend(ControlPanelMixin, {
+        var ClientAction = AbstractAction.extend({
+            hasControlPanel: true,
             ...
         });
-
-    Do not add the controlpanel mixin if you do not need it.  Note that some
-    code is needed to interact with the control panel (via the
-    ``update_control_panel`` method given by the mixin).
 
 - Registering the client action:
     As usual, we need to make the web client aware of the mapping between
@@ -2227,51 +2337,66 @@ in the action registry.
         </record>
 
 
-Using the control panel mixin
------------------------------
+Using the control panel
+-----------------------
 
-By default, the AbstractAction class does not include the control panel mixin.
-This means that a client action does not display a control panel.  In order to
+By default, the client action does not display a control panel.  In order to
 do that, several steps should be done.
 
-- add ControlPanelMixin in the widget:
+- Set the *hasControlPanel* to *true*.
+    In the widget code:
 
     .. code-block:: javascript
 
-        var ControlPanelMixin = require('web.ControlPanelMixin');
-
-        var MyClientAction = AbstractAction.extend(ControlPanelMixin, {
+        var MyClientAction = AbstractAction.extend({
+            hasControlPanel: true,
+            loadControlPanel: true, // default: false
             ...
         });
 
-- call the method *update_control_panel* whenever we need to update the control
-  panel. For example:
+    .. warning:: 
+        when the ``loadControlPanel`` is set to true, the client action will automatically get the content of a search view or a control panel view. 
+        In this case, a model name should be specified like this:
+        
+        .. code-block:: javascript
+
+            init: function (parent, action, options) {
+                ...
+                this.controlPanelParams.modelName = 'model.name';
+                ...
+            }
+
+- Call the method *updateControlPanel* whenever we need to update the control panel.
+    For example:
 
     .. code-block:: javascript
 
-        var SomeClientAction = Widget.extend(ControlPanelMixin, {
+        var SomeClientAction = Widget.extend({
+            hasControlPanel: true,
             ...
             start: function () {
                 this._renderButtons();
-                this._updateControlPanel();
+                this._update_control_panel();
                 ...
             },
             do_show: function () {
                  ...
-                 this._updateControlPanel();
+                 this._update_control_panel();
             },
             _renderButtons: function () {
                 this.$buttons = $(QWeb.render('SomeTemplate.Buttons'));
                 this.$buttons.on('click', ...);
             },
-            _updateControlPanel: function () {
-                this.update_control_panel({
+            _update_control_panel: function () {
+                this.updateControlPanel({
                     cp_content: {
                        $buttons: this.$buttons,
                     },
-             });
+                });
+            }
 
-For more information, look into the *control_panel.js* file.
+The ``updateControlPanel`` is the main method to customize the content in controlpanel. 
+For more information, look into the `control_panel_renderer.js <https://github.com/odoo/odoo/blob/13.0/addons/web/static/src/js/views/control_panel/control_panel_renderer.js#L130>`_ file.
 
 .. _.appendTo():
     https://api.jquery.com/appendTo/

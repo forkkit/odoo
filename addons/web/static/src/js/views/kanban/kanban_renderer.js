@@ -90,7 +90,7 @@ var KanbanRenderer = BasicRenderer.extend({
     },
     custom_events: _.extend({}, BasicRenderer.prototype.custom_events || {}, {
         close_quick_create: '_onCloseQuickCreate',
-        cancel_quick_create: '_onCloseQuickCreate',
+        cancel_quick_create: '_onCancelQuickCreate',
         set_progress_bar_state: '_onSetProgressBarState',
         start_quick_create: '_onStartQuickCreate',
         quick_create_column_updated: '_onQuickCreateColumnUpdated',
@@ -98,6 +98,14 @@ var KanbanRenderer = BasicRenderer.extend({
     events:_.extend({}, BasicRenderer.prototype.events || {}, {
         'keydown .o_kanban_record' : '_onRecordKeyDown'
     }),
+    sampleDataTargets: [
+        '.o_kanban_counter',
+        '.o_kanban_record',
+        '.o_kanban_toggle_fold',
+        '.o_column_folded',
+        '.o_column_archive_records',
+        '.o_column_unarchive_records',
+    ],
 
     /**
      * @override
@@ -152,12 +160,20 @@ var KanbanRenderer = BasicRenderer.extend({
     //--------------------------------------------------------------------------
 
     /**
-     * Displays the quick create record in the first column.
+     * Displays the quick create record in the requested column (first one by
+     * default)
      *
+     * @params {string} [groupId] local id of the group in which the quick create
+     *   must be inserted
      * @returns {Promise}
      */
-    addQuickCreate: function () {
-        return this.widgets[0].addQuickCreate();
+    addQuickCreate: function (groupId) {
+        let kanbanColumn;
+        if (groupId) {
+            kanbanColumn = this.widgets.find(column => column.db_id === groupId);
+        }
+        kanbanColumn = kanbanColumn || this.widgets[0];
+        return kanbanColumn.addQuickCreate();
     },
     /**
      * Focuses the first kanban record
@@ -192,7 +208,7 @@ var KanbanRenderer = BasicRenderer.extend({
         var column = this.widgets[index];
         this.widgets[index] = newColumn;
         if (options && options.state) {
-            this.state = options.state;
+            this._setState(options.state);
         }
         return newColumn.appendTo(document.createDocumentFragment()).then(function () {
             var def;
@@ -239,13 +255,6 @@ var KanbanRenderer = BasicRenderer.extend({
         }
         return Promise.resolve();
     },
-    /**
-     * @override
-     */
-    updateState: function (state) {
-        this._setState(state);
-        return this._super.apply(this, arguments);
-    },
 
     //--------------------------------------------------------------------------
     // Private
@@ -263,7 +272,7 @@ var KanbanRenderer = BasicRenderer.extend({
     },
     /**
      * Tries to give focus to the previous card, and returns true if successful
-     * 
+     *
      * @private
      * @param {DOMElement} currentColumn
      * @returns {boolean}
@@ -373,6 +382,7 @@ var KanbanRenderer = BasicRenderer.extend({
 
             if (this.createColumnEnabled) {
                 this.quickCreate = new ColumnQuickCreate(this, {
+                    applyExamplesText: this.examples && this.examples.applyExamplesText,
                     examples: this.examples && this.examples.examples,
                 });
                 this.defs.push(this.quickCreate.appendTo(fragment).then(function () {
@@ -489,23 +499,24 @@ var KanbanRenderer = BasicRenderer.extend({
     /**
      * Sets the current state and updates some internal attributes accordingly.
      *
-     * @private
-     * @param {Object} state
+     * @override
      */
-    _setState: function (state) {
-        this.state = state;
+    _setState: function () {
+        this._super(...arguments);
 
-        var groupByField = state.groupedBy[0];
+        var groupByField = this.state.groupedBy[0];
         var cleanGroupByField = this._cleanGroupByField(groupByField);
-        var groupByFieldAttrs = state.fields[cleanGroupByField];
-        var groupByFieldInfo = state.fieldsInfo.kanban[cleanGroupByField];
+        var groupByFieldAttrs = this.state.fields[cleanGroupByField];
+        var groupByFieldInfo = this.state.fieldsInfo.kanban[cleanGroupByField];
         // Deactivate the drag'n'drop if the groupedBy field:
         // - is a date or datetime since we group by month or
         // - is readonly (on the field attrs or in the view)
         var draggable = true;
+        var grouped_by_date = false;
         if (groupByFieldAttrs) {
             if (groupByFieldAttrs.type === "date" || groupByFieldAttrs.type === "datetime") {
                 draggable = false;
+                grouped_by_date = true;
             } else if (groupByFieldAttrs.readonly !== undefined) {
                 draggable = !(groupByFieldAttrs.readonly);
             }
@@ -523,8 +534,9 @@ var KanbanRenderer = BasicRenderer.extend({
             group_by_tooltip: groupByTooltip,
             groupedBy: groupByField,
             grouped_by_m2o: this.groupedByM2O,
+            grouped_by_date: grouped_by_date,
             relation: relation,
-            quick_create: this.quickCreateEnabled && viewUtils.isQuickCreateEnabled(state),
+            quick_create: this.quickCreateEnabled && viewUtils.isQuickCreateEnabled(this.state),
         });
         this.createColumnEnabled = this.groupedByM2O && this.columnOptions.group_creatable;
     },
@@ -583,6 +595,12 @@ var KanbanRenderer = BasicRenderer.extend({
     // Handlers
     //--------------------------------------------------------------------------
 
+    /**
+     * @private
+     */
+    _onCancelQuickCreate: function () {
+        this._toggleNoContentHelper();
+    },
     /**
      * Closes the opened quick create widgets in columns
      *

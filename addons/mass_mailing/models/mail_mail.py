@@ -6,8 +6,6 @@ import werkzeug.urls
 
 from odoo import api, fields, models, tools
 
-from odoo.addons.link_tracker.models.link_tracker import URL_REGEX
-
 
 class MailMail(models.Model):
     """Add the mass mailing campaign data to mail"""
@@ -16,25 +14,20 @@ class MailMail(models.Model):
     mailing_id = fields.Many2one('mailing.mailing', string='Mass Mailing')
     mailing_trace_ids = fields.One2many('mailing.trace', 'mail_mail_id', string='Statistics')
 
-    @api.model
-    def create(self, values):
-        """ Override mail_mail creation to create an entry in mailing.trace """
+    @api.model_create_multi
+    def create(self, values_list):
+        """ Override mail_mail creation to create an entry in mail.mail.statistics """
         # TDE note: should be after 'all values computed', to have values (FIXME after merging other branch holding create refactoring)
-        mail = super(MailMail, self).create(values)
-        if values.get('mailing_trace_ids'):
-            mail_sudo = mail.sudo()
-            mail_sudo.mailing_trace_ids.write({'message_id': mail_sudo.message_id, 'state': 'outgoing'})
-        return mail
+        mails = super(MailMail, self).create(values_list)
+        for mail, values in zip(mails, values_list):
+            if values.get('mailing_trace_ids'):
+                mail.mailing_trace_ids.write({'message_id': mail.message_id})
+        return mails
 
     def _get_tracking_url(self):
         base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
-        track_url = werkzeug.urls.url_join(
-            base_url, 'mail/track/%(mail_id)s/blank.gif?%(params)s' % {
-                'mail_id': self.id,
-                'params': werkzeug.urls.url_encode({'db': self.env.cr.dbname})
-            }
-        )
-        return '<img src="%s" alt=""/>' % track_url
+        token = tools.hmac(self.env(su=True), 'mass_mailing-mail_mail-open', self.id)
+        return werkzeug.urls.url_join(base_url, 'mail/track/%s/%s/blank.gif' % (self.id, token))
 
     def _get_unsubscribe_url(self, email_to):
         base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
@@ -42,7 +35,6 @@ class MailMail(models.Model):
             base_url, 'mail/mailing/%(mailing_id)s/unsubscribe?%(params)s' % {
                 'mailing_id': self.mailing_id.id,
                 'params': werkzeug.urls.url_encode({
-                    'db': self.env.cr.dbname,
                     'res_id': self.res_id,
                     'email': email_to,
                     'token': self.mailing_id._unsubscribe_token(
@@ -60,7 +52,7 @@ class MailMail(models.Model):
         body = super(MailMail, self)._send_prepare_body()
 
         if self.mailing_id and body and self.mailing_trace_ids:
-            for match in re.findall(URL_REGEX, self.body_html):
+            for match in re.findall(tools.URL_REGEX, self.body_html):
                 href = match[0]
                 url = match[1]
 
@@ -72,10 +64,13 @@ class MailMail(models.Model):
 
             # generate tracking URL
             tracking_url = self._get_tracking_url()
-            if tracking_url:
-                body = tools.append_content_to_html(body, tracking_url, plaintext=False, container_tag='div')
+            body = tools.append_content_to_html(
+                body,
+                '<img src="%s"/>' % tracking_url,
+                plaintext=False,
+            )
 
-        body = self.env['mail.thread']._replace_local_links(body)
+        body = self.env['mail.render.mixin']._replace_local_links(body)
 
         return body
 

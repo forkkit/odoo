@@ -15,6 +15,7 @@ class PurchaseOrder(models.Model):
         if not self.requisition_id:
             return
 
+        self = self.with_company(self.company_id)
         requisition = self.requisition_id
         if self.partner_id:
             partner = self.partner_id
@@ -23,8 +24,7 @@ class PurchaseOrder(models.Model):
         payment_term = partner.property_supplier_payment_term_id
 
         FiscalPosition = self.env['account.fiscal.position']
-        fpos = FiscalPosition.get_fiscal_position(partner.id)
-        fpos = FiscalPosition.browse(fpos)
+        fpos = FiscalPosition.with_company(self.company_id).get_fiscal_position(partner.id)
 
         self.partner_id = partner.id
         self.fiscal_position_id = fpos.id
@@ -56,10 +56,7 @@ class PurchaseOrder(models.Model):
                 name += '\n' + product_lang.description_purchase
 
             # Compute taxes
-            if fpos:
-                taxes_ids = fpos.map_tax(line.product_id.supplier_taxes_id.filtered(lambda tax: tax.company_id == requisition.company_id)).ids
-            else:
-                taxes_ids = line.product_id.supplier_taxes_id.filtered(lambda tax: tax.company_id == requisition.company_id).ids
+            taxes_ids = fpos.map_tax(line.product_id.supplier_taxes_id.filtered(lambda tax: tax.company_id == requisition.company_id)).ids
 
             # Compute quantity and price_unit
             if line.product_uom_id != line.product_id.uom_po_id:

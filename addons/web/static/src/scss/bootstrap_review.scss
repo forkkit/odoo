@@ -80,7 +80,73 @@
     }
 }
 
+// Do not display the backdrop element added by bootstrap in the body and add a
+// background on the modal to keep the same effect. The bootstrap backdrop was
+// probably useful for compatibility with <IE9 but is no longer needed. This
+// also avoids z-index issues because modals could be opened in an element
+// (e.g. the website #wrapwrap) whose stacking context is different of the body
+// one (where the backdrop is opened). This would make the backdrop appears on
+// top of the modal.
+.modal-backdrop {
+    display: none;
+}
+.modal:not([data-backdrop="false"]) {
+    background-color: rgba($modal-backdrop-bg, $modal-backdrop-opacity);
+}
+
 // Restore pointer cursor which came with the 'btn' class until BS 4.3.1
 .btn:not(:disabled):not(.disabled) {
     cursor: pointer;
+}
+
+// Disable RTL for the popover position
+.popover {
+    right: auto#{"/*rtl:ignore*/"};
+}
+
+// Restore height to prevent flex to be ignored
+.input-group .form-control {
+    height: initial;
+}
+
+// Review $link-decoration behavior
+@if $link-decoration and $link-decoration != none {
+    .btn:not(.btn-link), .nav-link, .dropdown-item, .page-link, .breadcrumb-item > a, .badge, .fa {
+        &, &:hover, &:focus {
+            text-decoration: none;
+        }
+    }
+}
+
+// Generating bootstrap color buttons was disabled (see import_bootstrap.scss).
+// We do it ourself here with a tweak: we introduce btn-fill-* (working as the
+// normal btn-* classes (in opposition to btn-outline-* classes). We then map
+// the btn-* classes to either btn-fill-* or btn-outline-* classes depending on
+// the configuration. We also allow to define a border-color different than the
+// background color.
+$o-btn-bg-colors: () !default;
+$o-btn-border-colors: () !default;
+@each $color, $value in $theme-colors {
+    $-bg-color: map-get($o-btn-bg-colors, $color) or $value;
+    $-border-color: map-get($o-btn-border-colors, $color) or $-bg-color;
+    .btn-fill-#{$color} {
+        @include button-variant($-bg-color, $-border-color);
+    }
+}
+@each $color, $value in $theme-colors {
+    $-bg-color: map-get($o-btn-bg-colors, $color) or $value;
+    $-border-color: map-get($o-btn-border-colors, $color) or $-bg-color;
+    .btn-outline-#{$color} {
+        @include button-outline-variant($-border-color);
+    }
+}
+$o-btn-outline-defaults: () !default;
+@each $color, $value in $theme-colors {
+    .btn-#{$color} {
+        @if index($o-btn-outline-defaults, $color) {
+            @extend .btn-outline-#{$color};
+        } @else {
+            @extend .btn-fill-#{$color};
+        }
+    }
 }

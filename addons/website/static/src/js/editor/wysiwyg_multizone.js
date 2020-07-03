@@ -77,14 +77,13 @@ var WysiwygMultizone = Wysiwyg.extend({
                 });
         });
 
-        // TODO review why this is needed
-        _.each(this.$('.oe_structure[data-editor-message!="False"]'), el => {
-            var isBlank = !el.innerHTML.trim();
-            if (isBlank) {
+        // Ensure :blank oe_structure elements are in fact empty as ':blank'
+        // does not really work with all browsers.
+        for (const el of this.$('.oe_structure')) {
+            if (!el.innerHTML.trim()) {
                 el.innerHTML = '';
             }
-            el.classList.toggle('oe_empty', isBlank);
-        });
+        }
 
         return this._super.apply(this, arguments).then(() => {
             // Showing Mega Menu snippets if one dropdown is already opened
@@ -148,10 +147,10 @@ var WysiwygMultizone = Wysiwyg.extend({
         var cssBgImage = $(el.querySelector('.o_record_cover_image')).css('background-image');
         var coverProps = {
             'background-image': cssBgImage.replace(/"/g, '').replace(window.location.protocol + "//" + window.location.host, ''),
-            'background-color': el.dataset.filterColor,
+            'background_color_class': el.dataset.bgColorClass,
+            'background_color_style': el.dataset.bgColorStyle,
             'opacity': el.dataset.filterValue,
             'resize_class': el.dataset.coverClass,
-            'text_size_class': el.dataset.textSizeClass,
             'text_align_class': el.dataset.textAlignClass,
         };
 

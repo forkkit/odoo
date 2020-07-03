@@ -9,14 +9,14 @@ class TestUBL(common.TransactionCase):
         super(TestUBL, self).setUp()
         # Force user Belgium country.
         self.env.user.company_id = self.env['res.company'].create({'name': 'MyCompany'})
-        self.env.user.company_id.country = self.env.ref('base.be')
+        self.env.user.company_id.country_id = self.env.ref('base.be')
         self.env.ref('l10n_be.l10nbe_chart_template').try_loading()
         self.partner_id = self.env['res.partner'].create({'name': 'TestUser', 'vat': 'BE0123456789'})
 
     def test_ubl_invoice_import(self):
         xml_file_path = get_module_resource('l10n_be_edi', 'test_xml_file', 'efff_test.xml')
         xml_file = open(xml_file_path, 'rb').read()
-        invoice = self.env['account.move'].with_context(default_type='in_invoice').create({})
+        invoice = self.env['account.move'].with_context(default_move_type='in_invoice').create({})
 
         attachment_id = self.env['ir.attachment'].create({
             'name': 'efff_test.xml',
@@ -25,8 +25,11 @@ class TestUBL(common.TransactionCase):
             'res_model': 'account.move',
         })
 
+        invoice_count = len(self.env['account.move'].search([]))
+
         invoice.message_post(attachment_ids=[attachment_id.id])
 
+        self.assertEqual(len(self.env['account.move'].search([])), invoice_count)
         self.assertEqual(invoice.amount_total, 666.50)
         self.assertEqual(invoice.amount_tax, 115.67)
         self.assertEqual(invoice.partner_id, self.partner_id)

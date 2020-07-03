@@ -145,7 +145,7 @@ var SlideUploadDialog = Dialog.extend({
 
         if (this.file.type === 'application/pdf') {
             _.extend(values, {
-                'image': canvas.toDataURL().split(',')[1],
+                'image_1920': canvas.toDataURL().split(',')[1],
                 'slide_type': canvas.height > canvas.width ? 'document' : 'presentation',
                 'mime_type': this.file.type,
                 'datas': this.file.data
@@ -153,7 +153,7 @@ var SlideUploadDialog = Dialog.extend({
         } else if (values['slide_type'] === 'webpage') {
             _.extend(values, {
                 'mime_type': 'text/html',
-                'image': this.file.type === 'image/svg+xml' ? this._svgToPng() : this.file.data,
+                'image_1920': this.file.type === 'image/svg+xml' ? this._svgToPng() : this.file.data,
             });
         } else if (/^image\/.*/.test(this.file.type)) {
             if (values['slide_type'] === 'presentation') {
@@ -164,7 +164,7 @@ var SlideUploadDialog = Dialog.extend({
                 });
             } else {
                 _.extend(values, {
-                    'image': this.file.type === 'image/svg+xml' ? this._svgToPng() : this.file.data,
+                    'image_1920': this.file.type === 'image/svg+xml' ? this._svgToPng() : this.file.data,
                 });
             }
         }
@@ -207,7 +207,7 @@ var SlideUploadDialog = Dialog.extend({
      *
      * @private
      */
-    _getSelect2DropdownValues: function (){
+    _getSelect2DropdownValues: function () {
         var result = {};
         var self = this;
         // tags
@@ -223,16 +223,16 @@ var SlideUploadDialog = Dialog.extend({
             result['tag_ids'] = tagValues;
         }
         // category
-        if (!self.defaultCategoryID){
+        if (!self.defaultCategoryID) {
             var categoryValue = this.$('#category_id').select2('data');
             if (categoryValue && categoryValue.create) {
                 result['category_id'] = [0, {'name': categoryValue.text}];
             } else if (categoryValue) {
-                result['category_id'] =  [categoryValue.id];
+                result['category_id'] = [categoryValue.id];
                 this.categoryID = categoryValue.id;
             }
         } else {
-            result['category_id'] =  [self.defaultCategoryID];
+            result['category_id'] = [self.defaultCategoryID];
             this.categoryID = self.defaultCategoryID;
         }
         return result;
@@ -291,23 +291,23 @@ var SlideUploadDialog = Dialog.extend({
                 }
             },
             fill_data: function (query, data) {
-                var that = this,
+                var self = this,
                     tags = {results: []};
                 _.each(data, function (obj) {
-                    if (that.matcher(query.term, obj[nameKey])) {
+                    if (self.matcher(query.term, obj[nameKey])) {
                         tags.results.push({id: obj.id, text: obj[nameKey]});
                     }
                 });
                 query.callback(tags);
             },
             query: function (query) {
-                var that = this;
+                var self = this;
                 // fetch data only once and store it
                 if (!this.selection_data) {
                     this.fetch_rpc_fnc().then(function (data) {
-                        that.can_create = data.can_create;
-                        that.fill_data(query, data.read_results);
-                        that.selection_data = data.read_results;
+                        self.can_create = data.can_create;
+                        self.fill_data(query, data.read_results);
+                        self.selection_data = data.read_results;
                     });
                 } else {
                     this.fill_data(query, this.selection_data);
@@ -354,10 +354,19 @@ var SlideUploadDialog = Dialog.extend({
      * Show the preview/right column and resize the modal
      * @private
      */
-    _showPreviewColumn: function() {
+    _showPreviewColumn: function () {
         this.$('#o_wslides_js_slide_upload_left_column').removeClass('col').addClass('col-md-6');
         this.$('#o_wslides_js_slide_upload_preview_column').removeClass('d-none');
         this.$modal.find('.modal-dialog').addClass('modal-lg');
+    },
+    /**
+     * Hide the preview/right column and resize the modal
+     * @private
+     */
+    _hidePreviewColumn: function () {
+        this.$('#o_wslides_js_slide_upload_left_column').addClass('col').removeClass('col-md-6');
+        this.$('#o_wslides_js_slide_upload_preview_column').addClass('d-none');
+        this.$modal.find('.modal-dialog').removeClass('modal-lg');
     },
     /**
      * @private
@@ -414,8 +423,14 @@ var SlideUploadDialog = Dialog.extend({
 
         var $input = $(ev.currentTarget);
         var preventOnchange = $input.data('preventOnchange');
+        var $preview = self.$('#slide-image');
 
         var file = ev.target.files[0];
+        if (!file) {
+            this.$('#slide-image').attr('src', '/website_slides/static/src/img/document.png');
+            this._hidePreviewColumn();
+            return;
+        }
         var isImage = /^image\/.*/.test(file.type);
         var loaded = false;
         this.file.name = file.name;
@@ -423,17 +438,19 @@ var SlideUploadDialog = Dialog.extend({
         if (!(isImage || this.file.type === 'application/pdf')) {
             this._alertDisplay(_t("Invalid file type. Please select pdf or image file"));
             this._fileReset();
+            this._hidePreviewColumn();
             return;
         }
         if (file.size / 1024 / 1024 > 25) {
             this._alertDisplay(_t("File is too big. File size cannot exceed 25MB"));
             this._fileReset();
+            this._hidePreviewColumn();
             return;
         }
 
         utils.getDataURLFromFile(file).then(function (buffer) {
             if (isImage) {
-                self.$('#slide-image').attr('src', buffer);
+                $preview.attr('src', buffer);
             }
             buffer = buffer.split(',')[1];
             self.file.data = buffer;
@@ -443,7 +460,7 @@ var SlideUploadDialog = Dialog.extend({
         if (file.type === 'application/pdf') {
             var ArrayReader = new FileReader();
             this.set('can_submit_form', false);
-            // file read as ArrayBuffer for PDFJS get_Document API
+            // file read as ArrayBuffer for pdfjsLib get_Document API
             ArrayReader.readAsArrayBuffer(file);
             ArrayReader.onload = function (evt) {
                 var buffer = evt.target.result;
@@ -453,15 +470,15 @@ var SlideUploadDialog = Dialog.extend({
                     self.set('can_submit_form', true);
                 };
                 /**
-                 * The following line fixes PDFJS 'Util' global variable.
+                 * The following line fixes pdfjsLib 'Util' global variable.
                  * This is (most likely) related to #32181 which lazy loads most assets.
                  *
-                 * That caused an issue where the global 'Util' variable from PDFJS can be
+                 * That caused an issue where the global 'Util' variable from pdfjsLib can be
                  * (depending of which libraries load first) overridden by the global 'Util'
                  * variable of bootstrap.
-                 * (See 'lib/bootstrap/js/util.js' and 'lib/pdfjs/src/shared/util.js')
+                 * (See 'lib/bootstrap/js/util.js' and 'web/static/lib/pdfjs/build/pdfjs.js')
                  *
-                 * This commit ensures that the global 'Util' variable is set to the one of PDFJS
+                 * This commit ensures that the global 'Util' variable is set to the one of pdfjsLib
                  * right before it's used.
                  *
                  * Eventually, we should update or get rid of one of the two libraries since they're
@@ -469,9 +486,9 @@ var SlideUploadDialog = Dialog.extend({
                  * In the mean time, this small fix allows not refactoring all of this and can not
                  * cause much harm.
                  */
-                Util = PDFJS.Util;
-                PDFJS.getDocument(new Uint8Array(buffer), null, passwordNeeded).then(function getPdf(pdf) {
-                    self._formSetFieldValue('duration', (pdf.pdfInfo.numPages || 0) * 5);
+                Util = window.pdfjsLib.Util;
+                window.pdfjsLib.getDocument(new Uint8Array(buffer), null, passwordNeeded).then(function getPdf(pdf) {
+                    self._formSetFieldValue('duration', (pdf._pdfInfo.numPages || 0) * 5);
                     pdf.getPage(1).then(function getFirstPage(page) {
                         var scale = 1;
                         var viewport = page.getViewport(scale);
@@ -485,7 +502,7 @@ var SlideUploadDialog = Dialog.extend({
                             viewport: viewport
                         }).then(function () {
                             var imageData = self.$('#data_canvas')[0].toDataURL();
-                            self.$('#slide-image').attr('src', imageData);
+                            $preview.attr('src', imageData);
                             if (loaded) {
                                 self.set('can_submit_form', true);
                             }
@@ -500,7 +517,9 @@ var SlideUploadDialog = Dialog.extend({
         if (!preventOnchange) {
             var input = file.name;
             var inputVal = input.substr(0, input.lastIndexOf('.')) || input;
-            this._formSetFieldValue('name', inputVal);
+            if (this._formGetFieldValue('name') === "") {
+                this._formSetFieldValue('name', inputVal);
+            }
         }
     },
     _onChangeSlideUrl: function (ev) {
@@ -541,7 +560,7 @@ var SlideUploadDialog = Dialog.extend({
                     .text(_.str.sprintf(_t('Failed to install "%s".'), this.modulesToInstallStatus.name));
             }
         } else {
-            this.modulesToInstallStatus = _.extend({}, _.find(this.modulesToInstall, function (item) { return item.id == moduleId; }));
+            this.modulesToInstallStatus = _.extend({}, _.find(this.modulesToInstall, function (item) { return item.id === moduleId; }));
             this.set('state', '_import');
             this.$('#o_wslides_install_module_text')
                 .text(_.str.sprintf(_t('Do you want to install the "%s" app?'), this.modulesToInstallStatus.name));
@@ -575,6 +594,7 @@ var SlideUploadDialog = Dialog.extend({
             this.modulesToInstallStatus = null;
         }
     },
+
     _onClickFormSubmit: function (ev) {
         var self = this;
         var $btn = $(ev.currentTarget);
@@ -586,15 +606,20 @@ var SlideUploadDialog = Dialog.extend({
                 route: '/slides/add_slide',
                 params: values,
             }).then(function (data) {
-                if (data.error) {
-                    self.set('state', oldType);
-                    self._alertDisplay(data.error);
-                } else {
-                    window.location = data.url;
-                }
+                self._onFormSubmitDone(data, oldType);
             });
         }
     },
+
+    _onFormSubmitDone: function (data, oldType) {
+        if (data.error) {
+            this.set('state', oldType);
+            this._alertDisplay(data.error);
+        } else {
+            window.location = data.url;
+        }
+    },
+
     _onClickSlideTypeIcon: function (ev) {
         var $elem = this.$(ev.currentTarget);
         var slideType = $elem.data('slideType');

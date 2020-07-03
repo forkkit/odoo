@@ -197,9 +197,6 @@
     @return $-with-support-font;
 }
 
-// Mixin which allows to extend the BS4 bg-variant mixin
-@mixin o-bg-color-extension($color, $text-color, $with-muted) {}
-
 // Function to remove all null values of a map
 @function o-map-omit($map) {
     $-map: ();
@@ -278,10 +275,9 @@
     margin-top: 0;
 }
 @mixin o-kanban-dropdown($padding-base: $o-kanban-inside-vgutter) {
-    margin: -1px -1px auto auto; // compensate border
     padding: $padding-base/2 $padding-base;
-    border: 1px solid transparent;
-    border-bottom: none;
+    border: none;
+    border-left: 1px solid transparent;
     vertical-align: top;
     color: $body-color;
 
@@ -384,6 +380,13 @@
     a {
         cursor: pointer;
     }
+}
+
+// Scrollbar doesn't overlap with content
+@mixin o-scrollbar-overlay {
+    overflow-y: auto;
+    overflow-y: overlay;
+    -ms-overflow-style: -ms-autohiding-scrollbar;
 }
 
 %o-nocontent-init-image {

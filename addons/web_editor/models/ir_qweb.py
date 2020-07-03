@@ -9,6 +9,7 @@ Also, adds methods to convert values back to Odoo models.
 """
 
 import ast
+import babel
 import base64
 import io
 import itertools
@@ -17,10 +18,11 @@ import logging
 import os
 import re
 import hashlib
+from datetime import datetime
 
 import pytz
 import requests
-from dateutil import parser
+from datetime import datetime
 from lxml import etree, html
 from PIL import Image as I
 from werkzeug import urls
@@ -28,8 +30,9 @@ from werkzeug import urls
 import odoo.modules
 
 from odoo import api, models, fields
-from odoo.tools import ustr, pycompat
+from odoo.tools import ustr, posix_to_ldml, pycompat
 from odoo.tools import html_escape as escape
+from odoo.tools.misc import get_lang
 from odoo.addons.base.models import ir_qweb
 
 REMOTE_CONNECTION_TIMEOUT = 2.5
@@ -44,17 +47,39 @@ class QWeb(models.AbstractModel):
 
     # compile directives
 
+    def _compile_node(self, el, options):
+        if options.get('snippet-key') == options['template']:
+            # Get the path of the template's content
+            path = options['root'].getpath(el).replace('/t', '')
+            # Only append the template key on template's first node.
+            # If it already has a data-snippet it is a saved snippet.
+            # Do not override it.
+            size = len(path.split('/'))
+            if size == 2 and 'data-snippet' not in el.attrib:
+                el.attrib['data-snippet'] = options['template'].split('.', 1)[-1]
+
+        return super()._compile_node(el, options)
+
     def _compile_directive_snippet(self, el, options):
-        el.set('t-call', el.attrib.pop('t-snippet'))
-        View = self.env['ir.ui.view']
-        view_id = View.get_view_id(el.attrib.get('t-call'))
-        name = View.browse(view_id).display_name
+        key = el.attrib.pop('t-snippet')
+        el.set('t-call', key)
+        el.set('t-call-options', "{'snippet-key': '" + key + "'}")
+        View = self.env['ir.ui.view'].sudo()
+        view_id = View.get_view_id(key)
+        name = View.browse(view_id).name
         thumbnail = el.attrib.pop('t-thumbnail', "oe-thumbnail")
-        div = u'<div name="%s" data-oe-type="snippet" data-oe-thumbnail="%s">' % (
+        div = u'<div name="%s" data-oe-type="snippet" data-oe-thumbnail="%s" data-oe-snippet-id="%s">' % (
             escape(pycompat.to_text(name)),
-            escape(pycompat.to_text(thumbnail))
+            escape(pycompat.to_text(thumbnail)),
+            escape(pycompat.to_text(view_id)),
         )
         return [self._append(ast.Str(div))] + self._compile_node(el, options) + [self._append(ast.Str(u'</div>'))]
+
+    def _compile_directive_snippet_call(self, el, options):
+        key = el.attrib.pop('t-snippet-call')
+        el.set('t-call', key)
+        el.set('t-call-options', "{'snippet-key': '" + key + "'}")
+        return self._compile_node(el, options)
 
     def _compile_directive_install(self, el, options):
         if self.user_has_groups('base.group_system'):
@@ -82,6 +107,7 @@ class QWeb(models.AbstractModel):
     def _directives_eval_order(self):
         directives = super(QWeb, self)._directives_eval_order()
         directives.insert(directives.index('call'), 'snippet')
+        directives.insert(directives.index('call'), 'snippet-call')
         directives.insert(directives.index('call'), 'install')
         return directives
 
@@ -202,6 +228,21 @@ class Date(models.AbstractModel):
         attrs = super(Date, self).attributes(record, field_name, options, values)
         if options.get('inherit_branding'):
             attrs['data-oe-original'] = record[field_name]
+
+            if record._fields[field_name].type == 'datetime':
+                attrs = self.env['ir.qweb.field.datetime'].attributes(record, field_name, options, values)
+                attrs['data-oe-type'] = 'datetime'
+                return attrs
+
+            lg = self.env['res.lang']._lang_get(self.env.user.lang) or get_lang(self.env)
+            locale = babel.Locale.parse(lg.code)
+            babel_format = value_format = posix_to_ldml(lg.date_format, locale=locale)
+
+            if record[field_name]:
+                date = fields.Date.from_string(record[field_name])
+                value_format = pycompat.to_text(babel.dates.format_date(date, format=babel_format, locale=locale))
+
+            attrs['data-oe-original-with-format'] = value_format
         return attrs
 
     @api.model
@@ -210,7 +251,9 @@ class Date(models.AbstractModel):
         if not value:
             return False
 
-        return value
+        lg = self.env['res.lang']._lang_get(self.env.user.lang) or get_lang(self.env)
+        date = datetime.strptime(value, lg.date_format)
+        return fields.Date.to_string(date)
 
 
 class DateTime(models.AbstractModel):
@@ -221,15 +264,27 @@ class DateTime(models.AbstractModel):
     @api.model
     def attributes(self, record, field_name, options, values):
         attrs = super(DateTime, self).attributes(record, field_name, options, values)
+
         if options.get('inherit_branding'):
             value = record[field_name]
+
+            lg = self.env['res.lang']._lang_get(self.env.user.lang) or get_lang(self.env)
+            locale = babel.Locale.parse(lg.code)
+            babel_format = value_format = posix_to_ldml('%s %s' % (lg.date_format, lg.time_format), locale=locale)
+            tz = record.env.context.get('tz') or self.env.user.tz
+
             if isinstance(value, str):
                 value = fields.Datetime.from_string(value)
+
             if value:
                 # convert from UTC (server timezone) to user timezone
-                value = fields.Datetime.context_timestamp(self, timestamp=value)
+                value = fields.Datetime.context_timestamp(self.with_context(tz=tz), timestamp=value)
+                value_format = pycompat.to_text(babel.dates.format_datetime(value, format=babel_format, locale=locale))
                 value = fields.Datetime.to_string(value)
+
             attrs['data-oe-original'] = value
+            attrs['data-oe-original-with-format'] = value_format
+            attrs['data-oe-original-tz'] = tz
         return attrs
 
     @api.model
@@ -239,10 +294,11 @@ class DateTime(models.AbstractModel):
             return False
 
         # parse from string to datetime
-        dt = parser.parse(value)
+        lg = self.env['res.lang']._lang_get(self.env.user.lang) or get_lang(self.env)
+        dt = datetime.strptime(value, '%s %s' % (lg.date_format, lg.time_format))
 
         # convert back from user's timezone to UTC
-        tz_name = self.env.context.get('tz') or self.env.user.tz
+        tz_name = element.attrib.get('data-oe-original-tz') or self.env.context.get('tz') or self.env.user.tz
         if tz_name:
             try:
                 user_tz = pytz.timezone(tz_name)
@@ -319,20 +375,24 @@ class Image(models.AbstractModel):
 
     @api.model
     def from_html(self, model, field, element):
+        if element.find('img') is None:
+            return False
         url = element.find('img').get('src')
 
         url_object = urls.url_parse(url)
         if url_object.path.startswith('/web/image'):
-            # url might be /web/image/<model>/<id>[_<checksum>]/<field>[/<width>x<height>]
             fragments = url_object.path.split('/')
             query = url_object.decode_query()
-            if fragments[3].isdigit():
+            url_id = fragments[3].split('-')[0]
+            # ir.attachment image urls: /web/image/<id>[-<checksum>][/...]
+            if url_id.isdigit():
                 model = 'ir.attachment'
-                oid = fragments[3]
+                oid = url_id
                 field = 'datas'
+            # url of binary field on model: /web/image/<model>/<id>/<field>[/...]
             else:
                 model = query.get('model', fragments[3])
-                oid = query.get('id', fragments[4].split('_')[0])
+                oid = query.get('id', fragments[4])
                 field = query.get('field', fragments[5])
             item = self.env[model].browse(int(oid))
             return item[field]

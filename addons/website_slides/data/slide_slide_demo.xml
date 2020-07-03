@@ -11,12 +11,19 @@
         <field name="slide_type">presentation</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_0_gard_0"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="True"/>
         <field name="public_views">10</field>
         <field name="completion_time">2.5</field>
         <field name="tag_ids" eval="[(4, ref('website_slides.slide_tag_demo_tools')), (4, ref('website_slides.slide_tag_demo_howto'))]"/>
         <field name="description">A summary of know-how: how and what. All the basics for this course about gardening.</field>
     </record>
+        <!--RESOURCE-->
+        <record id="slide_slide_demo_0_0_resource_0" model="slide.slide.resource">
+            <field name="name">Document</field>
+            <field name="data" type="base64" file="website_slides/static/src/img/document.png"/>
+            <field name="slide_id" ref="slide_slide_demo_0_0"/>
+        </record>
     <record id="slide_slide_demo_0_1" model="slide.slide">
         <field name="name">Home Gardening</field>
         <field name="sequence">2</field>
@@ -24,6 +31,7 @@
         <field name="slide_type">infographic</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_0_gard_0"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">5</field>
         <field name="completion_time">1</field>
@@ -37,6 +45,7 @@
         <field name="slide_type">infographic</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_0_gard_0"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">2</field>
         <field name="completion_time">2</field>
@@ -51,6 +60,7 @@
         <field name="slide_type">document</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_0_gard_0"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">0</field>
         <field name="completion_time">1</field>
@@ -64,45 +74,57 @@
         <field name="slide_type">quiz</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_0_gard_0"/>
         <field name="is_published" eval="True"/>
-        <field name="is_preview" eval="False"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
+        <field name="is_preview" eval="True"/>
         <field name="public_views">0</field>
         <field name="completion_time">1</field>
         <field name="description">Show your newly mastered knowledge !</field>
     </record>
         <record id="slide_slide_demo_0_4_question_0" model="slide.question">
             <field name="question">What is a strawberry ?</field>
+            <field name="sequence">1</field>
             <field name="slide_id" ref="slide_slide_demo_0_4"/>
         </record>
         <record id="slide_slide_demo_0_4_question_0_0" model="slide.answer">
             <field name="text_value">A fruit</field>
+            <field name="sequence">1</field>
             <field name="is_correct" eval="True"/>
+            <field name="comment">Correct ! A strawberry is a fruit because it's the product of a tree.</field>
             <field name="question_id" ref="slide_slide_demo_0_4_question_0"/>
         </record>
         <record id="slide_slide_demo_0_4_question_0_1" model="slide.answer">
             <field name="text_value">A vegetable</field>
+            <field name="sequence">2</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect ! A strawberry is not a vegetable.</field>
             <field name="question_id" ref="slide_slide_demo_0_4_question_0"/>
         </record>
         <record id="slide_slide_demo_0_4_question_0_2" model="slide.answer">
             <field name="text_value">A table</field>
+            <field name="sequence">3</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect ! A table is a piece of furniture.</field>
             <field name="question_id" ref="slide_slide_demo_0_4_question_0"/>
         </record>
         <record id="slide_slide_demo_0_4_question_1" model="slide.question">
             <field name="question">What is the best tool to dig a hole for your plants ?</field>
+            <field name="sequence">2</field>
             <field name="slide_id" ref="slide_slide_demo_0_4"/>
         </record>
         <record id="slide_slide_demo_0_4_question_1_0" model="slide.answer">
             <field name="text_value">A shovel</field>
+            <field name="sequence">1</field>
             <field name="is_correct" eval="True"/>
+            <field name="comment">Correct ! A shovel is the perfect tool to dig a hole.</field>
             <field name="question_id" ref="slide_slide_demo_0_4_question_1"/>
         </record>
         <record id="slide_slide_demo_0_4_question_1_1" model="slide.answer">
             <field name="text_value">A spoon</field>
+            <field name="sequence">2</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect ! Good luck digging a hole with a spoon...</field>
             <field name="question_id" ref="slide_slide_demo_0_4_question_1"/>
         </record>
-
 
     <!-- CHANNEL 1: Taking care of Trees -->
     <!-- ================================================== -->
@@ -129,6 +151,7 @@
         <field name="slide_type">infographic</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_1_gard1"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="True"/>
         <field name="public_views">5</field>
         <field name="completion_time">0.5</field>
@@ -142,6 +165,7 @@
         <field name="slide_type">infographic</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_1_gard1"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">5</field>
         <field name="completion_time">1.5</field>
@@ -155,6 +179,7 @@
         <field name="slide_type">infographic</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_1_gard1"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">10</field>
         <field name="completion_time">1</field>
@@ -171,6 +196,12 @@
             <field name="link">http://www.example.com</field>
             <field name="slide_id" ref="slide_slide_demo_1_2"/>
         </record>
+        <!--RESOURCE-->
+        <record id="slide_slide_demo_1_2_resource_0" model="slide.slide.resource">
+            <field name="name">Presentation</field>
+            <field name="data" type="base64" file="website_slides/static/src/img/presentation.pdf"/>
+            <field name="slide_id" ref="slide_slide_demo_1_2"/>
+        </record>
     <record id="slide_slide_demo_1_3" model="slide.slide">
         <field name="name">How to plant a potted tree</field>
         <field name="sequence">5</field>
@@ -180,6 +211,7 @@
         <field name="slide_type">video</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_1_gard1"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">0</field>
         <field name="completion_time">1</field>
@@ -193,24 +225,21 @@
         <field name="slide_type">webpage</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_1_gard1"/>
         <field name="html_content" type="html">
-<section class="s_cover parallax bg-black-50 pt16 pb16" data-scroll-background-ratio="0" style="background-image: none;">
-    <span class="s_parallax_bg oe_img_bg oe_custom_bg" style="background-image: url('/website_slides/static/src/img/slide_demo_tree_img_1.jpg'); background-position: 50% 0;"></span>
+<section class="s_cover parallax bg-black-50 pt16 pb16" data-scroll-background-ratio="0" style="background-image: none;" data-snippet="s_cover">
+    <span class="s_parallax_bg oe_img_bg" style="background-image: url('/website_slides/static/src/img/slide_demo_tree_img_1.jpg'); background-position: 50% 0;"></span>
     <div class="container">
         <div class="row s_nb_column_fixed">
-            <div class="col-lg-12 s_title">
-                <h1 class="s_title_thin o_default_snippet_text" style="font-size: 62px; text-align: center;">Catchy Headline</h1>
-            </div>
-            <div class="col-lg-12 s_text pt16 pb16">
+            <div class="col-lg-12">
+                <h1 class="o_default_snippet_text" style="font-size: 62px; text-align: center;">Catchy Headline</h1>
                 <p class="lead o_default_snippet_text" style="text-align: center;">Write one or two paragraphs describing your product, services or a specific feature.<br/> To be successful your content needs to be useful to your readers.</p>
-            </div>
-            <div class="col-lg-12 s_btn text-center pt16 pb16">
-                <a href="/aboutus" class="btn btn-delta rounded-circle o_default_snippet_text">About us</a>
-                <a href="/contactus" class="btn btn-primary rounded-circle o_default_snippet_text">Contact us</a>
+                <p>
+                    <a href="/contactus" class="btn btn-primary rounded-circle o_default_snippet_text">Contact us</a>
+                </p>
             </div>
         </div>
     </div>
 </section>
-<section class="s_text_image pt32 pb32">
+<section class="s_text_image pt32 pb32" data-snippet="s_text_image">
     <div class="container">
         <div class="row align-items-center">
             <div class="col-lg-6 pt16 pb16">
@@ -220,14 +249,13 @@
                 <h2 class="o_default_snippet_text">Section Subtitle</h2>
                 <p class="o_default_snippet_text">Write one or two paragraphs describing your product or services. <br/>To be successful your content needs to be useful to your readers.</p>
                 <p class="o_default_snippet_text">Start with the customer – find out what they want and give it to them.</p>
-                <div class="s_btn text-left pt16 pb16">
-                    <a href="#" class="btn btn-outline-primary o_default_snippet_text">Discover more</a>
-                </div>
+                <p class="o_default_snippet_text"><a href="#" class="btn btn-outline-primary">Discover more</a></p>
             </div>
         </div>
     </div>
 </section></field>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="True"/>
         <field name="public_views">5</field>
         <field name="completion_time">1</field>
@@ -246,35 +274,47 @@
         </record>
         <record id="slide_slide_demo_1_4_question_0" model="slide.question">
             <field name="question">Do you think Harry Potted has a good name ?</field>
+            <field name="sequence">1</field>
             <field name="slide_id" ref="slide_slide_demo_1_4"/>
         </record>
         <record id="slide_slide_demo_1_4_question_0_0" model="slide.answer">
             <field name="text_value">Yes</field>
+            <field name="sequence">1</field>
             <field name="is_correct" eval="True"/>
+            <field name="comment">Correct !</field>
             <field name="question_id" ref="slide_slide_demo_1_4_question_0"/>
         </record>
         <record id="slide_slide_demo_1_4_question_0_1" model="slide.answer">
             <field name="text_value">No</field>
+            <field name="sequence">2</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect !</field>
             <field name="question_id" ref="slide_slide_demo_1_4_question_0"/>
         </record>
         <record id="slide_slide_demo_1_4_question_1" model="slide.question">
             <field name="question">Did you read the whole article ?</field>
+            <field name="sequence">2</field>
             <field name="slide_id" ref="slide_slide_demo_1_4"/>
         </record>
         <record id="slide_slide_demo_1_4_question_1_0" model="slide.answer">
             <field name="text_value">Yes</field>
+            <field name="sequence">1</field>
             <field name="is_correct" eval="True"/>
+            <field name="comment">Correct ! Congratulations you have time to loose</field>
             <field name="question_id" ref="slide_slide_demo_1_4_question_1"/>
         </record>
         <record id="slide_slide_demo_1_4_question_1_1" model="slide.answer">
             <field name="text_value">No</field>
+            <field name="sequence">2</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect ! You really should read it.</field>
             <field name="question_id" ref="slide_slide_demo_1_4_question_1"/>
         </record>
         <record id="slide_slide_demo_1_4_question_1_2" model="slide.answer">
             <field name="text_value">What was the question again ?</field>
+            <field name="sequence">3</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect ! Seriously ?</field>
             <field name="question_id" ref="slide_slide_demo_1_4_question_1"/>
         </record>
     <record id="slide_slide_demo_1_5" model="slide.slide">
@@ -285,6 +325,7 @@
         <field name="slide_type">presentation</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_1_gard1"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">10</field>
         <field name="completion_time">2.5</field>
@@ -300,6 +341,7 @@
         <field name="slide_type">video</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_1_gard1"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">0</field>
         <field name="completion_time">1</field>
@@ -334,6 +376,7 @@
         <field name="slide_type">presentation</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_2_gard2"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="True"/>
         <field name="public_views">0</field>
         <field name="completion_time">1</field>
@@ -355,38 +398,56 @@
             <field name="link">http://www.example.com</field>
             <field name="slide_id" ref="slide_slide_demo_2_0"/>
         </record>
+        <!--RESOURCE-->
+        <record id="slide_slide_demo_2_0_resource_0" model="slide.slide.resource">
+            <field name="name">Tree image</field>
+            <field name="data" type="base64" file="website_slides/static/src/img/slide_demo_tree_img_2.jpg"/>
+            <field name="slide_id" ref="slide_slide_demo_2_0"/>
+        </record>
         <!-- QUIZZ -->
         <record id="slide_slide_demo_2_0_question_0" model="slide.question">
             <field name="question">Do you make beams out of lemon trees ?</field>
+            <field name="sequence">1</field>
             <field name="slide_id" ref="slide_slide_demo_2_0"/>
         </record>
         <record id="slide_slide_demo_2_0_question_0_0" model="slide.answer">
             <field name="text_value">Yes</field>
+            <field name="sequence">1</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect !</field>
             <field name="question_id" ref="slide_slide_demo_2_0_question_0"/>
         </record>
         <record id="slide_slide_demo_2_0_question_0_1" model="slide.answer">
             <field name="text_value">No</field>
+            <field name="sequence">2</field>
             <field name="is_correct" eval="True"/>
+            <field name="comment">Correct !</field>
             <field name="question_id" ref="slide_slide_demo_2_0_question_0"/>
         </record>
         <record id="slide_slide_demo_2_0_question_1" model="slide.question">
             <field name="question">Do you make lemons out of beams ?</field>
+            <field name="sequence">2</field>
             <field name="slide_id" ref="slide_slide_demo_2_0"/>
         </record>
         <record id="slide_slide_demo_2_0_question_1_0" model="slide.answer">
             <field name="text_value">Yes</field>
+            <field name="sequence">1</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect !</field>
             <field name="question_id" ref="slide_slide_demo_2_0_question_1"/>
         </record>
         <record id="slide_slide_demo_2_0_question_1_1" model="slide.answer">
             <field name="text_value">No</field>
+            <field name="sequence">2</field>
             <field name="is_correct" eval="True"/>
+            <field name="comment">Correct !</field>
             <field name="question_id" ref="slide_slide_demo_2_0_question_1"/>
         </record>
         <record id="slide_slide_demo_2_0_question_1_2" model="slide.answer">
             <field name="text_value">And also bananas</field>
+            <field name="sequence">3</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect ! of course not ...</field>
             <field name="question_id" ref="slide_slide_demo_2_0_question_1"/>
         </record>
     <record id="slide_slide_demo_2_1" model="slide.slide">
@@ -396,24 +457,21 @@
         <field name="slide_type">webpage</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_2_gard2"/>
         <field name="html_content" type="html">
-<section class="s_cover parallax bg-black-50 pt16 pb16" data-scroll-background-ratio="0" style="background-image: none;">
-    <span class="s_parallax_bg oe_img_bg oe_custom_bg" style="background-image: url('/website_slides/static/src/img/slide_demo_tree_img_3.jpg'); background-position: 50% 0;"></span>
+<section class="s_cover parallax bg-black-50 pt16 pb16" data-scroll-background-ratio="0" style="background-image: none;" data-snippet="s_cover">
+    <span class="s_parallax_bg oe_img_bg" style="background-image: url('/website_slides/static/src/img/slide_demo_tree_img_3.jpg'); background-position: 50% 0;"></span>
     <div class="container">
         <div class="row s_nb_column_fixed">
-            <div class="col-lg-12 s_title">
-                <h1 class="s_title_thin o_default_snippet_text" style="font-size: 62px; text-align: center;">Catchy Headline</h1>
-            </div>
-            <div class="col-lg-12 s_text pt16 pb16">
+            <div class="col-lg-12">
+                <h1 class="o_default_snippet_text" style="font-size: 62px; text-align: center;">Catchy Headline</h1>
                 <p class="lead o_default_snippet_text" style="text-align: center;">Write one or two paragraphs describing your product, services or a specific feature.<br/> To be successful your content needs to be useful to your readers.</p>
-            </div>
-            <div class="col-lg-12 s_btn text-center pt16 pb16">
-                <a href="/aboutus" class="btn btn-delta rounded-circle o_default_snippet_text">About us</a>
-                <a href="/contactus" class="btn btn-primary rounded-circle o_default_snippet_text">Contact us</a>
+                <p class="o_default_snippet_text">
+                    <a href="/contactus" class="btn btn-primary rounded-circle">Contact us</a>
+                </p>
             </div>
         </div>
     </div>
 </section>
-<section class="s_text_image pt32 pb32">
+<section class="s_text_image pt32 pb32" data-snippet="s_text_image">
     <div class="container">
         <div class="row align-items-center">
             <div class="col-lg-6 pt16 pb16">
@@ -423,14 +481,15 @@
                 <h2 class="o_default_snippet_text">Section Subtitle</h2>
                 <p class="o_default_snippet_text">Write one or two paragraphs describing your product or services. <br/>To be successful your content needs to be useful to your readers.</p>
                 <p class="o_default_snippet_text">Start with the customer – find out what they want and give it to them.</p>
-                <div class="s_btn text-left pt16 pb16">
-                    <a href="#" class="btn btn-outline-primary o_default_snippet_text">Discover more</a>
-                </div>
+                <p class="o_default_snippet_text">
+                    <a href="#" class="btn btn-outline-primary">Discover more</a>
+                </p>
             </div>
         </div>
     </div>
 </section></field>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">0</field>
         <field name="completion_time">2</field>
@@ -446,6 +505,7 @@
         <field name="slide_type">video</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_2_gard2"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">0</field>
         <field name="completion_time">1</field>
@@ -461,6 +521,7 @@
         <field name="slide_type">presentation</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_2_gard2"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">0</field>
         <field name="completion_time">2</field>
@@ -492,6 +553,7 @@
         <field name="slide_type">infographic</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_3_furn0"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="True"/>
         <field name="public_views">10</field>
         <field name="completion_time">12</field>
@@ -507,6 +569,7 @@
         <field name="slide_type">video</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_3_furn0"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">10</field>
         <field name="completion_time">3</field>
@@ -558,6 +621,7 @@
         <field name="slide_type">presentation</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_5_furn2"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="True"/>
         <field name="public_views">10</field>
         <field name="completion_time">2.5</field>
@@ -583,10 +647,11 @@
         <field name="slide_type">video</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_5_furn2"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">0</field>
         <field name="completion_time">3</field>
-        <field name="description">Learn of to identify quality wood in order to create solid furnitures.</field>
+        <field name="description">Learn to identify quality wood in order to create solid furnitures.</field>
     </record>
      <record id="slide_slide_demo_5_2" model="slide.slide">
         <field name="name">How to create your own piece of furniture</field>
@@ -597,6 +662,7 @@
         <field name="slide_type">video</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_5_furn2"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="True"/>
         <field name="public_views">5</field>
         <field name="completion_time">3</field>
@@ -609,6 +675,7 @@
         <field name="slide_type">quiz</field>
         <field name="channel_id" ref="website_slides.slide_channel_demo_5_furn2"/>
         <field name="is_published" eval="True"/>
+        <field name="date_published" eval="datetime.now() - timedelta(days=8)"/>
         <field name="is_preview" eval="False"/>
         <field name="public_views">0</field>
         <field name="completion_time">0.5</field>
@@ -616,16 +683,21 @@
     </record>
         <record id="slide_slide_demo_5_3_question_0" model="slide.question">
             <field name="question">Do you want to reply correctly ?</field>
+            <field name="sequence">1</field>
             <field name="slide_id" ref="slide_slide_demo_5_3"/>
         </record>
         <record id="slide_slide_demo_5_3_question_0_0" model="slide.answer">
             <field name="text_value">Yes</field>
+            <field name="sequence">1</field>
             <field name="is_correct" eval="True"/>
+            <field name="comment">Correct ! You did it !</field>
             <field name="question_id" ref="slide_slide_demo_5_3_question_0"/>
         </record>
         <record id="slide_slide_demo_5_3_question_0_1" model="slide.answer">
             <field name="text_value">No</field>
+            <field name="sequence">2</field>
             <field name="is_correct" eval="False"/>
+            <field name="comment">Incorrect ! You better think twice...</field>
             <field name="question_id" ref="slide_slide_demo_5_3_question_0"/>
         </record>
 

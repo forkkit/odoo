@@ -10,6 +10,13 @@ class TestCommonTimesheet(TransactionCase):
     def setUp(self):
         super(TestCommonTimesheet, self).setUp()
 
+        # Crappy hack to disable the rule from timesheet grid, if it exists
+        # The registry doesn't contain the field timesheet_manager_id.
+        # but there is an ir.rule about it, crashing during its evaluation
+        rule = self.env.ref('timesheet_grid.hr_timesheet_rule_approver_update', raise_if_not_found=False)
+        if rule:
+            rule.active = False
+
         # customer partner
         self.partner = self.env['res.partner'].create({
             'name': 'Customer Task',
@@ -75,8 +82,17 @@ class TestCommonTimesheet(TransactionCase):
             'user_id': self.user_manager.id,
         })
 
-
 class TestTimesheet(TestCommonTimesheet):
+
+    def setUp(self):
+        super(TestTimesheet, self).setUp()
+
+        # Crappy hack to disable the rule from timesheet grid, if it exists
+        # The registry doesn't contain the field timesheet_manager_id.
+        # but there is an ir.rule about it, crashing during its evaluation
+        rule = self.env.ref('timesheet_grid.timesheet_line_rule_user_update-unlink', raise_if_not_found=False)
+        if rule:
+            rule.active = False
 
     def test_log_timesheet(self):
         """ Test when log timesheet : check analytic account, user and employee are correctly set. """
@@ -112,7 +128,6 @@ class TestTimesheet(TestCommonTimesheet):
             'unit_amount': 7,
             'employee_id': self.empl_employee2.id,
         })
-        timesheet3._onchange_employee_id()
         self.assertEqual(timesheet3.user_id, self.user_employee2, 'Timesheet user should be the one linked to the given employee')
         self.assertEqual(timesheet3.product_uom_id, timesheet_uom, "The UoM of the timesheet 3 should be the one set on the company of the analytic account.")
 
@@ -194,7 +209,7 @@ class TestTimesheet(TestCommonTimesheet):
         tracked_project.analytic_account_id.unlink()
 
     def test_transfert_project(self):
-        """ Transfert task with timesheet to another project should not modified past timesheets (they are still linked to old project. """
+        """ Transfert task with timesheet to another project. """
         Timesheet = self.env['account.analytic.line']
         # create a second project
         self.project_customer2 = self.env['project.project'].create({
@@ -222,8 +237,8 @@ class TestTimesheet(TestCommonTimesheet):
 
         timesheet_count1 = Timesheet.search_count([('project_id', '=', self.project_customer.id)])
         timesheet_count2 = Timesheet.search_count([('project_id', '=', self.project_customer2.id)])
-        self.assertEqual(timesheet_count1, 1, "Still one timesheet in project 1")
-        self.assertEqual(timesheet_count2, 0, "No timesheet in project 2")
+        self.assertEqual(timesheet_count1, 0, "No timesheet in project 1")
+        self.assertEqual(timesheet_count2, 1, "Still one timesheet in project 2")
         self.assertEqual(len(self.task1.timesheet_ids), 1, "The timesheet still should be linked to task 1")
 
         # it is forbidden to set a task with timesheet without project
@@ -253,12 +268,18 @@ class TestTimesheet(TestCommonTimesheet):
         timesheets = timesheet_1 + timesheet_2
 
         # increase unit_amount to trigger amount recomputation
-        timesheets.sudo().write({
+        with self.assertRaises(AccessError):
+            # because the employee 1 is the sudo and he doesn't have the access right to update timesheet of employee 2
+            timesheets.sudo().write({
+                'unit_amount': 2,
+            })
+
+        timesheets.with_user(self.user_manager).write({
             'unit_amount': 2,
         })
 
         # since timesheet costs are different for both employees, we should get different amounts
-        self.assertRecordValues(timesheets, [{
+        self.assertRecordValues(timesheets.with_user(self.user_manager), [{
             'amount': -10.0,
         }, {
             'amount': -12.0,

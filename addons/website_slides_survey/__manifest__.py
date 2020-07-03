@@ -4,12 +4,13 @@
     'name': "Course Certifications",
     'summary': 'Add certification capabilities to your courses',
     'description': """This module lets you use the full power of certifications within your courses.""",
-    'category': 'Hidden',
+    'category': 'Website/eLearning',
     'version': '1.0',
     'depends': ['website_slides', 'survey'],
     'installable': True,
     'auto_install': True,
     'data': [
+        'security/ir.model.access.csv',
         'views/assets.xml',
         'views/slide_channel_views.xml',
         'views/slide_slide_views.xml',
@@ -27,6 +28,6 @@
     'demo': [
         'data/survey_demo.xml',
         'data/slide_slide_demo.xml',
-        'data/survey.user_input_line.csv',
+        'data/survey.user_input.line.csv',
     ],
 }

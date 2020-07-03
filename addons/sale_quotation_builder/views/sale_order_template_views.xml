@@ -14,12 +14,12 @@
             </xpath>
 
             <xpath expr="//notebook[@name='description']" position="inside">
-                <page string="Website Description">
+                <page string="Website Description" name="website_description">
                     <field name="website_description" />
                 </page>
             </xpath>
 
-            <xpath expr="//tree/field[@name='price_unit']" position="after">
+            <xpath expr="//tree/field[@name='product_uom_id']" position="after">
                 <field name="website_description" invisible="1"/>
             </xpath>
 

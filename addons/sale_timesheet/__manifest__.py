@@ -13,8 +13,9 @@ This module set the right product on all timesheet lines
 according to the order/contract you work on. This allows to
 have real delivered quantities in sales orders.
 """,
-    'depends': ['sale_management', 'hr_timesheet'],
+    'depends': ['sale_project', 'hr_timesheet'],
     'data': [
+        'data/sale_service_data.xml',
         'security/ir.model.access.csv',
         'security/sale_timesheet_security.xml',
         'views/account_invoice_views.xml',
@@ -29,10 +30,11 @@ have real delivered quantities in sales orders.
         'data/sale_timesheet_filters.xml',
         'wizard/project_create_sale_order_views.xml',
         'wizard/project_create_invoice_views.xml',
+        'wizard/sale_make_invoice_advance_views.xml',
+        'wizard/project_task_create_sale_order_views.xml'
     ],
     'demo': [
         'data/sale_service_demo.xml',
     ],
     'auto_install': True,
-    'uninstall_hook': 'uninstall_hook',
 }

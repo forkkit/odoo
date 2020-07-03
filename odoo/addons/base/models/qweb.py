@@ -5,7 +5,8 @@ import os.path
 import re
 import traceback
 
-from collections import OrderedDict, Sized, Mapping
+from collections import OrderedDict
+from collections.abc import Sized, Mapping
 from functools import reduce
 from itertools import tee, count
 from textwrap import dedent
@@ -18,13 +19,8 @@ from werkzeug.utils import escape as _escape
 
 from odoo.tools import pycompat, freehash
 
-try:
-    import builtins
-    builtin_defaults = {name: getattr(builtins, name) for name in dir(builtins)}
-except ImportError:
-    # pylint: disable=bad-python3-import
-    import __builtin__
-    builtin_defaults = {name: getattr(__builtin__, name) for name in dir(__builtin__)}
+import builtins
+builtin_defaults = {name: getattr(builtins, name) for name in dir(builtins)}
 
 try:
     import astor
@@ -94,6 +90,7 @@ class Contextifier(ast.NodeTransformer):
                 # handle that cross-version
                 kwonlyargs=[],
                 kw_defaults=[],
+                posonlyargs=[],
             ),
             body=Contextifier(self._safe_names + tuple(names)).visit(node.body)
         ), node)
@@ -237,13 +234,14 @@ class frozendict(dict):
 
 
 class QWeb(object):
+    __slots__ = ()
 
     _void_elements = frozenset([
         'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'keygen',
         'link', 'menuitem', 'meta', 'param', 'source', 'track', 'wbr'])
     _name_gen = count()
 
-    def render(self, template, values=None, **options):
+    def _render(self, template, values=None, **options):
         """ render(template, values, **options)
 
         Render the template specified by the given name.
@@ -354,7 +352,7 @@ class QWeb(object):
             return (document, template)
         else:
             try:
-                document = options.get('load', self.load)(template, options)
+                document = options.get('load', self._load)(template, options)
             except QWebException as e:
                 raise e
             except Exception as e:
@@ -378,7 +376,7 @@ class QWeb(object):
                 return (node, document)
         return (element, document)
 
-    def load(self, template, options):
+    def _load(self, template, options):
         """ Load a given template. """
         return template
 
@@ -542,7 +540,7 @@ class QWeb(object):
                 ast.arg(arg='values', annotation=None),
                 ast.arg(arg='options', annotation=None),
                 ast.arg(arg='log', annotation=None),
-            ], defaults=[], vararg=None, kwarg=None, kwonlyargs=[], kw_defaults=[]),
+            ], defaults=[], vararg=None, kwarg=None, posonlyargs=[], kwonlyargs=[], kw_defaults=[]),
             body=body or [ast.Return()],
             decorator_list=[])
         if lineno is not None:
@@ -1094,7 +1092,15 @@ class QWeb(object):
     def _compile_directive_if(self, el, options):
         orelse = []
         next_el = el.getnext()
+        comments_to_remove = []
+        while isinstance(next_el, etree._Comment):
+            comments_to_remove.append(next_el)
+            next_el = next_el.getnext()
+
         if next_el is not None and {'t-else', 't-elif'} & set(next_el.attrib):
+            parent = el.getparent()
+            for comment in comments_to_remove:
+                parent.remove(comment)
             if el.tail and not el.tail.isspace():
                 raise ValueError("Unexpected non-whitespace characters between t-if and t-else directives")
             el.tail = None

@@ -247,7 +247,8 @@ class TestTranslation(TransactionCase):
 
     def setUp(self):
         super(TestTranslation, self).setUp()
-        self.env['ir.translation']._load_module_terms(['base'], ['fr_FR'])
+        lang = self.env['res.lang']._activate_lang('fr_FR')
+        self.env.ref('base.module_base')._update_translations(['fr_FR'])
         self.customers = self.env['res.partner.category'].create({'name': 'Customers'})
         self.env['ir.translation'].create({
             'type': 'model',
@@ -352,8 +353,8 @@ class TestTranslation(TransactionCase):
         translations = self.env['ir.translation'].search([('name', '=', 'res.partner.category,name'), ('res_id', '=', cheese.id)], order='lang')
         self.assertEqual(len(translations), 2)
         self.assertRecordValues(translations,
-            [{'lang': 'en_US', 'src': 'Cheese', 'value': 'Cheese'},
-             {'lang': 'fr_FR', 'src': 'Cheese', 'value': 'Cheese'}])
+            [{'lang': 'en_US', 'src': 'Cheese', 'value': ''},
+             {'lang': 'fr_FR', 'src': 'Cheese', 'value': ''}])
 
         # Translate in both language
         translations[0].value = 'The Cheese'
@@ -364,7 +365,6 @@ class TestTranslation(TransactionCase):
         self.assertEqual(cheese.with_context(lang='fr_FR').name, 'Fromage')
         self.assertEqual(cheese.with_context(lang='en_US').name, 'The Cheese')
         cheese.flush()
-        cheese.invalidate_cache()
 
         # set a new master value
         cheese.with_context(lang='en_US').write({'name': 'Delicious Cheese'})
@@ -436,7 +436,7 @@ class TestTranslationWrite(TransactionCase):
         self.assertEqual(source_name[0]['name'], "English Name", "Reference field not updated")
 
     def test_03_fr_single(self):
-        self.env['res.lang'].load_lang('fr_FR')
+        self.env['res.lang']._activate_lang('fr_FR')
         self.env['res.users'].with_context(active_test=False).search([]).write({'lang': 'fr_FR'})
         self.env.ref('base.lang_en').active = False
 
@@ -454,7 +454,7 @@ class TestTranslationWrite(TransactionCase):
         self.assertEqual(len(translations), 0, "No French translation should be created when writing in French")
 
     def test_04_fr_multi(self):
-        self.env['res.lang'].load_lang('fr_FR')
+        self.env['res.lang']._activate_lang('fr_FR')
 
         langs = self.env['res.lang'].get_installed()
         self.assertEqual([('en_US', 'English (US)'), ('fr_FR', 'French / Français')], langs,
@@ -479,10 +479,32 @@ class TestTranslationWrite(TransactionCase):
             {'src': 'English Name', 'value': 'English Name', 'lang': 'en_US'},
             {'src': 'English Name', 'value': 'French Name', 'lang': 'fr_FR'}
         ])
-      
+
+    def test_04_fr_multi_no_en(self):
+        self.env['res.lang']._activate_lang('fr_FR')
+        self.env['res.lang']._activate_lang('es_ES')
+        self.env['res.users'].with_context(active_test=False).search([]).write({'lang': 'fr_FR'})
+        self.env.ref('base.lang_en').active = False
+
+        langs = self.env['res.lang'].get_installed()
+        self.assertEqual([('fr_FR', 'French / Français'), ('es_ES', 'Spanish / Español')], langs,
+                         "Test did not start with the expected languages")
+
+        self.category.with_context(lang='fr_FR').write({'name': 'French Name'})
+        self.category.with_context(lang='es_ES').write({'name': 'Spanish Name'})
+        self.category.with_context(lang=None).write({'name': 'None Name'})
+
+        translations = self.env['ir.translation'].search([
+            ('name', '=', 'res.partner.category,name'),
+            ('res_id', '=', self.category.id),
+        ], order='lang')
+        self.assertRecordValues(translations, [
+            {'src': 'None Name', 'value': 'Spanish Name', 'lang': 'es_ES'},
+            {'src': 'None Name', 'value': 'French Name', 'lang': 'fr_FR'},
+        ])
 
     def test_05_remove_multi(self):
-        self.env['res.lang'].load_lang('fr_FR')
+        self.env['res.lang']._activate_lang('fr_FR')
 
         langs = self.env['res.lang'].get_installed()
         self.assertEqual([('en_US', 'English (US)'), ('fr_FR', 'French / Français')], langs,
@@ -533,6 +555,28 @@ class TestTranslationWrite(TransactionCase):
         ])
         self.assertEqual(len(translations), 0, "Translations were not removed")
 
+        # simulate remove the English translation in the interface
+        belgium.with_context(lang='fr_FR').write({'vat_label': 'TVA'})
+        belgium.with_context(lang='en_US').write({'vat_label': 'VAT'})
+        self.env['ir.translation'].translate_fields('res.country', belgium.id, 'vat_label')
+        en_translation = self.env['ir.translation'].search([
+            ('name', '=', 'res.country,vat_label'),
+            ('res_id', '=', belgium.id),
+            ('lang', '=', 'en_US'),
+        ])
+        en_translation.write({'value': ''})
+
+        # should recover the initial value from db
+        self.assertEqual(
+            "TVA", belgium.with_context(lang='fr_FR').vat_label,
+            "French translation was not kept"
+        )
+        self.assertEqual(
+            "VAT", belgium.with_context(lang='en_US').vat_label,
+            "Did not fallback to source when reset"
+        )
+
+
     def test_field_selection(self):
         """ Test translations of field selections. """
         field = self.env['ir.model']._fields['state']
@@ -554,7 +598,9 @@ class TestTranslationWrite(TransactionCase):
 class TestXMLTranslation(TransactionCase):
     def setUp(self):
         super(TestXMLTranslation, self).setUp()
-        self.env['ir.translation']._load_module_terms(['base'], ['fr_FR', 'nl_NL'])
+        self.env['res.lang']._activate_lang('fr_FR')
+        self.env['res.lang']._activate_lang('nl_NL')
+        self.env.ref('base.module_base')._update_translations(['fr_FR', 'nl_NL'])
 
     def create_view(self, archf, terms, **kwargs):
         view = self.env['ir.ui.view'].create({
@@ -624,27 +670,41 @@ class TestXMLTranslation(TransactionCase):
         terms_en = ('Bread and cheeze',)
         terms_fr = ('Pain et fromage',)
         terms_nl = ('Brood and kaas',)
-        view = self.create_view(archf, terms_en, fr_FR=terms_fr, nl_NL=terms_nl)
+        view = self.create_view(archf, terms_en, en_US=terms_en, fr_FR=terms_fr, nl_NL=terms_nl)
 
-        env_en = self.env(context={})
+        env_nolang = self.env(context={})
+        env_en = self.env(context={'lang': 'en_US'})
         env_fr = self.env(context={'lang': 'fr_FR'})
         env_nl = self.env(context={'lang': 'nl_NL'})
 
+        self.assertEqual(view.with_env(env_nolang).arch_db, archf % terms_en)
         self.assertEqual(view.with_env(env_en).arch_db, archf % terms_en)
         self.assertEqual(view.with_env(env_fr).arch_db, archf % terms_fr)
         self.assertEqual(view.with_env(env_nl).arch_db, archf % terms_nl)
 
         # modify source term in view (fixed type in 'cheeze')
         terms_en = ('Bread and cheese',)
-        view.write({'arch_db': archf % terms_en})
+        view.with_env(env_en).write({'arch_db': archf % terms_en})
 
         # check whether translations have been synchronized
+        self.assertEqual(view.with_env(env_nolang).arch_db, archf % terms_en)
         self.assertEqual(view.with_env(env_en).arch_db, archf % terms_en)
         self.assertEqual(view.with_env(env_fr).arch_db, archf % terms_fr)
         self.assertEqual(view.with_env(env_nl).arch_db, archf % terms_nl)
 
+        view = self.create_view(archf, terms_fr, en_US=terms_en, fr_FR=terms_fr, nl_NL=terms_nl)
+        # modify source term in view in another language with close term
+        new_terms_fr = ('Pains et fromage',)
+        view.with_env(env_fr).write({'arch_db': archf % new_terms_fr})
+
+        # check whether translations have been synchronized
+        self.assertEqual(view.with_env(env_nolang).arch_db, archf % new_terms_fr)
+        self.assertEqual(view.with_env(env_en).arch_db, archf % terms_en)
+        self.assertEqual(view.with_env(env_fr).arch_db, archf % new_terms_fr)
+        self.assertEqual(view.with_env(env_nl).arch_db, archf % terms_nl)
+
     def test_sync_update(self):
-        """ Check translations after minor change in source terms. """
+        """ Check translations after major changes in source terms. """
         archf = '<form string="X"><div>%s</div><div>%s</div></form>'
         terms_src = ('Subtotal', 'Subtotal:')
         terms_en = ('', 'Sub total:')
@@ -658,9 +718,8 @@ class TestXMLTranslation(TransactionCase):
         self.assertEqual(len(translations), 2)
 
         # modifying the arch should sync existing translations without errors
-        view.write({
-            "arch": archf % ('Subtotal', 'Subtotal:<br/>')
-        })
+        new_arch = archf % ('Subtotal', 'Subtotal:<br/>')
+        view.write({"arch_db": new_arch})
 
         translations = self.env['ir.translation'].search([
             ('type', '=', 'model_terms'),
@@ -670,3 +729,18 @@ class TestXMLTranslation(TransactionCase):
         # 'Subtotal' being src==value, it will be discared
         # 'Subtotal:' will be discarded as it match 'Subtotal' instead of 'Subtotal:<br/>'
         self.assertEqual(len(translations), 0)
+
+    def test_cache_consistency(self):
+        view = self.env["ir.ui.view"].create({
+            "name": "test_translate_xml_cache_invalidation",
+            "model": "res.partner",
+            "arch": "<form><b>content</b></form>",
+        })
+        view_fr = view.with_context({"lang": "fr_FR"})
+        self.assertIn("<b>", view.arch_db)
+        self.assertIn("<b>", view_fr.arch_db)
+
+        # write with no lang, and check consistency in other languages
+        view.write({"arch_db": "<form><i>content</i></form>"})
+        self.assertIn("<i>", view.arch_db)
+        self.assertIn("<i>", view_fr.arch_db)

@@ -457,12 +457,12 @@
                 'repartition_type': 'base',
             }),
             (0,0, {
-                'factor_percent': 20,
+                'factor_percent': 10,
                 'repartition_type': 'tax',
                 'account_id': ref('1601'),
             }),
             (0,0, {
-                'factor_percent': 80,
+                'factor_percent': 90,
                 'repartition_type': 'tax',
             }),
         ]"/>
@@ -472,12 +472,12 @@
                 'repartition_type': 'base',
             }),
             (0,0, {
-                'factor_percent': 20,
+                'factor_percent': 10,
                 'repartition_type': 'tax',
                 'account_id': ref('1601'),
             }),
             (0,0, {
-                'factor_percent': 80,
+                'factor_percent': 90,
                 'repartition_type': 'tax',
             }),
         ]"/>
@@ -851,58 +851,6 @@
         ]"/>
     </record>
 
-    <record id="4I5b" model="account.tax.template">
-        <field name="description">4I5b</field>
-        <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
-        <field name="name">IVA al 4% detraibile al 50% (D)</field>
-        <field name="sequence">200</field>
-        <field name="amount">2</field>
-        <field name="amount_type">percent</field>
-        <field name="type_tax_use">none</field>
-        <field name="price_include">False</field>
-        <field name="tax_group_id" ref="tax_group_iva_4_de_50"/>
-        <field name="invoice_repartition_line_ids" eval="[(5, 0, 0),
-            (0,0, {
-                'factor_percent': 100,
-                'repartition_type': 'base',
-            }),
-
-        ]"/>
-        <field name="refund_repartition_line_ids" eval="[(5, 0, 0),
-            (0,0, {
-                'factor_percent': 100,
-                'repartition_type': 'base',
-            }),
-
-        ]"/>
-    </record>
-
-    <record id="4I5a" model="account.tax.template">
-        <field name="description">4I5a</field>
-        <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
-        <field name="name">IVA al 4% detraibile al 50% (I)</field>
-        <field name="sequence">100</field>
-        <field name="amount">2</field>
-        <field name="amount_type">percent</field>
-        <field name="type_tax_use">none</field>
-        <field name="price_include">False</field>
-        <field name="tax_group_id" ref="tax_group_iva_4_de_50"/>
-        <field name="invoice_repartition_line_ids" eval="[(5, 0, 0),
-            (0,0, {
-                'factor_percent': 100,
-                'repartition_type': 'base',
-            }),
-
-        ]"/>
-        <field name="refund_repartition_line_ids" eval="[(5, 0, 0),
-            (0,0, {
-                'factor_percent': 100,
-                'repartition_type': 'base',
-            }),
-
-        ]"/>
-    </record>
-
     <record id="4I5" model="account.tax.template">
         <field name="description">4I5</field>
         <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
@@ -1073,7 +1021,7 @@
         ]"/>
     </record>
 
-    <record id="22v INC" model="account.tax.template">
+    <record id="22v_INC" model="account.tax.template">
         <field name="description">22v INC</field>
         <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
         <field name="name">Iva al 22% (debito) INC</field>
@@ -1107,7 +1055,7 @@
         ]"/>
     </record>
 
-    <record id="21v INC" model="account.tax.template">
+    <record id="21v_INC" model="account.tax.template">
         <field name="description">21v INC</field>
         <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
         <field name="name">Iva al 21% (debito) INC</field>
@@ -1141,7 +1089,7 @@
         ]"/>
     </record>
 
-    <record id="20v INC" model="account.tax.template">
+    <record id="20v_INC" model="account.tax.template">
         <field name="description">20v INC</field>
         <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
         <field name="name">Iva al 20% (debito) INC</field>
@@ -1175,7 +1123,7 @@
         ]"/>
     </record>
 
-    <record id="10v INC" model="account.tax.template">
+    <record id="10v_INC" model="account.tax.template">
         <field name="description">10v INC</field>
         <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
         <field name="name">Iva al 10% (debito) INC</field>
@@ -1209,7 +1157,7 @@
         ]"/>
     </record>
 
-    <record id="12v INC" model="account.tax.template">
+    <record id="12v_INC" model="account.tax.template">
         <field name="description">12v INC</field>
         <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
         <field name="name">Iva 12% (debito) INC</field>
@@ -1243,7 +1191,7 @@
         ]"/>
     </record>
 
-    <record id="2v INC" model="account.tax.template">
+    <record id="2v_INC" model="account.tax.template">
         <field name="description">2v INC</field>
         <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
         <field name="name">Iva 2% (debito) INC</field>
@@ -1277,7 +1225,7 @@
         ]"/>
     </record>
 
-    <record id="4v INC" model="account.tax.template">
+    <record id="4v_INC" model="account.tax.template">
         <field name="description">4v INC</field>
         <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
         <field name="name">Iva 4% (debito) INC</field>
@@ -1311,7 +1259,7 @@
         ]"/>
     </record>
 
-    <record id="00v INC" model="account.tax.template">
+    <record id="00v_INC" model="account.tax.template">
         <field name="description">00v INC</field>
         <field name="chart_template_id" ref="l10n_it_chart_template_generic"/>
         <field name="name">Fuori Campo IVA (debito) INC</field>

@@ -4,9 +4,10 @@
 import base64
 import logging
 import psycopg2
-import werkzeug
+import werkzeug.utils
+import werkzeug.wrappers
 
-from werkzeug import url_encode
+from werkzeug.urls import url_encode
 
 from odoo import api, http, registry, SUPERUSER_ID, _
 from odoo.exceptions import AccessError
@@ -36,7 +37,7 @@ class MailController(http.Controller):
     def _check_token_and_record_or_redirect(cls, model, res_id, token):
         comparison = cls._check_token(token)
         if not comparison:
-            _logger.warning(_('Invalid token in route %s') % request.httprequest.url)
+            _logger.warning('Invalid token in route %s', request.httprequest.url)
             return comparison, None, cls._redirect_to_messaging()
         try:
             record = request.env[model].browse(res_id).exists()
@@ -90,7 +91,7 @@ class MailController(http.Controller):
                     #   redirect to the messaging.
                     suggested_company = record_sudo._get_mail_redirect_suggested_company()
                     if not suggested_company:
-                        raise AccessError()
+                        raise AccessError('')
                     cids = cids + [suggested_company.id]
                     record_sudo.with_user(uid).with_context(allowed_company_ids=cids).check_access_rule('read')
             except AccessError:
@@ -125,69 +126,67 @@ class MailController(http.Controller):
         url = '/web?#%s' % url_encode(url_params)
         return werkzeug.utils.redirect(url)
 
-    @http.route('/mail/receive', type='json', auth='none')
-    def receive(self, req):
-        """ End-point to receive mail from an external SMTP server. """
-        dbs = req.jsonrequest.get('databases')
-        for db in dbs:
-            message = base64.b64decode(dbs[db])
-            try:
-                db_registry = registry(db)
-                with db_registry.cursor() as cr:
-                    env = api.Environment(cr, SUPERUSER_ID, {})
-                    env['mail.thread'].message_process(None, message)
-            except psycopg2.Error:
-                pass
-        return True
-
     @http.route('/mail/read_followers', type='json', auth='user')
-    def read_followers(self, follower_ids, res_model):
-        followers = []
-        is_editable = request.env['mail.followers'].user_has_groups('base.group_no_one')
-        partner_id = request.env.user.partner_id
-        follower_id = None
+    def read_followers(self, follower_ids):
+        request.env['mail.followers'].check_access_rights("read")
         follower_recs = request.env['mail.followers'].sudo().browse(follower_ids)
         res_ids = follower_recs.mapped('res_id')
+        res_models = set(follower_recs.mapped('res_model'))
+        if len(res_models) > 1:
+            raise AccessError(_("Can't read followers with different targeted model"))
+        res_model = res_models.pop()
+        request.env[res_model].check_access_rights("read")
         request.env[res_model].browse(res_ids).check_access_rule("read")
+
+        followers = []
+        follower_id = None
         for follower in follower_recs:
-            is_uid = partner_id == follower.partner_id
-            follower_id = follower.id if is_uid else follower_id
+            if follower.partner_id == request.env.user.partner_id:
+                follower_id = follower.id
             followers.append({
                 'id': follower.id,
-                'name': follower.partner_id.name or follower.channel_id.name,
-                'email': follower.partner_id.email if follower.partner_id else None,
-                'res_model': 'res.partner' if follower.partner_id else 'mail.channel',
-                'res_id': follower.partner_id.id or follower.channel_id.id,
-                'is_editable': is_editable,
-                'is_uid': is_uid,
-                'active': follower.partner_id.active or bool(follower.channel_id),
+                'partner_id': follower.partner_id.id,
+                'channel_id': follower.channel_id.id,
+                'name': follower.name,
+                'email': follower.email,
+                'is_active': follower.is_active,
+                # When editing the followers, the "pencil" icon that leads to the edition of subtypes
+                # should be always be displayed and not only when "debug" mode is activated.
+                'is_editable': True
             })
         return {
             'followers': followers,
-            'subtypes': self.read_subscription_data(res_model, follower_id) if follower_id else None
+            'subtypes': self.read_subscription_data(follower_id) if follower_id else None
         }
 
     @http.route('/mail/read_subscription_data', type='json', auth='user')
-    def read_subscription_data(self, res_model, follower_id):
+    def read_subscription_data(self, follower_id):
         """ Computes:
             - message_subtype_data: data about document subtypes: which are
                 available, which are followed if any """
-        followers = request.env['mail.followers'].browse(follower_id)
+        request.env['mail.followers'].check_access_rights("read")
+        follower = request.env['mail.followers'].sudo().browse(follower_id)
+        follower.ensure_one()
+        request.env[follower.res_model].check_access_rights("read")
+        request.env[follower.res_model].browse(follower.res_id).check_access_rule("read")
 
         # find current model subtypes, add them to a dictionary
-        subtypes = request.env['mail.message.subtype'].search(['&', ('hidden', '=', False), '|', ('res_model', '=', res_model), ('res_model', '=', False)])
+        subtypes = request.env['mail.message.subtype'].search([
+            '&', ('hidden', '=', False),
+            '|', ('res_model', '=', follower.res_model), ('res_model', '=', False)])
+        followed_subtypes_ids = set(follower.subtype_ids.ids)
         subtypes_list = [{
             'name': subtype.name,
             'res_model': subtype.res_model,
             'sequence': subtype.sequence,
             'default': subtype.default,
             'internal': subtype.internal,
-            'followed': subtype.id in followers.mapped('subtype_ids').ids,
+            'followed': subtype.id in followed_subtypes_ids,
             'parent_model': subtype.parent_id.res_model,
             'id': subtype.id
         } for subtype in subtypes]
-        subtypes_list = sorted(subtypes_list, key=lambda it: (it['parent_model'] or '', it['res_model'] or '', it['internal'], it['sequence']))
-        return subtypes_list
+        return sorted(subtypes_list,
+                      key=lambda it: (it['parent_model'] or '', it['res_model'] or '', it['internal'], it['sequence']))
 
     @http.route('/mail/view', type='http', auth='public')
     def mail_action_view(self, model=None, res_id=None, access_token=None, **kwargs):
@@ -273,6 +272,8 @@ class MailController(http.Controller):
             'is_moderator': request.env.user.is_moderator,
             'moderation_counter': request.env.user.moderation_counter,
             'moderation_channel_ids': request.env.user.moderation_channel_ids.ids,
+            'partner_root': request.env.ref('base.partner_root').sudo().mail_partner_format(),
+            'public_partner': request.env.ref('base.public_partner').sudo().mail_partner_format(),
         }
         return values
 

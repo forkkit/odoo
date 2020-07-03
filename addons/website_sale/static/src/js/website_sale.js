@@ -12,8 +12,16 @@ publicWidget.registry.websiteSaleCartLink = publicWidget.Widget.extend({
     events: {
         'mouseenter': '_onMouseEnter',
         'mouseleave': '_onMouseLeave',
+        'click': '_onClick',
     },
 
+    /**
+     * @constructor
+     */
+    init: function () {
+        this._super.apply(this, arguments);
+        this._popoverRPC = null;
+    },
     /**
      * @override
      */
@@ -48,7 +56,7 @@ publicWidget.registry.websiteSaleCartLink = publicWidget.Widget.extend({
             if (!self.$el.is(':hover') || $('.mycart-popover:visible').length) {
                 return;
             }
-            $.get("/shop/cart", {
+            self._popoverRPC = $.get("/shop/cart", {
                 type: 'popover',
             }).then(function (data) {
                 self.$el.data("bs.popover").config.content = data;
@@ -57,7 +65,7 @@ publicWidget.registry.websiteSaleCartLink = publicWidget.Widget.extend({
                     self.$el.trigger('mouseleave');
                 });
             });
-        }, 100);
+        }, 300);
     },
     /**
      * @private
@@ -73,6 +81,25 @@ publicWidget.registry.websiteSaleCartLink = publicWidget.Widget.extend({
                self.$el.popover('hide');
             }
         }, 1000);
+    },
+    /**
+     * @private
+     * @param {Event} ev
+     */
+    _onClick: function (ev) {
+        // When clicking on the cart link, prevent any popover to show up (by
+        // clearing the related setTimeout) and, if a popover rpc is ongoing,
+        // wait for it to be completed before going to the link's href. Indeed,
+        // going to that page may perform the same computation the popover rpc
+        // is already doing.
+        clearTimeout(timeout);
+        if (this._popoverRPC && this._popoverRPC.state() === 'pending') {
+            ev.preventDefault();
+            var href = ev.currentTarget.href;
+            this._popoverRPC.then(function () {
+                window.location.href = href;
+            });
+        }
     },
 });
 });
@@ -120,13 +147,12 @@ odoo.define('website_sale.website_sale', function (require) {
 
 var core = require('web.core');
 var config = require('web.config');
-var concurrency = require('web.concurrency');
 var publicWidget = require('web.public.widget');
 var VariantMixin = require('sale.VariantMixin');
 var wSaleUtils = require('website_sale.utils');
+const wUtils = require('website.utils');
 require("web.zoomodoo");
 
-var qweb = core.qweb;
 
 publicWidget.registry.WebsiteSale = publicWidget.Widget.extend(VariantMixin, {
     selector: '.oe_website_sale',
@@ -183,8 +209,6 @@ publicWidget.registry.WebsiteSale = publicWidget.Widget.extend(VariantMixin, {
         this.triggerVariantChange(this.$el);
 
         this.$('select[name="country_id"]').change();
-
-        this.$('#checkbox_cgv').trigger('change');
 
         core.bus.on('resize', this, function () {
             if (config.device.size_class === config.device.SIZES.XL) {
@@ -319,7 +343,7 @@ publicWidget.registry.WebsiteSale = publicWidget.Widget.extend(VariantMixin, {
         this._rpc({
             route: "/shop/country_infos/" + $("#country_id").val(),
             params: {
-                mode: 'shipping',
+                mode: $("#country_id").attr('mode'),
             },
         }).then(function (data) {
             // placeholder phone_code
@@ -493,29 +517,18 @@ publicWidget.registry.WebsiteSale = publicWidget.Widget.extend(VariantMixin, {
      * @returns {Promise} never resolved
      */
     _submitForm: function () {
-        var $productCustomVariantValues = $('<input>', {
-            name: 'product_custom_attribute_values',
-            type: "hidden",
-            value: JSON.stringify(this.rootProduct.product_custom_attribute_values)
-        });
-        this.$form.append($productCustomVariantValues);
+        let params = this.rootProduct;
+        params.add_qty = params.quantity;
 
-        var $productNoVariantAttributeValues = $('<input>', {
-            name: 'no_variant_attribute_values',
-            type: "hidden",
-            value: JSON.stringify(this.rootProduct.no_variant_attribute_values)
-        });
-        this.$form.append($productNoVariantAttributeValues);
-
+        params.product_custom_attribute_values = JSON.stringify(params.product_custom_attribute_values);
+        params.no_variant_attribute_values = JSON.stringify(params.no_variant_attribute_values);
+        
         if (this.isBuyNow) {
-            this.$form.append($('<input>', {name: 'express', type: "hidden", value: true}));
+            params.express = true;
         }
 
-        this.$form.trigger('submit', [true]);
-
-        return new Promise(function () {});
+        return wUtils.sendRequest('/shop/cart/update', params);
     },
-
     /**
      * @private
      * @param {MouseEvent} ev
@@ -780,134 +793,6 @@ publicWidget.registry.websiteSaleCart = publicWidget.Widget.extend({
     _onClickDeleteProduct: function (ev) {
         ev.preventDefault();
         $(ev.currentTarget).closest('tr').find('.js_quantity').val(0).trigger('change');
-    },
-});
-
-/**
- * @todo maybe the custom autocomplete logic could be extract to be reusable
- */
-publicWidget.registry.productsSearchBar = publicWidget.Widget.extend({
-    selector: '.o_wsale_products_searchbar_form',
-    xmlDependencies: ['/website_sale/static/src/xml/website_sale_utils.xml'],
-    events: {
-        'input .search-query': '_onInput',
-        'focusout': '_onFocusOut',
-        'keydown .search-query': '_onKeydown',
-    },
-    autocompleteMinWidth: 300,
-
-    /**
-     * @constructor
-     */
-    init: function () {
-        this._super.apply(this, arguments);
-
-        this._dp = new concurrency.DropPrevious();
-
-        this._onInput = _.debounce(this._onInput, 400);
-        this._onFocusOut = _.debounce(this._onFocusOut, 100);
-    },
-    /**
-     * @override
-     */
-    start: function () {
-        this.$input = this.$('.search-query');
-
-        this.order = this.$('.o_wsale_search_order_by').val();
-        this.limit = parseInt(this.$input.data('limit'));
-        this.displayDescription = !!this.$input.data('displayDescription');
-        this.displayPrice = !!this.$input.data('displayPrice');
-        this.displayImage = !!this.$input.data('displayImage');
-
-        if (this.limit) {
-            this.$input.attr('autocomplete', 'off');
-        }
-
-        return this._super.apply(this, arguments);
-    },
-
-    //--------------------------------------------------------------------------
-    // Private
-    //--------------------------------------------------------------------------
-
-    /**
-     * @private
-     */
-    _fetch: function () {
-        return this._rpc({
-            route: '/shop/products/autocomplete',
-            params: {
-                'term': this.$input.val(),
-                'options': {
-                    'order': this.order,
-                    'limit': this.limit,
-                    'display_description': this.displayDescription,
-                    'display_price': this.displayPrice,
-                    'max_nb_chars': Math.round(Math.max(this.autocompleteMinWidth, parseInt(this.$el.width())) * 0.22),
-                },
-            },
-        });
-    },
-    /**
-     * @private
-     */
-    _render: function (res) {
-        var $prevMenu = this.$menu;
-        this.$el.toggleClass('dropdown show', !!res);
-        if (res) {
-            var products = res['products'];
-            this.$menu = $(qweb.render('website_sale.productsSearchBar.autocomplete', {
-                products: products,
-                hasMoreProducts: products.length < res['products_count'],
-                currency: res['currency'],
-                widget: this,
-            }));
-            this.$menu.css('min-width', this.autocompleteMinWidth);
-            this.$el.append(this.$menu);
-        }
-        if ($prevMenu) {
-            $prevMenu.remove();
-        }
-    },
-
-    //--------------------------------------------------------------------------
-    // Handlers
-    //--------------------------------------------------------------------------
-
-    /**
-     * @private
-     */
-    _onInput: function () {
-        if (!this.limit) {
-            return;
-        }
-        this._dp.add(this._fetch()).then(this._render.bind(this));
-    },
-    /**
-     * @private
-     */
-    _onFocusOut: function () {
-        if (!this.$el.has(document.activeElement).length) {
-            this._render();
-        }
-    },
-    /**
-     * @private
-     */
-    _onKeydown: function (ev) {
-        switch (ev.which) {
-            case $.ui.keyCode.ESCAPE:
-                this._render();
-                break;
-            case $.ui.keyCode.UP:
-                ev.preventDefault();
-                this.$menu.children().last().focus();
-                break;
-            case $.ui.keyCode.DOWN:
-                ev.preventDefault();
-                this.$menu.children().first().focus();
-                break;
-        }
     },
 });
 });

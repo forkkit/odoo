@@ -8,6 +8,7 @@ class Employee(models.Model):
     _inherit = 'hr.employee'
 
     employee_cars_count = fields.Integer(compute="_compute_employee_cars_count", string="Cars", groups="fleet.fleet_group_manager")
+    mobility_card = fields.Char(groups="fleet.fleet_group_user")
 
     def action_open_employee_cars(self):
         self.ensure_one()
@@ -26,8 +27,11 @@ class Employee(models.Model):
     def _compute_employee_cars_count(self):
         driver_ids = (self.mapped('user_id.partner_id') | self.sudo().mapped('address_home_id')).ids
         fleet_data = self.env['fleet.vehicle.assignation.log'].read_group(
-            domain=[('driver_id', 'in', driver_ids)], fields=['driver_id'], groupby=['driver_id'])
-        mapped_data = {m['driver_id'][0]: m['driver_id_count'] for m in fleet_data}
+            domain=[('driver_id', 'in', driver_ids)], fields=['vehicle_id:array_agg'], groupby=['driver_id'])
+        mapped_data = {
+            group['driver_id'][0]: len(set(group['vehicle_id']))
+            for group in fleet_data
+        }
         for employee in self:
             drivers = employee.user_id.partner_id | employee.sudo().address_home_id
             employee.employee_cars_count = sum(mapped_data.get(pid, 0) for pid in drivers.ids)
@@ -39,3 +43,8 @@ class Employee(models.Model):
             'type': 'ir.actions.act_url',
             'url': '/fleet/print_claim_report/%(employee_id)s' % {'employee_id': self.id},
         }
+
+class EmployeePublic(models.Model):
+    _inherit = 'hr.employee.public'
+
+    mobility_card = fields.Char(readonly=True)

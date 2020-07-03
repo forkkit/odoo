@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from werkzeug.exceptions import Forbidden, NotFound
 
-from odoo import fields, http, tools, _
+from odoo import fields, http, SUPERUSER_ID, tools, _
 from odoo.http import request
 from odoo.addons.base.models.ir_qweb_fields import nl2br
 from odoo.addons.http_routing.models.ir_http import slug
@@ -71,7 +71,7 @@ class TableCompute(object):
                     self.table[(pos // ppr) + y2][(pos % ppr) + x2] = False
             self.table[pos // ppr][pos % ppr] = {
                 'product': p, 'x': x, 'y': y,
-                'class': " ".join(x.html_class for x in p.website_style_ids if x.html_class)
+                'ribbon': p.website_ribbon_id,
             }
             if index <= ppg:
                 maxy = max(maxy, y + (pos // ppr))
@@ -110,7 +110,7 @@ class WebsiteSaleForm(WebsiteForm):
                 'no_auto_thread': False,
                 'res_id': order.id,
             }
-            request.env['mail.message'].sudo().create(values)
+            request.env['mail.message'].with_user(SUPERUSER_ID).create(values)
 
         if data['attachments']:
             self.insert_attachment(model_record, order.id, data['attachments'])
@@ -302,7 +302,7 @@ class WebsiteSale(http.Controller):
             values['main_object'] = category
         return request.render("website_sale.products", values)
 
-    @http.route(['/shop/product/<model("product.template"):product>'], type='http', auth="public", website=True)
+    @http.route(['/shop/product/<model("product.template"):product>'], type='http', auth="public", website=True, sitemap=True)
     def product(self, product, category='', search='', **kwargs):
         if not product.can_access_from_current_website():
             raise NotFound()
@@ -371,7 +371,7 @@ class WebsiteSale(http.Controller):
         request.website.sale_get_order(code=promo)
         return request.redirect(redirect)
 
-    @http.route(['/shop/cart'], type='http', auth="public", website=True)
+    @http.route(['/shop/cart'], type='http', auth="public", website=True, sitemap=False)
     def cart(self, access_token=None, revive='', **post):
         """
         Main cart management + abandoned cart revival
@@ -386,7 +386,7 @@ class WebsiteSale(http.Controller):
         if access_token:
             abandoned_order = request.env['sale.order'].sudo().search([('access_token', '=', access_token)], limit=1)
             if not abandoned_order:  # wrong token (or SO has been deleted)
-                return request.render('website.404')
+                raise NotFound()
             if abandoned_order.state != 'draft':  # abandoned cart already finished
                 values.update({'abandoned_proceed': True})
             elif revive == 'squash' or (revive == 'merge' and not request.session.get('sale_order_id')):  # restore old cart or merge with unexistant
@@ -404,6 +404,7 @@ class WebsiteSale(http.Controller):
             'suggested_products': [],
         })
         if order:
+            order.order_line.filtered(lambda l: not l.product_id.active).unlink()
             _order = order
             if not request.env.context.get('pricelist'):
                 _order = order.with_context(pricelist=order.pricelist_id.id)
@@ -415,7 +416,7 @@ class WebsiteSale(http.Controller):
 
         return request.render("website_sale.cart", values)
 
-    @http.route(['/shop/cart/update'], type='http', auth="public", methods=['GET', 'POST'], website=True, csrf=False)
+    @http.route(['/shop/cart/update'], type='http', auth="public", methods=['POST'], website=True)
     def cart_update(self, product_id, add_qty=1, set_qty=0, **kw):
         """This route is called when adding a product to cart (no options)."""
         sale_order = request.website.sale_get_order(force_create=True)
@@ -465,12 +466,12 @@ class WebsiteSale(http.Controller):
         if not display:
             return value
 
-        value['website_sale.cart_lines'] = request.env['ir.ui.view'].render_template("website_sale.cart_lines", {
+        value['website_sale.cart_lines'] = request.env['ir.ui.view']._render_template("website_sale.cart_lines", {
             'website_sale_order': order,
             'date': fields.Date.today(),
             'suggested_products': order._cart_accessories()
         })
-        value['website_sale.short_cart_summary'] = request.env['ir.ui.view'].render_template("website_sale.short_cart_summary", {
+        value['website_sale.short_cart_summary'] = request.env['ir.ui.view']._render_template("website_sale.short_cart_summary", {
             'website_sale_order': order,
         })
         return value
@@ -584,7 +585,7 @@ class WebsiteSale(http.Controller):
     def _checkout_form_save(self, mode, checkout, all_values):
         Partner = request.env['res.partner']
         if mode[0] == 'new':
-            partner_id = Partner.sudo().create(checkout).id
+            partner_id = Partner.sudo().with_context(tracking_disable=True).create(checkout).id
         elif mode[0] == 'edit':
             partner_id = int(all_values.get('partner_id', 0))
             if partner_id:
@@ -635,7 +636,7 @@ class WebsiteSale(http.Controller):
 
         return new_values, errors, error_msg
 
-    @http.route(['/shop/address'], type='http', methods=['GET', 'POST'], auth="public", website=True)
+    @http.route(['/shop/address'], type='http', methods=['GET', 'POST'], auth="public", website=True, sitemap=False)
     def address(self, **kw):
         Partner = request.env['res.partner'].with_context(show_address=1).sudo()
         order = request.website.sale_get_order()
@@ -692,7 +693,7 @@ class WebsiteSale(http.Controller):
                 partner_id = self._checkout_form_save(mode, post, kw)
                 if mode[1] == 'billing':
                     order.partner_id = partner_id
-                    order.onchange_partner_id()
+                    order.with_context(not_self_saleperson=True).onchange_partner_id()
                     # This is the *only* thing that the front end user will see/edit anyway when choosing billing address
                     order.partner_invoice_id = partner_id
                     if not kw.get('use_same'):
@@ -701,6 +702,7 @@ class WebsiteSale(http.Controller):
                 elif mode[1] == 'shipping':
                     order.partner_shipping_id = partner_id
 
+                # TDE FIXME: don't ever do this
                 order.message_partner_ids = [(4, partner_id), (3, request.website.partner_id.id)]
                 if not errors:
                     return request.redirect(kw.get('callback') or '/shop/confirm_order')
@@ -714,15 +716,15 @@ class WebsiteSale(http.Controller):
             'checkout': values,
             'can_edit_vat': can_edit_vat,
             'country': country,
+            'country_states': country.get_website_sale_states(mode=mode[1]),
             'countries': country.get_website_sale_countries(mode=mode[1]),
-            "states": country.get_website_sale_states(mode=mode[1]),
             'error': errors,
             'callback': kw.get('callback'),
             'only_services': order and order.only_services,
         }
         return request.render("website_sale.address", render_values)
 
-    @http.route(['/shop/checkout'], type='http', auth="public", website=True)
+    @http.route(['/shop/checkout'], type='http', auth="public", website=True, sitemap=False)
     def checkout(self, **post):
         order = request.website.sale_get_order()
 
@@ -749,7 +751,7 @@ class WebsiteSale(http.Controller):
             return 'ok'
         return request.render("website_sale.checkout", values)
 
-    @http.route(['/shop/confirm_order'], type='http', auth="public", website=True)
+    @http.route(['/shop/confirm_order'], type='http', auth="public", website=True, sitemap=False)
     def confirm_order(self, **post):
         order = request.website.sale_get_order()
 
@@ -770,7 +772,7 @@ class WebsiteSale(http.Controller):
     # ------------------------------------------------------
     # Extra step
     # ------------------------------------------------------
-    @http.route(['/shop/extra_info'], type='http', auth="public", website=True)
+    @http.route(['/shop/extra_info'], type='http', auth="public", website=True, sitemap=False)
     def extra_info(self, **post):
         # Check that this option is activated
         extra_step = request.website.viewref('website_sale.extra_info_option')
@@ -829,14 +831,13 @@ class WebsiteSale(http.Controller):
         values['acquirers'] = [acq for acq in acquirers if (acq.payment_flow == 'form' and acq.view_template_id) or
                                     (acq.payment_flow == 's2s' and acq.registration_view_template_id)]
         values['tokens'] = request.env['payment.token'].search(
-            [('partner_id', '=', order.partner_id.id),
-            ('acquirer_id', 'in', acquirers.ids)])
+            [('acquirer_id', 'in', acquirers.ids)])
 
         if order:
             values['acq_extra_fees'] = acquirers.get_acquirer_extra_fees(order.amount_total, order.currency_id, order.partner_id.country_id.id)
         return values
 
-    @http.route(['/shop/payment'], type='http', auth="public", website=True)
+    @http.route(['/shop/payment'], type='http', auth="public", website=True, sitemap=False)
     def payment(self, **post):
         """ Payment step. This page proposes several payment means based on available
         payment.acquirer. State at this point :
@@ -920,7 +921,7 @@ class WebsiteSale(http.Controller):
         request.session['__website_sale_last_tx_id'] = transaction.id
         return transaction.render_sale_button(order)
 
-    @http.route('/shop/payment/token', type='http', auth='public', website=True)
+    @http.route('/shop/payment/token', type='http', auth='public', website=True, sitemap=False)
     def payment_token(self, pm_id=None, **kwargs):
         """ Method that handles payment using saved tokens
 
@@ -959,12 +960,12 @@ class WebsiteSale(http.Controller):
 
         return {
             'recall': order.get_portal_last_transaction().state == 'pending',
-            'message': request.env['ir.ui.view'].render_template("website_sale.payment_confirmation_status", {
+            'message': request.env['ir.ui.view']._render_template("website_sale.payment_confirmation_status", {
                 'order': order
             })
         }
 
-    @http.route('/shop/payment/validate', type='http', auth="public", website=True)
+    @http.route('/shop/payment/validate', type='http', auth="public", website=True, sitemap=False)
     def payment_validate(self, transaction_id=None, sale_order_id=None, **post):
         """ Method that should be called by the server when receiving an update
         for a transaction. State at this point :
@@ -1000,12 +1001,11 @@ class WebsiteSale(http.Controller):
         PaymentProcessing.remove_payment_transaction(tx)
         return request.redirect('/shop/confirmation')
 
-
-    @http.route(['/shop/terms'], type='http', auth="public", website=True)
+    @http.route(['/shop/terms'], type='http', auth="public", website=True, sitemap=True)
     def terms(self, **kw):
         return request.render("website_sale.terms")
 
-    @http.route(['/shop/confirmation'], type='http', auth="public", website=True)
+    @http.route(['/shop/confirmation'], type='http', auth="public", website=True, sitemap=False)
     def payment_confirmation(self, **post):
         """ End of checkout process controller. Confirmation is basically seing
         the status of a sale.order. State at this point :
@@ -1021,11 +1021,11 @@ class WebsiteSale(http.Controller):
         else:
             return request.redirect('/shop')
 
-    @http.route(['/shop/print'], type='http', auth="public", website=True)
+    @http.route(['/shop/print'], type='http', auth="public", website=True, sitemap=False)
     def print_saleorder(self, **kwargs):
         sale_order_id = request.session.get('sale_last_order_id')
         if sale_order_id:
-            pdf, _ = request.env.ref('sale.action_report_saleorder').sudo().render_qweb_pdf([sale_order_id])
+            pdf, _ = request.env.ref('sale.action_report_saleorder').sudo()._render_qweb_pdf([sale_order_id])
             pdfhttpheaders = [('Content-Type', 'application/pdf'), ('Content-Length', u'%s' % len(pdf))]
             return request.make_response(pdf, headers=pdfhttpheaders)
         else:
@@ -1053,28 +1053,6 @@ class WebsiteSale(http.Controller):
             'website_id': request.website.id,
         })
         return "%s?enable_editor=1" % product.product_tmpl_id.website_url
-
-    @http.route(['/shop/change_styles'], type='json', auth='user')
-    def change_styles(self, id, style_id):
-        product = request.env['product.template'].browse(id)
-
-        remove = []
-        active = False
-        style_id = int(style_id)
-        for style in product.website_style_ids:
-            if style.id == style_id:
-                remove.append(style.id)
-                active = True
-                break
-
-        style = request.env['product.style'].browse(style_id)
-
-        if remove:
-            product.write({'website_style_ids': [(3, rid) for rid in remove]})
-        if not active:
-            product.write({'website_style_ids': [(4, style.id)]})
-
-        return not active
 
     @http.route(['/shop/change_sequence'], type='json', auth='user')
     def change_sequence(self, id, sequence):
@@ -1229,7 +1207,7 @@ class WebsiteSale(http.Controller):
                 ['product_id', 'visit_datetime:max'], ['product_id'], limit=max_number_of_product_for_carousel, orderby='visit_datetime DESC')
             products_ids = [product['product_id'][0] for product in products]
             if products_ids:
-                viewed_products = request.env['product.product'].browse(products_ids)
+                viewed_products = request.env['product.product'].with_context(display_default_code=False).browse(products_ids)
 
                 FieldMonetary = request.env['ir.qweb.field.monetary']
                 monetary_options = {
@@ -1243,7 +1221,7 @@ class WebsiteSale(http.Controller):
                     res_product.update(combination_info)
                     res_product['price'] = FieldMonetary.value_to_html(res_product['price'], monetary_options)
                     if rating:
-                        res_product['rating'] = request.env["ir.ui.view"].render_template('website_rating.rating_widget_stars_static', values={
+                        res_product['rating'] = request.env["ir.ui.view"]._render_template('portal_rating.rating_widget_stars_static', values={
                             'rating_avg': product.rating_avg,
                             'rating_count': product.rating_count,
                         })
@@ -1255,10 +1233,11 @@ class WebsiteSale(http.Controller):
     @http.route('/shop/products/recently_viewed_update', type='json', auth='public', website=True)
     def products_recently_viewed_update(self, product_id, **kwargs):
         res = {}
-        visitor_sudo = request.env['website.visitor']._get_visitor_from_request_or_create()
-        if request.httprequest.cookies.get('visitor_uuid', '') != visitor_sudo.access_token:
-            res['visitor_uuid'] = visitor_sudo.access_token
-        visitor_sudo._add_viewed_product(product_id)
+        visitor_sudo = request.env['website.visitor']._get_visitor_from_request(force_create=True)
+        if visitor_sudo:
+            if request.httprequest.cookies.get('visitor_uuid', '') != visitor_sudo.access_token:
+                res['visitor_uuid'] = visitor_sudo.access_token
+            visitor_sudo._add_viewed_product(product_id)
         return res
 
     @http.route('/shop/products/recently_viewed_delete', type='json', auth='public', website=True)

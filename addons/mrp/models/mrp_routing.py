@@ -4,32 +4,6 @@
 from odoo import api, fields, models, _
 
 
-class MrpRouting(models.Model):
-    """ Specifies routings of work centers """
-    _name = 'mrp.routing'
-    _description = 'Routings'
-
-    name = fields.Char('Routing', required=True)
-    active = fields.Boolean(
-        'Active', default=True,
-        help="If the active field is set to False, it will allow you to hide the routing without removing it.")
-    code = fields.Char(
-        'Reference',
-        copy=False, default=lambda self: _('New'), readonly=True)
-    note = fields.Text('Description')
-    operation_ids = fields.One2many(
-        'mrp.routing.workcenter', 'routing_id', 'Operations',
-        copy=True)
-    company_id = fields.Many2one(
-        'res.company', 'Company', default=lambda self: self.env.company)
-
-    @api.model
-    def create(self, vals):
-        if 'code' not in vals or vals['code'] == _('New'):
-            vals['code'] = self.env['ir.sequence'].next_by_code('mrp.routing') or _('New')
-        return super(MrpRouting, self).create(vals)
-
-
 class MrpRoutingWorkcenter(models.Model):
     _name = 'mrp.routing.workcenter'
     _description = 'Work Center Usage'
@@ -41,21 +15,21 @@ class MrpRoutingWorkcenter(models.Model):
     sequence = fields.Integer(
         'Sequence', default=100,
         help="Gives the sequence order when displaying a list of routing Work Centers.")
-    routing_id = fields.Many2one(
-        'mrp.routing', 'Parent Routing',
-        index=True, ondelete='cascade', required=True,
-        help="The routing contains all the Work Centers used and for how long. This will create work orders afterwards "
-        "which alters the execution of the manufacturing order.")
-    note = fields.Text('Description')
+    bom_id = fields.Many2one(
+        'mrp.bom', 'Bill of Material',
+        index=True, ondelete='cascade',
+        help="The Bill of Material this operation is linked to")
     company_id = fields.Many2one(
         'res.company', 'Company',
-        readonly=True, related='routing_id.company_id', store=True)
-    worksheet = fields.Binary('PDF', help="Upload your PDF file.")
+        readonly=True, store=True,
+        default=lambda self: self.env.company)
     worksheet_type = fields.Selection([
-        ('pdf', 'PDF'), ('google_slide', 'Google Slide')],
+        ('pdf', 'PDF'), ('google_slide', 'Google Slide'), ('text', 'Text')],
         string="Work Sheet", default="pdf",
         help="Defines if you want to use a PDF or a Google Slide as work sheet."
     )
+    note = fields.Text('Description', help="Text worksheet description")
+    worksheet = fields.Binary('PDF')
     worksheet_google_slide = fields.Char('Google Slide', help="Paste the url of your Google Slide. Make sure the access to the document is public.")
     time_mode = fields.Selection([
         ('auto', 'Compute based on real time'),

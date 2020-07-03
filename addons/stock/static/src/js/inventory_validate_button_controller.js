@@ -27,10 +27,10 @@ var InventoryValidationController = ListController.extend({
     /**
      * @override
      */
-    renderButtons: function ($node) {
+    renderButtons: function () {
         this._super.apply(this, arguments);
         var $validationButton = $(qweb.render('InventoryLines.Buttons'));
-        $validationButton.prependTo($node.find('.o_list_buttons'));
+        this.$buttons.prepend($validationButton);
     },
 
     // -------------------------------------------------------------------------
@@ -69,15 +69,9 @@ var InventoryValidationController = ListController.extend({
                     }
                     // ... but in any other cases, we go back on the inventory form.
                     self.do_notify(
-                        _t("Success"),
+                        false,
                         _t("The inventory has been validated"));
-                    self.do_action({
-                        type: 'ir.actions.act_window',
-                        res_model: 'stock.inventory',
-                        res_id: self.inventory_id,
-                        views: [[false, 'form']],
-                        target: 'main'
-                    });
+                    self.trigger_up('history_back');
                 };
 
                 if (_.isObject(res)) {

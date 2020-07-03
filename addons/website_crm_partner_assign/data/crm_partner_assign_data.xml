@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
-        <record model="crm.lead.tag" id="tag_portal_lead_partner_unavailable">
+        <record model="crm.tag" id="tag_portal_lead_partner_unavailable">
             <field name="name">No more partner available</field>
             <field name="color">3</field>
         </record>
-        <record model="crm.lead.tag" id="tag_portal_lead_is_spam">
+        <record model="crm.tag" id="tag_portal_lead_is_spam">
             <field name="name">Spam</field>
             <field name="color">3</field>
         </record>
-        <record model="crm.lead.tag" id="tag_portal_lead_own_opp">
+        <record model="crm.tag" id="tag_portal_lead_own_opp">
             <field name="name">Created by Partner</field>
             <field name="color">4</field>
         </record>
@@ -118,17 +118,6 @@
             </field>
             <field name="lang">${ctx['partner_id'].lang}</field>
             <field name="auto_delete" eval="True"/>
-            <field name="user_signature" eval="False"/>
         </record>
     </data>
-
-    <data noupdate="1">
-        <record id="menu_resellers" model="website.menu">
-            <field name="name">Resellers</field>
-            <field name="url">/partners</field>
-            <field name="parent_id" ref="website.main_menu"/>
-            <field name="sequence">55</field>
-        </record>
-    </data>
-
 </odoo>

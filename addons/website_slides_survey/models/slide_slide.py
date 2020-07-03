@@ -8,37 +8,31 @@ class SlidePartnerRelation(models.Model):
     _inherit = 'slide.slide.partner'
 
     user_input_ids = fields.One2many('survey.user_input', 'slide_partner_id', 'Certification attempts')
-    survey_quizz_passed = fields.Boolean('Certification Quizz Passed', compute='_compute_survey_quizz_passed', store=True)
+    survey_scoring_success = fields.Boolean('Certification Succeeded', compute='_compute_survey_scoring_success', store=True)
 
-    @api.depends('partner_id', 'user_input_ids.quizz_passed')
-    def _compute_survey_quizz_passed(self):
-        passed_user_inputs = self.env['survey.user_input'].sudo().search([
+    @api.depends('partner_id', 'user_input_ids.scoring_success')
+    def _compute_survey_scoring_success(self):
+        succeeded_user_inputs = self.env['survey.user_input'].sudo().search([
             ('slide_partner_id', 'in', self.ids),
-            ('quizz_passed', '=', True)
+            ('scoring_success', '=', True)
         ])
-        passed_slide_partners = passed_user_inputs.mapped('slide_partner_id')
+        succeeded_slide_partners = succeeded_user_inputs.mapped('slide_partner_id')
         for record in self:
-            record.survey_quizz_passed = record in passed_slide_partners
+            record.survey_scoring_success = record in succeeded_slide_partners
 
-    @api.model_create_multi
-    def create(self, vals_list):
-        res = super(SlidePartnerRelation, self).create(vals_list)
-        completed = res.filtered('survey_quizz_passed')
-        if completed:
-            completed.write({'completed': True})
-        return res
-
-    def _write(self, vals):
-        res = super(SlidePartnerRelation, self)._write(vals)
-        if vals.get('survey_quizz_passed'):
-            self.sudo().write({'completed': True})
-        return res
-
+    def _compute_field_value(self, field):
+        super()._compute_field_value(field)
+        if field.name == 'survey_scoring_success':
+            self.filtered('survey_scoring_success').write({
+                'completed': True
+            })
 
 class Slide(models.Model):
     _inherit = 'slide.slide'
 
-    slide_type = fields.Selection(selection_add=[('certification', 'Certification')])
+    slide_type = fields.Selection(selection_add=[
+        ('certification', 'Certification')
+    ], ondelete={'certification': 'set default'})
     survey_id = fields.Many2one('survey.survey', 'Certification')
     nbr_certification = fields.Integer("Number of Certifications", compute='_compute_slides_statistics', store=True)
 
@@ -57,7 +51,33 @@ class Slide(models.Model):
         rec = super(Slide, self).create(values)
         if rec.survey_id:
             rec.slide_type = 'certification'
+        if 'survey_id' in values:
+            rec._ensure_challenge_category()
         return rec
+
+    def write(self, values):
+        old_surveys = self.mapped('survey_id')
+        result = super(Slide, self).write(values)
+        if 'survey_id' in values:
+            self._ensure_challenge_category(old_surveys=old_surveys - self.mapped('survey_id'))
+        return result
+
+    def unlink(self):
+        old_surveys = self.mapped('survey_id')
+        result = super(Slide, self).unlink()
+        self._ensure_challenge_category(old_surveys=old_surveys, unlink=True)
+        return result
+
+    def _ensure_challenge_category(self, old_surveys=None, unlink=False):
+        """ If a slide is linked to a survey that gives a badge, the challenge category of this badge must be
+        set to 'slides' in order to appear under the certification badge list on ranks_badges page.
+        If the survey is unlinked from the slide, the challenge category must be reset to 'certification'"""
+        if old_surveys:
+            old_certification_challenges = old_surveys.mapped('certification_badge_id').challenge_ids
+            old_certification_challenges.write({'challenge_category': 'certification'})
+        if not unlink:
+            certification_challenges = self.mapped('survey_id').mapped('certification_badge_id').challenge_ids
+            certification_challenges.write({'challenge_category': 'slides'})
 
     def _generate_certification_url(self):
         """ get a map of certification url for certification slide from `self`. The url will come from the survey user input:
@@ -77,7 +97,7 @@ class Slide(models.Model):
                     last_user_input = next(user_input for user_input in user_membership_id_sudo.user_input_ids.sorted(
                         lambda user_input: user_input.create_date, reverse=True
                     ))
-                    certification_urls[slide.id] = last_user_input._get_survey_url()
+                    certification_urls[slide.id] = last_user_input.get_start_url()
                 else:
                     user_input = slide.survey_id.sudo()._create_answer(
                         partner=self.env.user.partner_id,
@@ -88,7 +108,7 @@ class Slide(models.Model):
                         },
                         invite_token=self.env['survey.user_input']._generate_invite_token()
                     )
-                    certification_urls[slide.id] = user_input._get_survey_url()
+                    certification_urls[slide.id] = user_input.get_start_url()
             else:
                 user_input = slide.survey_id.sudo()._create_answer(
                     partner=self.env.user.partner_id,
@@ -97,5 +117,5 @@ class Slide(models.Model):
                         'slide_id': slide.id
                     }
                 )
-                certification_urls[slide.id] = user_input._get_survey_url()
+                certification_urls[slide.id] = user_input.get_start_url()
         return certification_urls

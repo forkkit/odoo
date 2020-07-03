@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo.addons.sms.tests import common as sms_common
-from odoo.addons.test_mail_full.tests import common as test_mail_full_common
+from odoo.addons.test_mail_full.tests.common import TestMailFullCommon, TestRecipients
 
 
-class TestSmsTemplate(test_mail_full_common.BaseFunctionalTest, sms_common.MockSMS, test_mail_full_common.TestRecipients):
+class TestSmsTemplate(TestMailFullCommon, TestRecipients):
 
     @classmethod
     def setUpClass(cls):
@@ -25,7 +24,7 @@ class TestSmsTemplate(test_mail_full_common.BaseFunctionalTest, sms_common.MockS
         self.assertEqual(rendered_body[self.test_record.id], 'Dear %s this is an SMS.' % self.test_record.display_name)
 
     def test_sms_template_lang(self):
-        self.env.ref('base.lang_fr').write({'active': True})
+        self.env['res.lang']._activate_lang('fr_FR')
         self.user_admin.write({'lang': 'en_US'})
         self.env['ir.translation'].create({
             'type': 'model',
@@ -51,21 +50,42 @@ class TestSmsTemplate(test_mail_full_common.BaseFunctionalTest, sms_common.MockS
         self.assertEqual(self.sms_template.body, self.body_en)
         self.assertEqual(self.sms_template.with_context(lang='fr_FR').body, self.body_fr)
 
-        rid_to_tpl = self.sms_template._get_context_lang_per_id((self.test_record | test_record_2).ids)
-        self.assertEqual(set(rid_to_tpl.keys()), set((self.test_record | test_record_2).ids))
-        for rid, tpl in rid_to_tpl.items():
+        rid_to_lang = self.sms_template._render_lang((self.test_record | test_record_2).ids)
+        self.assertEqual(set(rid_to_lang.keys()), set((self.test_record | test_record_2).ids))
+        for rid, lang in rid_to_lang.items():
+            # TDE FIXME: False or en_US ?
             if rid == self.test_record.id:
-                self.assertEqual(tpl._context.get('lang'), 'en_US')
+                self.assertEqual(lang, 'en_US')
             elif rid == test_record_2.id:
-                self.assertEqual(tpl._context.get('lang'), 'fr_FR')
+                self.assertEqual(lang, 'fr_FR')
             else:
                 self.assertTrue(False)
 
-        lang_to_rids = self.sms_template._get_ids_per_lang((self.test_record | test_record_2).ids)
-        for lang, rids in lang_to_rids.items():
+        tpl_to_rids = self.sms_template._classify_per_lang((self.test_record | test_record_2).ids)
+        for lang, (tpl, rids) in tpl_to_rids.items():
+            # TDE FIXME: False or en_US ?
             if lang == 'en_US':
                 self.assertEqual(rids, self.test_record.ids)
             elif lang == 'fr_FR':
                 self.assertEqual(rids, test_record_2.ids)
             else:
                 self.assertTrue(False, 'Should not return lang %s' % lang)
+
+    def test_sms_template_create_and_unlink_sidebar_action(self):
+        ActWindow = self.env['ir.actions.act_window']
+        self.sms_template.action_create_sidebar_action()
+        action_id = self.sms_template.sidebar_action_id.id
+
+        self.assertNotEqual(action_id, False)
+        self.assertEqual(ActWindow.search_count([('id', '=', action_id)]), 1)
+
+        self.sms_template.action_unlink_sidebar_action()
+        self.assertEqual(ActWindow.search_count([('id', '=', action_id)]), 0)
+
+    def test_sms_template_unlink_with_action(self):
+        ActWindow = self.env['ir.actions.act_window']
+        self.sms_template.action_create_sidebar_action()
+        action_id = self.sms_template.sidebar_action_id.id
+
+        self.sms_template.unlink()
+        self.assertEqual(ActWindow.search_count([('id', '=', action_id)]), 0)

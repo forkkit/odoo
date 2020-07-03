@@ -4,14 +4,11 @@
 import base64
 from random import choice
 from string import digits
-import itertools
-from werkzeug import url_encode
-import pytz
+from werkzeug.urls import url_encode
 
 from odoo import api, fields, models, _
 from odoo.exceptions import ValidationError, AccessError
 from odoo.modules.module import get_module_resource
-from odoo.addons.resource.models.resource_mixin import timezone_datetime
 
 
 class HrEmployeePrivate(models.Model):
@@ -48,14 +45,14 @@ class HrEmployeePrivate(models.Model):
         'The employee address has a company linked',
         compute='_compute_is_address_home_a_company',
     )
-    private_email = fields.Char(related='address_home_id.email', string="Private Email", readonly=False, groups="hr.group_hr_user")
+    private_email = fields.Char(related='address_home_id.email', string="Private Email", groups="hr.group_hr_user")
     country_id = fields.Many2one(
         'res.country', 'Nationality (Country)', groups="hr.group_hr_user", tracking=True)
     gender = fields.Selection([
         ('male', 'Male'),
         ('female', 'Female'),
         ('other', 'Other')
-    ], groups="hr.group_hr_user", default="male", tracking=True)
+    ], groups="hr.group_hr_user", tracking=True)
     marital = fields.Selection([
         ('single', 'Single'),
         ('married', 'Married'),
@@ -114,6 +111,7 @@ class HrEmployeePrivate(models.Model):
         ('retired', 'Retired')
     ], string="Departure Reason", groups="hr.group_hr_user", copy=False, tracking=True)
     departure_description = fields.Text(string="Additional Information", groups="hr.group_hr_user", copy=False, tracking=True)
+    departure_date = fields.Date(string="Departure Date", groups="hr.group_hr_user", copy=False, tracking=True)
     message_main_attachment_id = fields.Many2one(groups="hr.group_hr_user")
 
     _sql_constraints = [
@@ -194,30 +192,10 @@ class HrEmployeePrivate(models.Model):
             if employee.pin and not employee.pin.isdigit():
                 raise ValidationError(_("The PIN must be a sequence of digits."))
 
-    @api.onchange('job_id')
-    def _onchange_job_id(self):
-        if self.job_id:
-            self.job_title = self.job_id.name
-
-    @api.onchange('address_id')
-    def _onchange_address(self):
-        self.work_phone = self.address_id.phone
-        self.mobile_phone = self.address_id.mobile
-
-    @api.onchange('company_id')
-    def _onchange_company(self):
-        address = self.company_id.partner_id.address_get(['default'])
-        self.address_id = address['default'] if address else False
-
-    @api.onchange('department_id')
-    def _onchange_department(self):
-        if self.department_id.manager_id:
-            self.parent_id = self.department_id.manager_id
-
     @api.onchange('user_id')
     def _onchange_user(self):
         if self.user_id:
-            self.update(self._sync_user(self.user_id))
+            self.update(self._sync_user(self.user_id, bool(self.image_1920)))
             if not self.name:
                 self.name = self.user_id.name
 
@@ -226,11 +204,13 @@ class HrEmployeePrivate(models.Model):
         if self.resource_calendar_id and not self.tz:
             self.tz = self.resource_calendar_id.tz
 
-    def _sync_user(self, user):
+    def _sync_user(self, user, employee_has_image=False):
         vals = dict(
-            image_1920=user.image_1920,
             work_email=user.email,
+            user_id=user.id,
         )
+        if not employee_has_image:
+            vals['image_1920'] = user.image_1920
         if user.tz:
             vals['tz'] = user.tz
         return vals
@@ -239,10 +219,15 @@ class HrEmployeePrivate(models.Model):
     def create(self, vals):
         if vals.get('user_id'):
             user = self.env['res.users'].browse(vals['user_id'])
-            vals.update(self._sync_user(user))
+            vals.update(self._sync_user(user, vals.get('image_1920') == self._default_image()))
             vals['name'] = vals.get('name', user.name)
         employee = super(HrEmployeePrivate, self).create(vals)
-        url = '/web#%s' % url_encode({'action': 'hr.plan_wizard_action', 'active_id': employee.id, 'active_model': 'hr.employee'})
+        url = '/web#%s' % url_encode({
+            'action': 'hr.plan_wizard_action',
+            'active_id': employee.id,
+            'active_model': 'hr.employee',
+            'menu_id': self.env.ref('hr.menu_hr_root').id,
+        })
         employee._message_log(body=_('<b>Congratulations!</b> May I recommend you to setup an <a href="%s">onboarding plan?</a>') % (url))
         if employee.department_id:
             self.env['mail.channel'].sudo().search([
@@ -256,7 +241,8 @@ class HrEmployeePrivate(models.Model):
             if account_id:
                 self.env['res.partner.bank'].browse(account_id).partner_id = vals['address_home_id']
         if vals.get('user_id'):
-            vals.update(self._sync_user(self.env['res.users'].browse(vals['user_id'])))
+            # Update the profile pictures with user, except if provided 
+            vals.update(self._sync_user(self.env['res.users'].browse(vals['user_id']), bool(vals.get('image_1920'))))
         res = super(HrEmployeePrivate, self).write(vals)
         if vals.get('department_id') or vals.get('user_id'):
             department_id = vals['department_id'] if vals.get('department_id') else self[:1].department_id.id
@@ -273,10 +259,14 @@ class HrEmployeePrivate(models.Model):
 
     def toggle_active(self):
         res = super(HrEmployeePrivate, self).toggle_active()
-        self.filtered(lambda employee: employee.active).write({
+        unarchived_employees = self.filtered(lambda employee: employee.active)
+        unarchived_employees.write({
             'departure_reason': False,
             'departure_description': False,
+            'departure_date': False
         })
+        archived_addresses = unarchived_employees.mapped('address_home_id').filtered(lambda addr: not addr.active)
+        archived_addresses.toggle_active()
         if len(self) == 1 and not self.active:
             return {
                 'type': 'ir.actions.act_window',
@@ -291,7 +281,7 @@ class HrEmployeePrivate(models.Model):
 
     def generate_random_barcode(self):
         for employee in self:
-            employee.barcode = "".join(choice(digits) for i in range(8))
+            employee.barcode = '041'+"".join(choice(digits) for i in range(9))
 
     @api.depends('address_home_id.parent_id')
     def _compute_is_address_home_a_company(self):

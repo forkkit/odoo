@@ -2,6 +2,7 @@ odoo.define('hr_expense.documents.upload.mixin', function (require) {
 "use strict";
 
 var core = require('web.core');
+var config = require('web.config');
 var _t = core._t;
 var qweb = core.qweb;
 
@@ -41,13 +42,15 @@ var DocumentUploadMixin = {
             return filtered;
         }, []);
         if (!attachent_ids.length) {
-            return self.do_notify(_t("Error"), _t("An error occurred during the upload"));
+            return self.do_notify(false, _t("An error occurred during the upload"));
         }
+        var myContext =  this.initialState.context
+        myContext['isMobile'] =  config.device.isMobile
         return this._rpc({
             model: 'hr.expense',
             method: 'create_expense_from_attachments',
-            args: ["", attachent_ids],
-            context: this.initialState.context,
+            args: ["", attachent_ids, this.viewType],
+            context: myContext,
         }).then(function(result) {
             self.do_action(result);
         });

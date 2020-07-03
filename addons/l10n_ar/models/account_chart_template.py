@@ -51,10 +51,21 @@ class AccountChartTemplate(models.Model):
             if company_responsibility and company_responsibility != coa_responsibility:
                 raise UserError(_(
                     'You are trying to install a chart of account for the %s responsibility but your company is'
-                    ' configured as %s type' % (coa_responsibility.name, company_responsibility.name)))
+                    ' configured as %s type', coa_responsibility.name, company_responsibility.name))
             company.write({
                 'l10n_ar_afip_responsibility_type_id': coa_responsibility.id,
                 'country_id': self.env.ref('base.ar').id,
                 'tax_calculation_rounding_method': 'round_globally',
             })
-        return super()._load(sale_tax_rate, purchase_tax_rate, company)
+            # set CUIT identification type (which is the argentinian vat) in the created company partner instead of
+            # the default VAT type.
+            company.partner_id.l10n_latam_identification_type_id = self.env.ref('l10n_ar.it_cuit')
+
+        res = super()._load(sale_tax_rate, purchase_tax_rate, company)
+
+        # If Responsable Monotributista remove the default purchase tax
+        if self == self.env.ref('l10n_ar.l10nar_base_chart_template') or \
+           self == self.env.ref('l10n_ar.l10nar_ex_chart_template'):
+            company.account_purchase_tax_id = self.env['account.tax']
+
+        return res

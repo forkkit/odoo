@@ -13,7 +13,7 @@
     "version": "3.0",
     "author": "WT-IO-IT GmbH, Wolfgang Taferner",
     "website": "https://www.wt-io-it.at",
-    "category": "Localization",
+    'category': 'Accounting/Localizations',
     'summary': "Austrian Standardized Charts & Tax",
     "description": """
    
@@ -34,6 +34,7 @@ Austrian charts of accounts (Einheitskontenrahmen 2010).
         "base_vat",
     ],
     "data": [
+        'data/res.country.state.csv',
         'data/account_account_tag.xml',
         'data/account_account_template.xml',
         'data/account_chart_template.xml',

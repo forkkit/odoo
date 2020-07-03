@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import fields, models
+from odoo import fields, models, tools
 
 
 class StockValuationLayer(models.Model):
@@ -13,7 +13,6 @@ class StockValuationLayer(models.Model):
 
     _rec_name = 'product_id'
 
-    active = fields.Boolean(related='product_id.active')
     company_id = fields.Many2one('res.company', 'Company', readonly=True, required=True)
     product_id = fields.Many2one('product.product', 'Product', readonly=True, required=True, check_company=True)
     categ_id = fields.Many2one('product.category', related='product_id.categ_id')
@@ -24,10 +23,16 @@ class StockValuationLayer(models.Model):
     unit_cost = fields.Monetary('Unit Value', readonly=True)
     value = fields.Monetary('Total Value', readonly=True)
     remaining_qty = fields.Float(digits=0, readonly=True)
-    remaining_value = fields.Monetary('remaining_value Value', readonly=True)
+    remaining_value = fields.Monetary('Remaining Value', readonly=True)
     description = fields.Char('Description', readonly=True)
     stock_valuation_layer_id = fields.Many2one('stock.valuation.layer', 'Linked To', readonly=True, check_company=True)
     stock_valuation_layer_ids = fields.One2many('stock.valuation.layer', 'stock_valuation_layer_id')
-    stock_move_id = fields.Many2one('stock.move', 'Stock Move', readonly=True, check_company=True)
+    stock_move_id = fields.Many2one('stock.move', 'Stock Move', readonly=True, check_company=True, index=True)
     account_move_id = fields.Many2one('account.move', 'Journal Entry', readonly=True, check_company=True)
+
+    def init(self):
+        tools.create_index(
+            self._cr, 'stock_valuation_layer_index',
+            self._table, ['product_id', 'remaining_qty', 'stock_move_id', 'company_id', 'create_date']
+        )
 

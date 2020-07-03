@@ -93,6 +93,8 @@ class StockMove(models.Model):
     def _get_upstream_documents_and_responsibles(self, visited):
         if self.created_purchase_line_id and self.created_purchase_line_id.state not in ('done', 'cancel'):
             return [(self.created_purchase_line_id.order_id, self.created_purchase_line_id.order_id.user_id, visited)]
+        elif self.purchase_line_id and self.purchase_line_id.state not in ('done', 'cancel'):
+            return[(self.purchase_line_id.order_id, self.purchase_line_id.order_id.user_id, visited)]
         else:
             return super(StockMove, self)._get_upstream_documents_and_responsibles(visited)
 
@@ -124,12 +126,15 @@ class StockWarehouse(models.Model):
                     'company_id': self.company_id.id,
                     'route_id': self._find_global_route('purchase_stock.route_warehouse0_buy', _('Buy')).id,
                     'propagate_cancel': self.reception_steps != 'one_step',
+                    'delay_alert': True,
+                    'propagate_date': self.reception_steps != 'one_step',
                 },
                 'update_values': {
                     'active': self.buy_to_resupply,
                     'name': self._format_rulename(location_id, False, 'Buy'),
                     'location_id': location_id.id,
                     'propagate_cancel': self.reception_steps != 'one_step',
+                    'propagate_date': self.reception_steps != 'one_step',
                 }
             }
         })
@@ -138,6 +143,17 @@ class StockWarehouse(models.Model):
     def _get_all_routes(self):
         routes = super(StockWarehouse, self)._get_all_routes()
         routes |= self.filtered(lambda self: self.buy_to_resupply and self.buy_pull_id and self.buy_pull_id.route_id).mapped('buy_pull_id').mapped('route_id')
+        return routes
+
+    def get_rules_dict(self):
+        result = super(StockWarehouse, self).get_rules_dict()
+        for warehouse in self:
+            result[warehouse.id].update(warehouse._get_receive_rules_dict())
+        return result
+
+    def _get_routes_values(self):
+        routes = super(StockWarehouse, self)._get_routes_values()
+        routes.update(self._get_receive_routes_values('buy_to_resupply'))
         return routes
 
     def _update_name_and_code(self, name=False, code=False):
@@ -161,11 +177,18 @@ class ReturnPicking(models.TransientModel):
 class Orderpoint(models.Model):
     _inherit = "stock.warehouse.orderpoint"
 
-    def _quantity_in_progress(self):
-        res = super(Orderpoint, self)._quantity_in_progress()
-        for poline in self.env['purchase.order.line'].search([('state','in',('draft','sent','to approve')),('orderpoint_id','in',self.ids)]):
-            res[poline.orderpoint_id.id] += poline.product_uom._compute_quantity(poline.product_qty, poline.orderpoint_id.product_uom, round=False)
-        return res
+    show_supplier = fields.Boolean('Show supplier column', compute='_compute_show_suppplier')
+    supplier_id = fields.Many2one(
+        'product.supplierinfo', string='Vendor', check_company=True,
+        domain="['|', ('product_id', '=', product_id), '&', ('product_id', '=', False), ('product_tmpl_id', '=', product_tmpl_id)]")
+
+    @api.depends('route_id')
+    def _compute_show_suppplier(self):
+        buy_route = []
+        for res in self.env['stock.rule'].search_read([('action', '=', 'buy')], ['route_id']):
+            buy_route.append(res['route_id'][0])
+        for orderpoint in self:
+            orderpoint.show_supplier = orderpoint.route_id.id in buy_route
 
     def action_view_purchase(self):
         """ This function returns an action that display existing
@@ -182,6 +205,47 @@ class Orderpoint(models.Model):
         result['domain'] = "[('id','in',%s)]" % (purchase_ids.ids)
 
         return result
+
+    def _get_replenishment_order_notification(self):
+        self.ensure_one()
+        order = self.env['purchase.order.line'].search([
+            ('orderpoint_id', 'in', self.ids)
+        ], limit=1).order_id
+        if order:
+            action = self.env.ref('purchase.action_rfq_form')
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': _('The following replenishment order has been generated'),
+                    'message': '<a href="#action=%d&id=%d&model=purchase.order" target="_blank">%s</a>' % (action.id, order.id, order.display_name),
+                    'sticky': False,
+                }
+            }
+        return super()._get_replenishment_order_notification()
+
+    def _prepare_procurement_values(self, date=False, group=False):
+        values = super()._prepare_procurement_values(date=date, group=group)
+        values['supplierinfo_id'] = self.supplier_id
+        return values
+
+    def _quantity_in_progress(self):
+        res = super()._quantity_in_progress()
+        qty_by_product_location, dummy = self.product_id._get_quantity_in_progress(self.location_id.ids)
+        for orderpoint in self:
+            product_qty = qty_by_product_location.get((orderpoint.product_id.id, orderpoint.location_id.id), 0.0)
+            product_uom_qty = orderpoint.product_id.uom_id._compute_quantity(product_qty, orderpoint.product_uom, round=False)
+            res[orderpoint.id] += product_uom_qty
+        return res
+
+    def _set_default_route_id(self):
+        route_id = self.env['stock.rule'].search([
+            ('action', '=', 'buy')
+        ]).route_id
+        orderpoint_wh_supplier = self.filtered(lambda o: o.product_id.seller_ids)
+        if route_id and orderpoint_wh_supplier:
+            orderpoint_wh_supplier.route_id = route_id[0].id
+        return super()._set_default_route_id()
 
 
 class ProductionLot(models.Model):

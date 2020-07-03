@@ -11,6 +11,7 @@ var AbstractField = require('web.AbstractField');
 var config = require('web.config');
 var core = require('web.core');
 var datepicker = require('web.datepicker');
+var deprecatedFields = require('web.basic_fields.deprecated');
 var dom = require('web.dom');
 var Domain = require('web.Domain');
 var DomainSelector = require('web.DomainSelector');
@@ -22,7 +23,9 @@ var utils = require('web.utils');
 var view_dialogs = require('web.view_dialogs');
 var field_utils = require('web.field_utils');
 var time = require('web.time');
-var ColorpickerDialog = require('web.ColorpickerDialog');
+const {ColorpickerDialog} = require('web.Colorpicker');
+
+let FieldBoolean = deprecatedFields.FieldBoolean;
 
 require("web.zoomodoo");
 
@@ -323,7 +326,7 @@ var InputField = DebouncedField.extend({
      * @private
      */
     _onInput: function () {
-        this.isDirty = true;
+        this.isDirty = !this._isLastSetValue(this.$input.val());
         this._doDebouncedAction();
     },
     /**
@@ -361,6 +364,16 @@ var InputField = DebouncedField.extend({
 
 var NumericField = InputField.extend({
     tagName: 'span',
+
+    /**
+     * @override
+     */
+    init() {
+        this._super.apply(this, arguments);
+        this.shouldFormat = Boolean(
+            JSON.parse('format' in this.nodeOptions ? this.nodeOptions.format : true)
+        );
+    },
 
     //--------------------------------------------------------------------------
     // Public
@@ -424,8 +437,24 @@ var NumericField = InputField.extend({
      * @private
      */
     _formatValue: function (value) {
-        if (this.mode === 'edit' && this.nodeOptions.type === 'number') {
+        if (!this.shouldFormat || (this.mode === 'edit' && this.nodeOptions.type === 'number')) {
             return value;
+        }
+        return this._super.apply(this, arguments);
+    },
+
+    /**
+     * Parse numerical value (integer or float)
+     *
+     * Note: We have to overwrite this method to skip the format if we are into
+     * edit mode on a input type number.
+     *
+     * @override
+     * @private
+     */
+    _parseValue: function (value) {
+        if (this.mode === 'edit' && this.nodeOptions.type === 'number') {
+            return Number(value);
         }
         return this._super.apply(this, arguments);
     },
@@ -604,6 +633,9 @@ var FieldDateRange = InputField.extend({
         if (this.$pickerContainer) {
             this.$pickerContainer.remove();
         }
+        if (this._onScroll) {
+            window.removeEventListener('scroll', this._onScroll, true);
+        }
         this._super.apply(this, arguments);
     },
 
@@ -666,6 +698,8 @@ var FieldDateRange = InputField.extend({
 
         this.$el.daterangepicker(this.dateRangePickerOptions);
         this.$el.on('apply.daterangepicker', this._applyChanges.bind(this));
+        this.$el.on('show.daterangepicker', this._onDateRangePickerShow.bind(this));
+        this.$el.on('hide.daterangepicker', this._onDateRangePickerHide.bind(this));
         this.$el.off('keyup.daterangepicker');
         this.$pickerContainer = this.$el.data('daterangepicker').container;
 
@@ -676,6 +710,39 @@ var FieldDateRange = InputField.extend({
                 self.$el.data('daterangepicker').hide();
             }
         });
+
+        // Prevent bootstrap from focusing on modal (which breaks hours drop-down in firefox)
+        this.$pickerContainer.on('focusin.bs.modal', 'select', function (ev) {
+            ev.stopPropagation();
+        });
+    },
+
+    //--------------------------------------------------------------------------
+    // Handlers
+    //--------------------------------------------------------------------------
+
+    /**
+     * Unbind the scroll event handler when the daterangepicker is closed.
+     *
+     * @private
+     */
+    _onDateRangePickerHide() {
+        if (this._onScroll) {
+            window.removeEventListener('scroll', this._onScroll, true);
+        }
+    },
+    /**
+     * Bind the scroll event handle when the daterangepicker is open.
+     *
+     * @private
+     */
+    _onDateRangePickerShow() {
+        this._onScroll = ev => {
+            if (!this.$pickerContainer.get(0).contains(ev.target)) {
+                this.$el.data('daterangepicker').hide();
+            }
+        };
+        window.addEventListener('scroll', this._onScroll, true);
     },
 });
 
@@ -739,7 +806,7 @@ var FieldDate = InputField.extend({
      */
     activate: function () {
         if (this.isFocusable() && this.datewidget) {
-            this.datewidget.focus();
+            this.datewidget.$input.select();
             return true;
         }
         return false;
@@ -858,6 +925,49 @@ var FieldDateTime = FieldDate.extend({
     },
 });
 
+const RemainingDays = FieldDate.extend({
+    description: _lt("Remaining Days"),
+    supportedFieldTypes: ['date', 'datetime'],
+
+    //--------------------------------------------------------------------------
+    // Private
+    //--------------------------------------------------------------------------
+
+    /**
+     * Displays the delta (in days) between the value of the field and today. If
+     * the delta is larger than 99 days, displays the date as usual (without
+     * time).
+     *
+     * @override
+     */
+    _renderReadonly() {
+        if (this.value === false) {
+            this.$el.removeClass('text-bf text-danger text-warning');
+            return;
+        }
+        // compare the value (in the user timezone) with now (also in the user
+        // timezone), to get a meaningful delta for the user
+        const nowUTC = moment().utc();
+        const nowUserTZ = nowUTC.clone().add(session.getTZOffset(nowUTC), 'minutes');
+        const valueUserTZ = this.value.clone().add(session.getTZOffset(this.value), 'minutes');
+        const diffDays = valueUserTZ.startOf('day').diff(nowUserTZ.startOf('day'), 'days');
+        let text;
+        if (Math.abs(diffDays) > 99) {
+            text = this._formatValue(this.value, 'date');
+        } else if (diffDays === 0) {
+            text = _t("Today");
+        } else if (diffDays < 0) {
+            text = diffDays === -1 ? _t("Yesterday") : _t(`${-diffDays} days ago`);
+        } else {
+            text = diffDays === 1 ? _t("Tomorrow") : _t(`In ${diffDays} days`);
+        }
+        this.$el.text(text).attr('title', this._formatValue(this.value, 'date'));
+        this.$el.toggleClass('text-bf', diffDays <= 0);
+        this.$el.toggleClass('text-danger', diffDays < 0);
+        this.$el.toggleClass('text-warning', diffDays === 0);
+    },
+});
+
 var FieldMonetary = NumericField.extend({
     description: _lt("Monetary"),
     className: 'o_field_monetary o_field_number',
@@ -967,134 +1077,6 @@ var FieldMonetary = NumericField.extend({
         var currencyID = this.record.data[currencyField] && this.record.data[currencyField].res_id;
         this.currency = session.get_currency(currencyID);
         this.formatOptions.currency = this.currency; // _formatValue() uses formatOptions
-    },
-});
-
-var FieldBoolean = AbstractField.extend({
-    className: 'o_field_boolean',
-    description: _lt("Checkbox"),
-    events: _.extend({}, AbstractField.prototype.events, {
-        change: '_onChange',
-    }),
-    supportedFieldTypes: ['boolean'],
-
-    //--------------------------------------------------------------------------
-    // Public
-    //--------------------------------------------------------------------------
-
-    /**
-     * Toggle the checkbox if it is activated due to a click on itself.
-     *
-     * @override
-     */
-    activate: function (options) {
-        var activated = this._super.apply(this, arguments);
-        // The formatValue of boolean fields renders HTML elements similar to
-        // the one rendered by the widget itself. Even though the event might
-        // have been fired on the non-widget version of this field, we can still
-        // test the presence of its custom class.
-        if (activated && options && options.event && $(options.event.target).closest('.custom-control.custom-checkbox').length) {
-            this._setValue(!this.value);  // Toggle the checkbox
-        }
-        return activated;
-    },
-
-    /**
-     * @override
-     * @returns {jQuery} the focusable checkbox input
-     */
-    getFocusableElement: function () {
-        return this.mode === 'readonly' ? $() : this.$input;
-    },
-    /**
-     * A boolean field is always set since false is a valid value.
-     *
-     * @override
-     */
-    isSet: function () {
-        return true;
-    },
-    /**
-     * When the checkbox is rerendered, we need to check if it was the actual
-     * origin of the reset. If it is, we need to activate it back so it looks
-     * like it was not rerendered but is still the same input.
-     *
-     * @override
-     */
-    reset: function (record, event) {
-        var rendered = this._super.apply(this, arguments);
-        if (event && event.target.name === this.name) {
-            this.activate();
-        }
-        return rendered;
-    },
-    /**
-     * Associates the 'for' attribute of the internal label.
-     *
-     * @override
-     */
-    setIDForLabel: function (id) {
-        this._super.apply(this, arguments);
-        this.$('.custom-control-label').attr('for', id);
-    },
-
-    //--------------------------------------------------------------------------
-    // Private
-    //--------------------------------------------------------------------------
-
-    /**
-     * The actual checkbox is designed in css to have full control over its
-     * appearance, as opposed to letting the browser and the os decide how
-     * a checkbox should look. The actual input is disabled and hidden. In
-     * readonly mode, the checkbox is disabled.
-     *
-     * @override
-     * @private
-     */
-    _render: function () {
-        var $checkbox = this._formatValue(this.value);
-        this.$input = $checkbox.find('input');
-        this.$input.prop('disabled', this.mode === 'readonly');
-        this.$el.addClass($checkbox.attr('class'));
-        this.$el.empty().append($checkbox.contents());
-    },
-
-    //--------------------------------------------------------------------------
-    // Handlers
-    //--------------------------------------------------------------------------
-
-    /**
-     * Properly update the value when the checkbox is (un)ticked to trigger
-     * possible onchanges.
-     *
-     * @private
-     */
-    _onChange: function () {
-        this._setValue(this.$input[0].checked);
-    },
-    /**
-     * Implement keyboard movements.  Mostly useful for its environment, such
-     * as a list view.
-     *
-     * @override
-     * @private
-     * @param {KeyEvent} ev
-     */
-    _onKeydown: function (ev) {
-        switch (ev.which) {
-            case $.ui.keyCode.ENTER:
-                // prevent subsequent 'click' event (see _onKeydown of AbstractField)
-                ev.preventDefault();
-                this.$input.prop('checked', !this.value);
-                this._setValue(!this.value);
-                return;
-            case $.ui.keyCode.UP:
-            case $.ui.keyCode.RIGHT:
-            case $.ui.keyCode.DOWN:
-            case $.ui.keyCode.LEFT:
-                ev.preventDefault();
-        }
-        this._super.apply(this, arguments);
     },
 });
 
@@ -1309,14 +1291,47 @@ var FieldFloatToggle = AbstractField.extend({
 });
 
 var FieldPercentage = FieldFloat.extend({
+    className: 'o_field_float_percentage o_field_number',
     description: _lt("Percentage"),
-    formatType:'percentage',
+
+    /**
+     * @constructor
+     */
+    init() {
+        this._super(...arguments);
+        if (this.mode === 'edit') {
+            this.tagName = 'div';
+            this.className += ' o_input';
+
+            // do not display % in the input in edit
+            this.formatOptions.noSymbol = true;
+        }
+    },
+
+    //--------------------------------------------------------------------------
+    // Private
+    //--------------------------------------------------------------------------
+
+    /**
+     * For percentage widget, the input is inside a div, alongside a span
+     * containing the percentage(%) symbol.
+     *
+     * @override
+     * @private
+     */
+    _renderEdit() {
+        this.$el.empty();
+        // Prepare and add the input
+        this._prepareInput(this.$input).appendTo(this.$el);
+        const $percentageSymbol = $('<span>', { text: '%' });
+        this.$el.append($percentageSymbol);
+    },
 });
 
 var FieldText = InputField.extend(TranslatableFieldMixin, {
     description: _lt("Multiline Text"),
     className: 'o_field_text',
-    supportedFieldTypes: ['text'],
+    supportedFieldTypes: ['text', 'html'],
     tagName: 'span',
 
     /**
@@ -1449,9 +1464,27 @@ var FieldEmail = InputField.extend({
      * @private
      */
     _renderReadonly: function () {
-        this.$el.text(this.value)
-            .addClass('o_form_uri o_text_overflow')
-            .attr('href', this.prefix + ':' + this.value);
+        if (this.value) {
+            this.$el.text(this.value)
+                .addClass('o_form_uri o_text_overflow')
+                .attr('href', this.prefix + ':' + this.value);
+        } else {
+            this.$el.text('');
+        }
+    },
+    /**
+     * Trim the value input by the user.
+     *
+     * @override
+     * @private
+     * @param {any} value
+     * @param {Object} [options]
+     */
+    _setValue: function (value, options) {
+        if (this.field.trim) {
+            value = value.trim();
+        }
+        return this._super(value, options);
     },
 
     //--------------------------------------------------------------------------
@@ -1508,6 +1541,7 @@ var UrlWidget = InputField.extend({
     init: function () {
         this._super.apply(this, arguments);
         this.tagName = this.mode === 'readonly' ? 'a' : 'input';
+        this.websitePath = this.nodeOptions.website_path || false;
     },
 
     //--------------------------------------------------------------------------
@@ -1535,10 +1569,15 @@ var UrlWidget = InputField.extend({
      * @private
      */
     _renderReadonly: function () {
+        let href = this.value;
+        if (this.value && !this.websitePath) {
+            const regex = /^(?:[fF]|[hH][tT])[tT][pP][sS]?:\/\//;
+            href = !regex.test(this.value) ? `http://${href}` : href;
+        }
         this.$el.text(this.attrs.text || this.value)
             .addClass('o_form_uri o_text_overflow')
             .attr('target', '_blank')
-            .attr('href', this.value);
+            .attr('href', href);
     },
 
     //--------------------------------------------------------------------------
@@ -1600,13 +1639,6 @@ var CopyClipboard = {
     /**
      * @override
      */
-    _render: function () {
-        this._super.apply(this, arguments);
-        this.$el.addClass('o_field_copy');
-    },
-    /**
-     * @override
-     */
     _renderReadonly: function () {
         this._super.apply(this, arguments);
         if (this.value) {
@@ -1619,11 +1651,13 @@ var CopyClipboard = {
 var TextCopyClipboard = FieldText.extend(CopyClipboard, {
     description: _lt("Copy to Clipboard"),
     clipboardTemplate: 'CopyClipboardText',
+    className: "o_field_copy",
 });
 
 var CharCopyClipboard = FieldChar.extend(CopyClipboard, {
     description: _lt("Copy to Clipboard"),
     clipboardTemplate: 'CopyClipboardChar',
+    className: 'o_field_copy o_text_overflow',
 });
 
 var AbstractFieldBinary = AbstractField.extend({
@@ -1638,7 +1672,8 @@ var AbstractFieldBinary = AbstractField.extend({
         this._super.apply(this, arguments);
         this.fields = record.fields;
         this.useFileAPI = !!window.FileReader;
-        this.max_upload_size = 25 * 1024 * 1024; // 25Mo
+        this.max_upload_size = 64 * 1024 * 1024; // 64Mo
+        this.accepted_file_extensions = (this.nodeOptions && this.nodeOptions.accepted_file_extensions) || this.accepted_file_extensions || '*';
         if (!this.useFileAPI) {
             var self = this;
             this.fileupload_id = _.uniqueId('o_fileupload');
@@ -1678,7 +1713,7 @@ var AbstractFieldBinary = AbstractField.extend({
     },
     on_file_uploaded: function (size, name) {
         if (size === false) {
-            this.do_warn(_t("File Upload"), _t("There was a problem while uploading your file"));
+            this.do_warn(false, _t("There was a problem while uploading your file"));
             // TODO: use crashmanager
             console.warn("Error while uploading file : ", name);
         } else {
@@ -1770,6 +1805,7 @@ var FieldBinaryImage = AbstractFieldBinary.extend({
         'i': 'png',
         'P': 'svg+xml',
     },
+    accepted_file_extensions: 'image/*',
     /**
      * Returns the image URL from a model.
      *
@@ -1820,7 +1856,7 @@ var FieldBinaryImage = AbstractFieldBinary.extend({
 
         $img.one('error', function () {
             $img.attr('src', self.placeholder);
-            self.do_warn(_t("Image"), _t("Could not display the selected image."));
+            self.do_warn(false, _t("Could not display the selected image"));
         });
 
         return this._super.apply(this, arguments);
@@ -1852,13 +1888,18 @@ var FieldBinaryImage = AbstractFieldBinary.extend({
                     this.$el.addClass(this.attrs.class);
                 }
 
-                var urlThumb = this._getImageUrl(this.model, this.res_id, 'image_128', unique);
+                const image_field = this.field.manual ? this.name:'image_128';
+                var urlThumb = this._getImageUrl(this.model, this.res_id, image_field, unique);
 
                 this.$el.empty();
                 $img = this.$el;
                 $img.css('backgroundImage', 'url(' + urlThumb + ')');
             } else {
                 $img = this.$('img');
+            }
+            var zoomDelay = 0;
+            if (this.nodeOptions.zoom_delay) {
+                zoomDelay = this.nodeOptions.zoom_delay;
             }
 
             if(this.recordData[imageField]) {
@@ -1867,12 +1908,14 @@ var FieldBinaryImage = AbstractFieldBinary.extend({
 
                 $img.zoomOdoo({
                     event: 'mouseenter',
+                    timer: zoomDelay,
                     attach: '.o_content',
                     attachToTarget: true,
                     onShow: function () {
                         if(this.$zoom.height() < 256 && this.$zoom.width() < 256) {
                             this.hide();
                         }
+                        core.bus.on('keydown', this, this.hide);
                     },
                     beforeAttach: function () {
                         this.$flyout.css({ width: '512px', height: '512px' });
@@ -1953,7 +1996,7 @@ var FieldBinaryFile = AbstractFieldBinary.extend({
     },
     on_save_as: function (ev) {
         if (!this.value) {
-            this.do_warn(_t("Save As..."), _t("The field is empty, there's nothing to save !"));
+            this.do_warn(false, _t("The field is empty, there's nothing to save."));
             ev.stopPropagation();
         } else if (this.res_id) {
             framework.blockUI();
@@ -1981,6 +2024,7 @@ var FieldPdfViewer = FieldBinaryFile.extend({
     description: _lt("PDF Viewer"),
     supportedFieldTypes: ['binary'],
     template: 'FieldPdfViewer',
+    accepted_file_extensions: 'application/pdf',
     /**
      * @override
      */
@@ -2285,7 +2329,7 @@ var StateSelectionWidget = AbstractField.extend({
             .addClass(currentState.state_class)
             .prop('special_click', true)
             .parent().attr('title', currentState.state_name)
-            .attr('aria-label', currentState.state_name);
+            .attr('aria-label', this.string + ": " + currentState.state_name);
 
         // Render "FormSelection.Items" and move it into "FormSelection"
         var $items = $(qweb.render('FormSelection.items', {
@@ -2416,7 +2460,6 @@ var BooleanToggle = FieldBoolean.extend({
     _onClick: function (event) {
         event.stopPropagation();
         this._setValue(!this.value);
-        this.$el.closest(".o_data_row").toggleClass('text-muted', this.value);
     },
 });
 
@@ -2633,7 +2676,7 @@ var FieldProgressBar = AbstractField.extend({
             // Cover all numbers with parseFloat
             parsedValue = field_utils.parse.float($input.val());
         } catch (error) {
-            this.do_warn(_t("Wrong value entered!"), _t("Only Integer or Float Value should be valid."));
+            this.do_warn(false, _t("Please enter a numerical value"));
         }
 
         if (parsedValue !== undefined) {
@@ -3349,6 +3392,116 @@ var FieldColor = AbstractField.extend({
     },
 });
 
+var FieldColorPicker = FieldInteger.extend({
+    RECORD_COLORS: [
+        _t('No color'),
+        _t('Red'),
+        _t('Orange'),
+        _t('Yellow'),
+        _t('Light blue'),
+        _t('Dark purple'),
+        _t('Salmon pink'),
+        _t('Medium blue'),
+        _t('Dark blue'),
+        _t('Fushia'),
+        _t('Green'),
+        _t('Purple'),
+    ],
+
+    /**
+     * Prepares the rendering, since we are based on an input but not using it
+     * setting tagName after parent init force the widget to not render an input
+     *
+     * @override
+     */
+    init: function () {
+        this._super.apply(this, arguments);
+        this.tagName = 'div';
+    },
+    /**
+     * Render the widget when it is edited.
+     *
+     * @override
+     */
+    _renderEdit: function () {
+        this.$el.html(qweb.render('ColorPicker'));
+        this._setupColorPicker();
+        this._highlightSelectedColor();
+    },
+    /**
+     * Render the widget when it is NOT edited.
+     *
+     * @override
+     */
+    _renderReadonly: function () {
+        var selectedColorName = this.RECORD_COLORS[this.value];
+        this.$el.html(qweb.render('ColorPickerReadonly', { active_color: this.value, name_color: selectedColorName }));
+        this.$el.on('click', 'a', function(ev){ ev.preventDefault(); });
+    },
+    /**
+     * Render the kanban colors inside first ul element.
+     * This is the same template as in KanbanRecord.
+     *
+     * <a> elements click are bound to _onColorChanged
+     *
+     */
+    _setupColorPicker: function () {
+        var $colorpicker = this.$('ul');
+        if (!$colorpicker.length) {
+            return;
+        }
+        $colorpicker.html(qweb.render('KanbanColorPicker', { colors: this.RECORD_COLORS }));
+        $colorpicker.on('click', 'a', this._onColorChanged.bind(this));
+    },
+    /**
+     * Returns the widget value.
+     * Since NumericField is based on an input, but we don't use it,
+     * we override this function to use the internal value of the widget.
+     *
+     *
+     * @override
+     * @returns {string}
+     */
+    _getValue: function (){
+        return this.value;
+    },
+    /**
+     * Listener in edit mode for click on a color.
+     * The actual color can be found in the data-color
+     * attribute of the target element.
+     *
+     * We re-render the widget after the update because
+     * the selected color has changed and it should
+     * be reflected in the ui.
+     *
+     * @param ev
+     */
+    _onColorChanged: function(ev) {
+        ev.preventDefault();
+        var color = null;
+        if(ev.currentTarget && ev.currentTarget.dataset && ev.currentTarget.dataset.color){
+            color = ev.currentTarget.dataset.color;
+        }
+        if(color){
+            this.value = color;
+            this._onChange();
+            this._renderEdit();
+        }
+    },
+    /**
+     * Helper to modify the active color's style
+     * while in edit mode.
+     *
+     */
+    _highlightSelectedColor: function(){
+        try{
+            $(this.$('li')[parseInt(this.value)]).css('border', '2px solid teal');
+        } catch(err) {
+
+        }
+    },
+});
+
 return {
     TranslatableFieldMixin: TranslatableFieldMixin,
     DebouncedField: DebouncedField,
@@ -3365,6 +3518,7 @@ return {
     FieldDate: FieldDate,
     FieldDateTime: FieldDateTime,
     FieldDateRange: FieldDateRange,
+    RemainingDays: RemainingDays,
     FieldDomain: FieldDomain,
     FieldFloat: FieldFloat,
     FieldFloatTime: FieldFloatTime,
@@ -3394,6 +3548,7 @@ return {
     JournalDashboardGraph: JournalDashboardGraph,
     AceEditor: AceEditor,
     FieldColor: FieldColor,
+    FieldColorPicker: FieldColorPicker,
 };
 
 });

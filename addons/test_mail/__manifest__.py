@@ -9,16 +9,15 @@
     'description': """This module contains tests related to mail. Those are
 contained in a separate module as it contains models used only to perform
 tests independently to functional aspects of other models. """,
-    'depends': ['test_performance', 'mail', 'mail_bot'],
+    'depends': ['test_performance', 'mail'],
     'data': [
         'security/ir.model.access.csv',
         'security/test_mail_security.xml',
         'data/data.xml',
+        'data/subtype_data.xml',
+        'data/template_data.xml',
     ],
     'demo': [
-        'data/demo.xml',
-        'data/subtype_demo.xml',
-        'data/template_demo.xml',
     ],
     'installable': True,
     'application': False,

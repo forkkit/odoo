@@ -9,10 +9,10 @@ class PosConfig(models.Model):
 
     iface_splitbill = fields.Boolean(string='Bill Splitting', help='Enables Bill Splitting in the Point of Sale.')
     iface_printbill = fields.Boolean(string='Bill Printing', help='Allows to print the Bill before payment.')
-    iface_orderline_notes = fields.Boolean(string='Orderline Notes', help='Allow custom notes on Orderlines.')
+    iface_orderline_notes = fields.Boolean(string='Notes', help='Allow custom notes on Orderlines.')
     floor_ids = fields.One2many('restaurant.floor', 'pos_config_id', string='Restaurant Floors', help='The restaurant floors served by this point of sale.')
     printer_ids = fields.Many2many('restaurant.printer', 'pos_config_printer_rel', 'config_id', 'printer_id', string='Order Printers')
-    is_table_management = fields.Boolean('Table Management')
+    is_table_management = fields.Boolean('Floors & Tables')
     is_order_printer = fields.Boolean('Order Printer')
     module_pos_restaurant = fields.Boolean(default=True)
 
@@ -25,20 +25,29 @@ class PosConfig(models.Model):
             'is_table_management': False,
             'iface_orderline_notes': False})
 
-    @api.onchange('is_table_management')
-    def _onchange_is_table_management(self):
-        if not self.is_table_management:
-            self.floor_ids = [(5, 0, 0)]
-
-    @api.onchange('is_order_printer')
-    def _onchange_is_order_printer(self):
-        if not self.is_order_printer:
-            self.printer_ids = [(5, 0, 0)]
-
     def get_tables_order_count(self):
         """         """
         self.ensure_one()
+        tables = self.env['restaurant.table'].search([('floor_id.pos_config_id', 'in', self.ids)])
+        domain = [('state', '=', 'draft'), ('table_id', 'in', tables.ids)]
+
+        order_stats = self.env['pos.order'].read_group(domain, ['table_id'], 'table_id')
+        orders_map = dict((s['table_id'][0], s['table_id_count']) for s in order_stats)
+
         result = []
-        for table in self.floor_ids.table_ids.filtered(lambda t: t.active ==  True):
-            result.append({'id': table.id, 'orders': self.env['pos.order'].search_count([('state', '=', 'draft'), ('table_id', '=', table.id)])})
+        for table in tables:
+            result.append({'id': table.id, 'orders': orders_map.get(table.id, 0)})
         return result
+
+    def _get_forbidden_change_fields(self):
+        forbidden_keys = super(PosConfig, self)._get_forbidden_change_fields()
+        forbidden_keys.append('is_table_management')
+        forbidden_keys.append('floor_ids')
+        return forbidden_keys
+
+    def write(self, vals):
+        if ('is_table_management' in vals and vals['is_table_management'] == False):
+            vals['floor_ids'] = [(5, 0, 0)]
+        if ('is_order_printer' in vals and vals['is_order_printer'] == False):
+            vals['printer_ids'] = [(5, 0, 0)]
+        return super(PosConfig, self).write(vals)

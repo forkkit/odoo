@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import fields, models, tools
+from odoo import api, fields, models, tools
 from odoo.osv import expression
 
 
@@ -13,9 +13,9 @@ class LunchProductReport(models.Model):
 
     id = fields.Integer('ID')
     product_id = fields.Many2one('lunch.product', 'Product')
-    name = fields.Char('Product Name')
+    name = fields.Char('Product Name', related='product_id.name')
     category_id = fields.Many2one('lunch.product.category', 'Product Category')
-    description = fields.Text('Description')
+    description = fields.Text('Description', related='product_id.description')
     price = fields.Float('Price')
     supplier_id = fields.Many2one('lunch.supplier', 'Vendor')
     company_id = fields.Many2one('res.company')
@@ -33,13 +33,24 @@ class LunchProductReport(models.Model):
     def _compute_image_128(self):
         for product_r in self:
             product = product_r.product_id
-            category = product_r.category_id
+            category = product_r.sudo().category_id
             if product.image_128:
                 product_r.image_128 = product.image_128
             elif category.image_128:
                 product_r.image_128 = category.image_128
             else:
                 product_r.image_128 = False
+
+    def compute_concurrency_field(self):
+        """Image caching is based on the `__last_update` field (=self.CONCURRENCY_CHECK_FIELD)
+        But the image is never cached by the browser because the value fallbacks to
+        `now` when access logging is disabled. This override sets a "real" value based on the
+        product or category last update.
+        """
+        for report in self:
+            product_last_update = report.product_id[self.CONCURRENCY_CHECK_FIELD]
+            category_last_update = report.category_id[self.CONCURRENCY_CHECK_FIELD]
+            report[self.CONCURRENCY_CHECK_FIELD] = max(product_last_update, category_last_update)
 
     def _compute_is_available_at(self):
         """
@@ -81,9 +92,7 @@ class LunchProductReport(models.Model):
                 SELECT
                     row_number() over (ORDER BY users.id,product.id) AS id,
                     product.id AS product_id,
-                    product.name,
                     product.category_id,
-                    product.description,
                     product.price,
                     product.supplier_id,
                     product.company_id,
@@ -93,7 +102,7 @@ class LunchProductReport(models.Model):
                     product.new_until >= current_date AS is_new,
                     orders.last_order_date
                 FROM lunch_product product
-                INNER JOIN res_users users ON product.company_id IS NULL OR users.company_id = product.company_id -- multi company
+                CROSS JOIN res_users users
                 INNER JOIN res_groups_users_rel groups ON groups.uid = users.id -- only generate for internal users
                 LEFT JOIN LATERAL (select max(date) AS last_order_date FROM lunch_order where user_id=users.id and product_id=product.id) AS orders ON TRUE
                 LEFT JOIN LATERAL (select user_id FROM lunch_product_favorite_user_rel where user_id=users.id and product_id=product.id) AS fav ON TRUE

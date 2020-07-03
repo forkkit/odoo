@@ -69,7 +69,7 @@ class CrmLeadForwardToPartner(models.TransientModel):
             if no_email:
                 raise UserError(_('Set an email address for the partner(s): %s') % ", ".join(no_email))
         if self.forward_type == 'single' and not self.partner_id.email:
-            raise UserError(_('Set an email address for the partner %s') % self.partner_id.name)
+            raise UserError(_('Set an email address for the partner %s', self.partner_id.name))
 
         partners_leads = {}
         for lead in self.assignation_lines:
@@ -119,10 +119,10 @@ class CrmLeadForwardToPartner(models.TransientModel):
 
     forward_type = fields.Selection([
         ('single', 'a single partner: manual selection of partner'),
-        ('assigned', "several partners: automatic assignation, using GPS coordinates and partner's grades")
+        ('assigned', "several partners: automatic assignment, using GPS coordinates and partner's grades")
     ], 'Forward selected leads to', default=lambda self: self.env.context.get('forward_type') or 'single')
     partner_id = fields.Many2one('res.partner', 'Forward Leads To')
-    assignation_lines = fields.One2many('crm.lead.assignation', 'forward_id', 'Partner Assignation')
+    assignation_lines = fields.One2many('crm.lead.assignation', 'forward_id', 'Partner Assignment')
     body = fields.Html('Contents', help='Automatically sanitized HTML contents')
 
 
@@ -130,7 +130,7 @@ class CrmLeadAssignation(models.TransientModel):
     _name = 'crm.lead.assignation'
     _description = 'Lead Assignation'
 
-    forward_id = fields.Many2one('crm.lead.forward.to.partner', 'Partner Assignation')
+    forward_id = fields.Many2one('crm.lead.forward.to.partner', 'Partner Assignment')
     lead_id = fields.Many2one('crm.lead', 'Lead')
     lead_location = fields.Char('Lead Location')
     partner_assigned_id = fields.Many2one('res.partner', 'Assigned Partner')

@@ -13,7 +13,9 @@ _logger = logging.getLogger(__name__)
 class TransferPaymentAcquirer(models.Model):
     _inherit = 'payment.acquirer'
 
-    provider = fields.Selection(selection_add=[('transfer', 'Manual Payment')], default='transfer')
+    provider = fields.Selection(selection_add=[
+        ('transfer', 'Manual Payment')
+    ], default='transfer', ondelete={'transfer': 'set default'})
 
     @api.model
     def _create_missing_journal_for_acquirers(self, company=None):
@@ -88,7 +90,7 @@ class TransferPaymentTransaction(models.Model):
     def _transfer_form_get_invalid_parameters(self, data):
         invalid_parameters = []
 
-        if float_compare(float(data.get('amount', '0.0')), self.amount, 2) != 0:
+        if float_compare(float(data.get('amount') or '0.0'), self.amount, 2) != 0:
             invalid_parameters.append(('amount', data.get('amount'), '%.2f' % self.amount))
         if data.get('currency') != self.currency_id.name:
             invalid_parameters.append(('currency', data.get('currency'), self.currency_id.name))

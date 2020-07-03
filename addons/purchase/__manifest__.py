@@ -4,7 +4,7 @@
 {
     'name': 'Purchase',
     'version': '1.2',
-    'category': 'Operations/Purchase',
+    'category': 'Inventory/Purchase',
     'sequence': 60,
     'summary': 'Purchase orders, tenders and agreements',
     'description': "",
@@ -13,8 +13,10 @@
     'data': [
         'security/purchase_security.xml',
         'security/ir.model.access.csv',
+        'views/assets.xml',
         'views/account_move_views.xml',
         'data/purchase_data.xml',
+        'data/ir_cron_data.xml',
         'report/purchase_reports.xml',
         'views/purchase_views.xml',
         'views/res_config_settings_views.xml',
@@ -27,6 +29,10 @@
         'views/portal_templates.xml',
         'report/purchase_order_templates.xml',
         'report/purchase_quotation_templates.xml',
+    ],
+    'qweb': [
+        "static/src/xml/purchase_dashboard.xml",
+        "static/src/xml/purchase_toaster_button.xml",
     ],
     'demo': [
         'data/purchase_demo.xml',

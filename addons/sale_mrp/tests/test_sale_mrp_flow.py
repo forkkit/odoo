@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from datetime import datetime
-
+from odoo.addons.account.tests.common import AccountTestCommon
 from odoo.tests import common, Form
 from odoo.exceptions import UserError
 from odoo.tools import mute_logger, float_compare
@@ -10,7 +9,7 @@ from odoo.tools import mute_logger, float_compare
 
 # these tests create accounting entries, and therefore need a chart of accounts
 @common.tagged('post_install', '-at_install')
-class TestSaleMrpFlow(common.SavepointCase):
+class TestSaleMrpFlow(AccountTestCommon):
 
     @classmethod
     def setUpClass(cls):
@@ -21,7 +20,6 @@ class TestSaleMrpFlow(common.SavepointCase):
         cls.MrpProduction = cls.env['mrp.production']
         cls.Inventory = cls.env['stock.inventory']
         cls.InventoryLine = cls.env['stock.inventory.line']
-        cls.ProductProduce = cls.env['mrp.product.produce']
         cls.ProductCategory = cls.env['product.category']
 
         cls.categ_unit = cls.env.ref('uom.product_uom_categ_unit')
@@ -289,7 +287,7 @@ class TestSaleMrpFlow(common.SavepointCase):
         # ----------------------------------------
 
         order_form = Form(self.env['sale.order'])
-        order_form.partner_id = self.env.ref('base.res_partner_2')
+        order_form.partner_id = self.env['res.partner'].create({'name': 'My Test Partner'})
         with order_form.order_line.new() as line:
             line.product_id = product_a
             line.product_uom = self.uom_dozen
@@ -433,15 +431,10 @@ class TestSaleMrpFlow(common.SavepointCase):
         # produce product D.
         # ------------------
 
-        produce_form = Form(self.ProductProduce.with_context({
-            'active_id': mnf_product_d.id,
-            'active_ids': [mnf_product_d.id],
-        }))
-        produce_form.qty_producing = 20
-        produce_d = produce_form.save()
-        # produce_d.on_change_qty()
-        produce_d.do_produce()
-        mnf_product_d.post_inventory()
+        mo_form = Form(mnf_product_d)
+        mo_form.qty_producing = 20
+        mnf_product_d = mo_form.save()
+        mnf_product_d._post_inventory()
 
         # Check state of manufacturing order.
         self.assertEqual(mnf_product_d.state, 'done', 'Manufacturing order should still be in progress state.')
@@ -488,13 +481,10 @@ class TestSaleMrpFlow(common.SavepointCase):
         # Produce product A.
         # ------------------
 
-        produce_form = Form(self.ProductProduce.with_context({
-            'active_id': mnf_product_a.id,
-            'active_ids': [mnf_product_a.id],
-        }))
-        produce_a = produce_form.save()
-        produce_a.do_produce()
-        mnf_product_a.post_inventory()
+        mo_form = Form(mnf_product_a)
+        mo_form.qty_producing = mo_form.product_qty
+        mnf_product_a = mo_form.save()
+        mnf_product_a._post_inventory()
         # Check state of manufacturing order product A.
         self.assertEqual(mnf_product_a.state, 'done', 'Manufacturing order should still be in the progress state.')
         # Check product A avaialble quantity should be 120.
@@ -503,13 +493,42 @@ class TestSaleMrpFlow(common.SavepointCase):
     def test_01_sale_mrp_delivery_kit(self):
         """ Test delivered quantity on SO based on delivered quantity in pickings."""
         # intial so
-        product = self.env.ref('mrp.product_product_table_kit')
-        product.type = 'consu'
-        product.invoice_policy = 'delivery'
+        product = self.env['product.product'].create({
+            'name': 'Table Kit',
+            'type': 'consu',
+            'invoice_policy': 'delivery',
+            'categ_id': self.env.ref('product.product_category_all').id,
+        })
         # Remove the MTO route as purchase is not installed and since the procurement removal the exception is directly raised
         product.write({'route_ids': [(6, 0, [self.warehouse.manufacture_pull_id.route_id.id])]})
 
-        partner = self.env.ref('base.res_partner_1')
+        product_wood_panel = self.env['product.product'].create({
+            'name': 'Wood Panel',
+            'type': 'product',
+        })
+        product_desk_bolt = self.env['product.product'].create({
+            'name': 'Bolt',
+            'type': 'product',
+        })
+        self.env['mrp.bom'].create({
+            'product_tmpl_id': product.product_tmpl_id.id,
+            'product_uom_id': self.env.ref('uom.product_uom_unit').id,
+            'sequence': 2,
+            'type': 'phantom',
+            'bom_line_ids': [
+                (0, 0, {
+                    'product_id': product_wood_panel.id,
+                    'product_qty': 1,
+                    'product_uom_id': self.env.ref('uom.product_uom_unit').id,
+                }), (0, 0, {
+                    'product_id': product_desk_bolt.id,
+                    'product_qty': 4,
+                    'product_uom_id': self.env.ref('uom.product_uom_unit').id,
+                })
+            ]
+        })
+
+        partner = self.env['res.partner'].create({'name': 'My Test Partner'})
         # if `delivery` module is installed, a default property is set for the carrier to use
         # However this will lead to an extra line on the SO (the delivery line), which will force
         # the SO to have a different flow (and `invoice_state` value)
@@ -535,7 +554,7 @@ class TestSaleMrpFlow(common.SavepointCase):
         pick = so.picking_ids
         pick.move_lines.write({'quantity_done': 1})
         wiz_act = pick.button_validate()
-        wiz = self.env[wiz_act['res_model']].browse(wiz_act['res_id'])
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save()
         wiz.process()
         self.assertEqual(so.invoice_status, 'no', 'Sale MRP: so invoice_status should be "no" after partial delivery of a kit')
         del_qty = sum(sol.qty_delivered for sol in so.order_line)
@@ -544,7 +563,7 @@ class TestSaleMrpFlow(common.SavepointCase):
         self.assertEqual(len(so.picking_ids), 2, 'Sale MRP: number of pickings should be 2')
         pick_2 = so.picking_ids.filtered('backorder_id')
         for move in pick_2.move_lines:
-            if move.product_id.id == self.env.ref('mrp.product_product_computer_desk_bolt').id:
+            if move.product_id.id == product_desk_bolt.id:
                 move.write({'quantity_done': 19})
             else:
                 move.write({'quantity_done': 4})
@@ -572,7 +591,7 @@ class TestSaleMrpFlow(common.SavepointCase):
             'rounding': 1.0})
         self.company = self.env.ref('base.main_company')
         self.company.anglo_saxon_accounting = True
-        self.partner = self.env.ref('base.res_partner_1')
+        self.partner = self.env['res.partner'].create({'name': 'My Test Partner'})
         self.category = self.env.ref('product.product_category_1').copy({'name': 'Test category','property_valuation': 'real_time', 'property_cost_method': 'fifo'})
         account_type = self.env['account.account.type'].create({'name': 'RCV type', 'type': 'other', 'internal_group': 'asset'})
         self.account_receiv = self.env['account.account'].create({'name': 'Receivable', 'code': 'RCV00' , 'user_type_id': account_type.id, 'reconcile': True})
@@ -653,7 +672,7 @@ class TestSaleMrpFlow(common.SavepointCase):
         # To check the products on the picking
         self.assertEqual(pick.move_lines.mapped('product_id'), self.component1 | self.component2)
         wiz_act = pick.button_validate()
-        wiz = self.env[wiz_act['res_model']].browse(wiz_act['res_id'])
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save()
         wiz.process()
         # Create the invoice
         self.so._create_invoices()
@@ -691,7 +710,7 @@ class TestSaleMrpFlow(common.SavepointCase):
         self.env['stock.quant']._update_available_quantity(self.component_c, stock_location, 30)
 
         # Creation of a sale order for x10 kit_1
-        partner = self.env.ref('base.res_partner_1')
+        partner = self.env['res.partner'].create({'name': 'My Test Partner'})
         f = Form(self.env['sale.order'])
         f.partner_id = partner
         with f.order_line.new() as line:
@@ -732,8 +751,9 @@ class TestSaleMrpFlow(common.SavepointCase):
 
         # Process only x1 of the first component then create a backorder for the missing components
         picking_original.move_lines.sorted()[0].write({'quantity_done': 1})
-        backorder_wizard = self.env['stock.backorder.confirmation'].create({'pick_ids': [(4, so.picking_ids[0].id)]})
-        backorder_wizard.process()
+
+        wiz_act = so.picking_ids[0].button_validate()
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save().process()
 
         # Check that the backorder was created, no kit should be delivered at this point
         self.assertEqual(len(so.picking_ids), 2)
@@ -744,8 +764,8 @@ class TestSaleMrpFlow(common.SavepointCase):
         # Process only x6 each componenent in the picking
         # Then create a backorder for the missing components
         backorder_1.move_lines.write({'quantity_done': 6})
-        backorder_wizard = self.env['stock.backorder.confirmation'].create({'pick_ids': [(4, backorder_1.id)]})
-        backorder_wizard.process()
+        wiz_act = backorder_1.button_validate()
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save().process()
 
         # Check that a backorder is created
         self.assertEqual(len(so.picking_ids), 3)
@@ -761,8 +781,8 @@ class TestSaleMrpFlow(common.SavepointCase):
         # - A backorder will be created, the SO should have 3 picking_ids linked to it.
         backorder_2.move_lines.write({'quantity_done': 3})
 
-        backorder_wizard = self.env['stock.backorder.confirmation'].create({'pick_ids': [(4, backorder_2.id)]})
-        backorder_wizard.process()
+        wiz_act = backorder_2.button_validate()
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save().process()
 
         self.assertEqual(len(so.picking_ids), 4)
         backorder_3 = so.picking_ids - picking_original - backorder_2 - backorder_1
@@ -814,7 +834,7 @@ class TestSaleMrpFlow(common.SavepointCase):
         self.env['stock.quant']._update_available_quantity(self.component_g, stock_location, 28)
 
         # Creation of a sale order for x7 kit_parent
-        partner = self.env.ref('base.res_partner_1')
+        partner = self.env['res.partner'].create({'name': 'My Test Partner'})
         f = Form(self.env['sale.order'])
         f.partner_id = partner
         with f.order_line.new() as line:
@@ -854,8 +874,8 @@ class TestSaleMrpFlow(common.SavepointCase):
         move_lines.write({'quantity_done': qty_to_process})
 
         # Create a backorder for the missing componenents
-        backorder_wizard = self.env['stock.backorder.confirmation'].create({'pick_ids': [(4, so.picking_ids[0].id)]})
-        backorder_wizard.process()
+        wiz_act = picking_original.button_validate()
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save().process()
 
         # Check that a backorded is created
         self.assertEqual(len(so.picking_ids), 2)
@@ -874,8 +894,8 @@ class TestSaleMrpFlow(common.SavepointCase):
         self._process_quantities(backorder_1.move_lines, qty_to_process)
 
         # Create a backorder for the missing componenents
-        backorder_wizard = self.env['stock.backorder.confirmation'].create({'pick_ids': [(4, backorder_1.id)]})
-        backorder_wizard.process()
+        wiz_act = backorder_1.button_validate()
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save().process()
 
         # Only 1 kit_parent should be delivered at this point
         self.assertEqual(order_line.qty_delivered, 1)
@@ -913,8 +933,8 @@ class TestSaleMrpFlow(common.SavepointCase):
         self._process_quantities(backorder_2.move_lines, qty_to_process)
 
         # Create a backorder for the missing componenents
-        backorder_wizard = self.env['stock.backorder.confirmation'].create({'pick_ids': [(4, backorder_2.id)]})
-        backorder_wizard.process()
+        wiz_act = backorder_2.button_validate()
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save().process()
 
         # Check that x3 kit_parents are indeed delivered
         self.assertEqual(order_line.qty_delivered, 3)
@@ -958,7 +978,7 @@ class TestSaleMrpFlow(common.SavepointCase):
 
         # Process all components and validate the picking
         wiz_act = return_pick.button_validate()
-        wiz = self.env[wiz_act['res_model']].browse(wiz_act['res_id'])
+        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save()
         wiz.process()
 
         # Now quantity delivered should be 3 again
@@ -980,8 +1000,8 @@ class TestSaleMrpFlow(common.SavepointCase):
                 'to_refund': True
             })
 
-        backorder_wizard = self.env['stock.backorder.confirmation'].create({'pick_ids': [(4, return_of_return_pick.id)]})
-        backorder_wizard.process()
+        wiz_act = return_of_return_pick.button_validate()
+        Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save().process()
 
         # As one of each component is missing, only 6 kit_parents should be delivered
         self.assertEqual(order_line.qty_delivered, 6)
@@ -1036,7 +1056,7 @@ class TestSaleMrpFlow(common.SavepointCase):
         # Creation of a sale order for x7 kit_parent
         qty_ordered = 7
         f = Form(self.env['sale.order'])
-        f.partner_id = self.env.ref('base.res_partner_1')
+        f.partner_id = self.env['res.partner'].create({'name': 'My Test Partner'})
         f.warehouse_id = warehouse_2
         with f.order_line.new() as line:
             line.product_id = self.kit_parent
@@ -1146,7 +1166,7 @@ class TestSaleMrpFlow(common.SavepointCase):
         self.env['stock.quant']._update_available_quantity(component_uom_kg, stock_location, 0.03)
 
         # Creation of a sale order for x10 kit_1
-        partner = self.env.ref('base.res_partner_1')
+        partner = self.env['res.partner'].create({'name': 'My Test Partner'})
         f = Form(self.env['sale.order'])
         f.partner_id = partner
         with f.order_line.new() as line:
@@ -1174,9 +1194,8 @@ class TestSaleMrpFlow(common.SavepointCase):
             component_uom_kg: 0.006
         }
         self._process_quantities(move_lines, qty_to_process)
-        backorder_wizard = self.env['stock.backorder.confirmation'].create(
-            {'pick_ids': [(4, so.picking_ids[0].id)]})
-        backorder_wizard.process()
+        res = move_lines.picking_id.button_validate()
+        Form(self.env[res['res_model']].with_context(res['context'])).save().process()
 
         # Check that a backorder is created
         self.assertEqual(len(so.picking_ids), 2)
@@ -1277,7 +1296,7 @@ class TestSaleMrpFlow(common.SavepointCase):
         # Creation of a sale order for x5 kit_uom_in_kit
         qty_ordered = 5
         f = Form(self.env['sale.order'])
-        f.partner_id = self.env.ref('base.res_partner_1')
+        f.partner_id = self.env['res.partner'].create({'name': 'My Test Partner'})
         f.warehouse_id = warehouse_1
         with f.order_line.new() as line:
             line.product_id = kit_uom_in_kit
@@ -1326,6 +1345,15 @@ class TestSaleMrpFlow(common.SavepointCase):
         # kit_1 --|- component_shelf1   x3
         #         |- component_shelf2   x2
 
+        stock_location_components = self.env['stock.location'].create({
+            'name': 'Shelf 1',
+            'location_id': self.env.ref('stock.warehouse0').lot_stock_id.id,
+        })
+        stock_location_14 = self.env['stock.location'].create({
+            'name': 'Shelf 2',
+            'location_id': self.env.ref('stock.warehouse0').lot_stock_id.id,
+        })
+
         kit_1 = self._create_product('Kit1', self.uom_unit)
         component_shelf1 = self._create_product('Comp Shelf1', self.uom_unit)
         component_shelf2 = self._create_product('Comp Shelf2', self.uom_unit)
@@ -1352,7 +1380,7 @@ class TestSaleMrpFlow(common.SavepointCase):
                 'name': 'Shelf1 -> Customer',
                 'action': 'pull',
                 'picking_type_id': self.ref('stock.picking_type_in'),
-                'location_src_id': self.ref('stock.stock_location_components'),
+                'location_src_id': stock_location_components.id,
                 'location_id': self.ref('stock.stock_location_customers'),
             })],
         })
@@ -1364,7 +1392,7 @@ class TestSaleMrpFlow(common.SavepointCase):
                 'name': 'Shelf2 -> Customer',
                 'action': 'pull',
                 'picking_type_id': self.ref('stock.picking_type_in'),
-                'location_src_id': self.ref('stock.stock_location_14'),
+                'location_src_id': stock_location_14.id,
                 'location_id': self.ref('stock.stock_location_customers'),
             })],
         })
@@ -1380,7 +1408,7 @@ class TestSaleMrpFlow(common.SavepointCase):
 
         # Creating a sale order for 5 kits and confirming it
         order_form = Form(self.env['sale.order'])
-        order_form.partner_id = self.env.ref('base.res_partner_2')
+        order_form.partner_id = self.env['res.partner'].create({'name': 'My Test Partner'})
         with order_form.order_line.new() as line:
             line.product_id = kit_1
             line.product_uom = self.uom_unit
@@ -1396,9 +1424,9 @@ class TestSaleMrpFlow(common.SavepointCase):
         moves = order.picking_ids.mapped('move_lines')
         move_shelf1 = moves.filtered(lambda m: m.product_id == component_shelf1)
         move_shelf2 = moves.filtered(lambda m: m.product_id == component_shelf2)
-        self.assertEqual(move_shelf1.location_id.id, self.ref('stock.stock_location_components'))
+        self.assertEqual(move_shelf1.location_id.id, stock_location_components.id)
         self.assertEqual(move_shelf1.location_dest_id.id, self.ref('stock.stock_location_customers'))
-        self.assertEqual(move_shelf2.location_id.id, self.ref('stock.stock_location_14'))
+        self.assertEqual(move_shelf2.location_id.id, stock_location_14.id)
         self.assertEqual(move_shelf2.location_dest_id.id, self.ref('stock.stock_location_customers'))
 
     def test_11_sale_mrp_explode_kits_uom_quantities(self):
@@ -1438,7 +1466,7 @@ class TestSaleMrpFlow(common.SavepointCase):
 
         # Creating a sale order for 3 Units of kit_1 and confirming it
         order_form = Form(self.env['sale.order'])
-        order_form.partner_id = self.env.ref('base.res_partner_2')
+        order_form.partner_id = self.env['res.partner'].create({'name': 'My Test Partner'})
         order_form.warehouse_id = warehouse_1
         with order_form.order_line.new() as line:
             line.product_id = kit_1
@@ -1488,7 +1516,7 @@ class TestSaleMrpFlow(common.SavepointCase):
 
         # Create sale order
         sale_form = Form(self.env['sale.order'])
-        sale_form.partner_id = self.env.ref('base.res_partner_1')
+        sale_form.partner_id = self.env['res.partner'].create({'name': 'My Test Partner'})
         with sale_form.order_line.new() as line:
             line.name = finished_product.name
             line.product_id = finished_product
@@ -1497,9 +1525,116 @@ class TestSaleMrpFlow(common.SavepointCase):
             line.price_unit = 10.0
         sale_order = sale_form.save()
 
-        with self.assertRaises(UserError):
-            sale_order.action_confirm()
+        sale_order.action_confirm()
 
         mo = self.env['mrp.production'].search([('product_id', '=', finished_product.id)])
 
         self.assertTrue(mo, 'Manufacturing order created.')
+
+    def test_cancel_flow_1(self):
+        """ Sell a MTO/manufacture product.
+
+        Cancel the delivery and the production order. Then duplicate
+        the delivery. Another production order should be created."""
+        route_manufacture = self.warehouse.manufacture_pull_id.route_id.id
+        route_mto = self.warehouse.mto_pull_id.route_id.id
+        self.uom_unit = self.env.ref('uom.product_uom_unit')
+
+        # Create finished product
+        finished_product = self.env['product.product'].create({
+            'name': 'Geyser',
+            'type': 'product',
+            'route_ids': [(4, route_mto), (4, route_manufacture)],
+        })
+
+        product_raw = self.env['product.product'].create({
+            'name': 'raw Geyser',
+            'type': 'product',
+        })
+
+        # Create bom for finish product
+        bom = self.env['mrp.bom'].create({
+            'product_id': finished_product.id,
+            'product_tmpl_id': finished_product.product_tmpl_id.id,
+            'product_uom_id': self.env.ref('uom.product_uom_unit').id,
+            'product_qty': 1.0,
+            'type': 'normal',
+            'bom_line_ids': [(5, 0), (0, 0, {'product_id': product_raw.id})]
+        })
+
+        # Create sale order
+        sale_form = Form(self.env['sale.order'])
+        sale_form.partner_id = self.env['res.partner'].create({'name': 'My Test Partner'})
+        with sale_form.order_line.new() as line:
+            line.name = finished_product.name
+            line.product_id = finished_product
+            line.product_uom_qty = 1.0
+            line.product_uom = self.uom_unit
+            line.price_unit = 10.0
+        sale_order = sale_form.save()
+
+        sale_order.action_confirm()
+
+        mo = self.env['mrp.production'].search([('product_id', '=', finished_product.id)])
+        delivery = sale_order.picking_ids
+        delivery.action_cancel()
+        mo.action_cancel()
+        copied_delivery = delivery.copy()
+        copied_delivery.action_confirm()
+        mos = self.env['mrp.production'].search([('product_id', '=', finished_product.id)])
+        self.assertEqual(len(mos), 1)
+        self.assertEqual(mos.state, 'cancel')
+
+    def test_cancel_flow_2(self):
+        """ Sell a MTO/manufacture product.
+
+        Cancel the production order and the delivery. Then duplicate
+        the delivery. Another production order should be created."""
+        route_manufacture = self.warehouse.manufacture_pull_id.route_id.id
+        route_mto = self.warehouse.mto_pull_id.route_id.id
+        self.uom_unit = self.env.ref('uom.product_uom_unit')
+
+        # Create finished product
+        finished_product = self.env['product.product'].create({
+            'name': 'Geyser',
+            'type': 'product',
+            'route_ids': [(4, route_mto), (4, route_manufacture)],
+        })
+
+        product_raw = self.env['product.product'].create({
+            'name': 'raw Geyser',
+            'type': 'product',
+        })
+
+        # Create bom for finish product
+        bom = self.env['mrp.bom'].create({
+            'product_id': finished_product.id,
+            'product_tmpl_id': finished_product.product_tmpl_id.id,
+            'product_uom_id': self.env.ref('uom.product_uom_unit').id,
+            'product_qty': 1.0,
+            'type': 'normal',
+            'bom_line_ids': [(5, 0), (0, 0, {'product_id': product_raw.id})]
+        })
+
+        # Create sale order
+        sale_form = Form(self.env['sale.order'])
+        sale_form.partner_id = self.env['res.partner'].create({'name': 'My Test Partner'})
+        with sale_form.order_line.new() as line:
+            line.name = finished_product.name
+            line.product_id = finished_product
+            line.product_uom_qty = 1.0
+            line.product_uom = self.uom_unit
+            line.price_unit = 10.0
+        sale_order = sale_form.save()
+
+        sale_order.action_confirm()
+
+        mo = self.env['mrp.production'].search([('product_id', '=', finished_product.id)])
+        delivery = sale_order.picking_ids
+        mo.action_cancel()
+        delivery.action_cancel()
+        copied_delivery = delivery.copy()
+        copied_delivery.action_confirm()
+        mos = self.env['mrp.production'].search([('product_id', '=', finished_product.id)])
+        self.assertEqual(len(mos), 1)
+        self.assertEqual(mos.state, 'cancel')

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -46,6 +47,12 @@ class EventTypeMail(models.Model):
         domain=[('model', '=', 'event.registration')], ondelete='restrict',
         help='This field contains the template of the mail that will be automatically sent')
 
+    @api.model
+    def _get_event_mail_fields_whitelist(self):
+        """ Whitelist of fields that are copied from event_type_mail_ids to event_mail_ids when
+        changing the event_type_id field of event.event """
+        return ['notification_type', 'template_id', 'interval_nbr', 'interval_unit', 'interval_type']
+
 
 class EventMailScheduler(models.Model):
     """ Event automated mailing. This model replaces all existing fields and
@@ -75,7 +82,7 @@ class EventMailScheduler(models.Model):
         help='This field contains the template of the mail that will be automatically sent')
     scheduled_date = fields.Datetime('Scheduled Sent Mail', compute='_compute_scheduled_date', store=True)
     mail_registration_ids = fields.One2many('event.mail.registration', 'scheduler_id')
-    mail_sent = fields.Boolean('Mail Sent on Event')
+    mail_sent = fields.Boolean('Mail Sent on Event', copy=False)
     done = fields.Boolean('Sent', compute='_compute_done', store=True)
 
     @api.depends('mail_sent', 'interval_type', 'event_id.registration_ids', 'mail_registration_ids')
@@ -86,19 +93,17 @@ class EventMailScheduler(models.Model):
             else:
                 mail.done = len(mail.mail_registration_ids) == len(mail.event_id.registration_ids) and all(mail.mail_sent for mail in mail.mail_registration_ids)
 
-    @api.depends('event_id.state', 'event_id.date_begin', 'interval_type', 'interval_unit', 'interval_nbr')
+    @api.depends('event_id.date_begin', 'interval_type', 'interval_unit', 'interval_nbr')
     def _compute_scheduled_date(self):
         for mail in self:
-            if mail.event_id.state not in ['confirm', 'done']:
-                mail.scheduled_date = False
+            if mail.interval_type == 'after_sub':
+                date, sign = mail.event_id.create_date, 1
+            elif mail.interval_type == 'before_event':
+                date, sign = mail.event_id.date_begin, -1
             else:
-                if mail.interval_type == 'after_sub':
-                    date, sign = mail.event_id.create_date, 1
-                elif mail.interval_type == 'before_event':
-                    date, sign = mail.event_id.date_begin, -1
-                else:
-                    date, sign = mail.event_id.date_end, 1
-                mail.scheduled_date = date + _INTERVALS[mail.interval_unit](sign * mail.interval_nbr)
+                date, sign = mail.event_id.date_end, 1
+
+            mail.scheduled_date = date + _INTERVALS[mail.interval_unit](sign * mail.interval_nbr) if date else False
 
     def execute(self):
         for mail in self:
@@ -128,20 +133,26 @@ class EventMailScheduler(models.Model):
             try:
                 event, template = scheduler.event_id, scheduler.template_id
                 emails = list(set([event.organizer_id.email, event.user_id.email, template.write_uid.email]))
-                subject = _("WARNING: Event Scheduler Error for event: %s" % event.name)
+                subject = _("WARNING: Event Scheduler Error for event: %s", event.name)
                 body = _("""Event Scheduler for:
-                              - Event: %s (%s)
-                              - Scheduled: %s
-                              - Template: %s (%s)
+  - Event: %(event_name)s (%(event_id)s)
+  - Scheduled: %(date)s
+  - Template: %(template_name)s (%(template_id)s)
 
-                            Failed with error:
-                              - %s
+Failed with error:
+  - %(error)s
 
-                            You receive this email because you are:
-                              - the organizer of the event,
-                              - or the responsible of the event,
-                              - or the last writer of the template."""
-                         % (event.name, event.id, scheduler.scheduled_date, template.name, template.id, ex_s))
+You receive this email because you are:
+  - the organizer of the event,
+  - or the responsible of the event,
+  - or the last writer of the template.
+""",
+                         event_name=event.name,
+                         event_id=event.id,
+                         date=scheduler.scheduled_date,
+                         template_name=template.name,
+                         template_id=template.id,
+                         error=ex_s)
                 email = self.env['ir.mail_server'].build_email(
                     email_from=self.env.user.email,
                     email_to=emails,

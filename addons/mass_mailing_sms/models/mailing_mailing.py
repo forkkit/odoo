@@ -5,6 +5,7 @@ import logging
 
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError
+from odoo.osv import expression
 
 _logger = logging.getLogger(__name__)
 
@@ -20,52 +21,58 @@ class Mailing(models.Model):
         return res
 
     # mailing options
-    mailing_type = fields.Selection(selection_add=[('sms', 'SMS')])
+    mailing_type = fields.Selection(selection_add=[
+        ('sms', 'SMS')
+    ], ondelete={'sms': 'set default'})
     # sms options
-    body_plaintext = fields.Text('SMS Body')
+    body_plaintext = fields.Text('SMS Body', compute='_compute_body_plaintext', store=True, readonly=False)
     sms_template_id = fields.Many2one('sms.template', string='SMS Template', ondelete='set null')
     sms_has_insufficient_credit = fields.Boolean(
-        'Insufficient IAP credits', compute='_compute_sms_has_insufficient_credit',
+        'Insufficient IAP credits', compute='_compute_sms_has_iap_failure',
         help='UX Field to propose to buy IAP credits')
+    sms_has_unregistered_account = fields.Boolean(
+        'Unregistered IAP account', compute='_compute_sms_has_iap_failure',
+        help='UX Field to propose to Register the SMS IAP account')
     sms_force_send = fields.Boolean(
         'Send Directly', help='Use at your own risks.')
     # opt_out_link
     sms_allow_unsubscribe = fields.Boolean('Include opt-out link', default=False)
 
-    @api.onchange('mailing_type')
-    def _onchange_mailing_type(self):
-        if self.mailing_type == 'sms' and (not self.medium_id or self.medium_id == self.env.ref('utm.utm_medium_email')):
-            self.medium_id = self.env.ref('mass_mailing_sms.utm_medium_sms').id
-        elif self.mailing_type == 'mail' and (not self.medium_id or self.medium_id == self.env.ref('mass_mailing_sms.utm_medium_sms')):
-            self.medium_id = self.env.ref('utm.utm_medium_email').id
+    @api.depends('mailing_type')
+    def _compute_medium_id(self):
+        super(Mailing, self)._compute_medium_id()
+        for mailing in self:
+            if mailing.mailing_type == 'sms' and (not mailing.medium_id or mailing.medium_id == self.env.ref('utm.utm_medium_email')):
+                mailing.medium_id = self.env.ref('mass_mailing_sms.utm_medium_sms').id
+            elif mailing.mailing_type == 'mail' and (not mailing.medium_id or mailing.medium_id == self.env.ref('mass_mailing_sms.utm_medium_sms')):
+                mailing.medium_id = self.env.ref('utm.utm_medium_email').id
 
-    @api.onchange('sms_template_id', 'mailing_type')
-    def _onchange_sms_template_id(self):
-        if self.mailing_type == 'sms' and self.sms_template_id:
-            self.body_plaintext = self.sms_template_id.body
+    @api.depends('sms_template_id', 'mailing_type')
+    def _compute_body_plaintext(self):
+        for mailing in self:
+            if mailing.mailing_type == 'sms' and mailing.sms_template_id:
+                mailing.body_plaintext = mailing.sms_template_id.body
 
     @api.depends('mailing_trace_ids.failure_type')
-    def _compute_sms_has_insufficient_credit(self):
-        mailing_ids = self.env['mailing.trace'].sudo().search([
-            ('mass_mailing_id', 'in', self.ids),
-            ('trace_type', '=', 'sms'),
-            ('failure_type', '=', 'sms_credit')
-        ]).mapped('mass_mailing_id')
-        for mailing in self:
-            mailing.sms_has_insufficient_credit = mailing in mailing_ids
+    def _compute_sms_has_iap_failure(self):
+        failures = ['sms_acc', 'sms_credit'] 
+        if not self.ids:
+            self.sms_has_insufficient_credit = self.sms_has_unregistered_account = False
+        else:
+            traces = self.env['mailing.trace'].sudo().read_group([
+                        ('mass_mailing_id', 'in', self.ids),
+                        ('trace_type', '=', 'sms'),
+                        ('failure_type', 'in', failures)
+            ], ['mass_mailing_id', 'failure_type'], ['mass_mailing_id', 'failure_type'], lazy=False)
 
-    # --------------------------------------------------
-    # CRUD
-    # --------------------------------------------------
+            trace_dict = dict.fromkeys(self.ids, {key: False for key in failures})
+            for t in traces:
+                trace_dict[t['mass_mailing_id'][0]][t['failure_type']] =  t['__count'] and True or False
 
-    @api.model
-    def create(self, values):
-        if values.get('mailing_type') == 'sms':
-            if not values.get('medium_id'):
-                values['medium_id'] = self.env.ref('mass_mailing_sms.utm_medium_sms').id
-            if values.get('sms_template_id') and not values.get('body_plaintext'):
-                values['body_plaintext'] = self.env['sms.template'].browse(values['sms_template_id']).body
-        return super(Mailing, self).create(values)
+            for mail in self:
+                mail.sms_has_insufficient_credit = trace_dict[mail.id]['sms_credit']
+                mail.sms_has_unregistered_account = trace_dict[mail.id]['sms_acc']
+
 
     # --------------------------------------------------
     # BUSINESS / VIEWS ACTIONS
@@ -133,7 +140,7 @@ class Mailing(models.Model):
         self.ensure_one()
         opt_out = []
         target = self.env[self.mailing_model_real]
-        if self.mailing_model_real == "mail.mass_mailing.contact":
+        if self.mailing_model_real == 'mailing.contact':
             # if user is opt_out on One list but not on another
             # or if two user with same email address, one opted in and the other one opted out, send the mail anyway
             # TODO DBE Fixme : Optimise the following to get real opt_out and opt_in
@@ -164,7 +171,7 @@ class Mailing(models.Model):
             if 'phone' in target._fields:
                 phone_fields.append('phone')
         if not phone_fields:
-            raise UserError(_("Unsupported %s for mass SMS") % self.mailing_model_id.name)
+            raise UserError(_("Unsupported %s for mass SMS", self.mailing_model_id.name))
 
         query = """
             SELECT %(select_query)s
@@ -219,3 +226,14 @@ class Mailing(models.Model):
             composer._action_send_sms()
             mailing.write({'state': 'done', 'sent_date': fields.Datetime.now()})
         return True
+
+    # --------------------------------------------------
+    # TOOLS
+    # --------------------------------------------------
+
+    def _get_default_mailing_domain(self):
+        mailing_domain = super(Mailing, self)._get_default_mailing_domain()
+        if self.mailing_type == 'sms' and 'phone_sanitized_blacklisted' in self.env[self.mailing_model_name]._fields:
+            mailing_domain = expression.AND([mailing_domain, [('phone_sanitized_blacklisted', '=', False)]])
+
+        return mailing_domain

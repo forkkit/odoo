@@ -9,12 +9,14 @@ from odoo.tools.translate import html_translate
 from odoo.osv import expression
 
 
-class ProductStyle(models.Model):
-    _name = "product.style"
-    _description = 'Product Style'
+class ProductRibbon(models.Model):
+    _name = "product.ribbon"
+    _description = 'Product ribbon'
 
-    name = fields.Char(string='Style Name', required=True)
-    html_class = fields.Char(string='HTML Classes')
+    html = fields.Char(string='Ribbon html', required=True)
+    bg_color = fields.Char(string='Ribbon background color', required=False)
+    text_color = fields.Char(string='Ribbon text color', required=False)
+    html_class = fields.Char(string='Ribbon class', required=True, default='')
 
 
 class ProductPricelist(models.Model):
@@ -30,7 +32,7 @@ class ProductPricelist(models.Model):
         domain = [('company_id', '=', company_id)]
         return self.env['website'].search(domain, limit=1)
 
-    website_id = fields.Many2one('website', string="Website", ondelete='restrict', default=_default_website)
+    website_id = fields.Many2one('website', string="Website", ondelete='restrict', default=_default_website, domain="[('company_id', '=?', company_id)]")
     code = fields.Char(string='E-commerce Promotional Code', groups="base.group_user")
     selectable = fields.Boolean(help="Allow the end user to choose this price list")
 
@@ -54,7 +56,7 @@ class ProductPricelist(models.Model):
 
     def write(self, data):
         res = super(ProductPricelist, self).write(data)
-        if data.keys() & {'code', 'active', 'website_id', 'selectable'}:
+        if data.keys() & {'code', 'active', 'website_id', 'selectable', 'company_id'}:
             self._check_website_pricelist()
         self.clear_cache()
         return res
@@ -65,8 +67,8 @@ class ProductPricelist(models.Model):
         self.clear_cache()
         return res
 
-    def _get_partner_pricelist_multi_search_domain_hook(self):
-        domain = super(ProductPricelist, self)._get_partner_pricelist_multi_search_domain_hook()
+    def _get_partner_pricelist_multi_search_domain_hook(self, company_id):
+        domain = super(ProductPricelist, self)._get_partner_pricelist_multi_search_domain_hook(company_id)
         website = ir_http.get_request_website()
         if website:
             domain += self._get_website_pricelists_domain(website.id)
@@ -119,12 +121,6 @@ class ProductPricelist(models.Model):
             company_id = website.company_id.id
         return super(ProductPricelist, self)._get_partner_pricelist_multi(partner_ids, company_id)
 
-    @api.onchange('company_id')
-    def _onchange_company_id(self):
-        ''' Show only the company's website '''
-        domain = self.company_id and [('company_id', '=', self.company_id.id)] or []
-        return {'domain': {'website_id': domain}}
-
     @api.constrains('company_id', 'website_id')
     def _check_websites_in_company(self):
         '''Prevent misconfiguration multi-website/multi-companies.
@@ -132,8 +128,7 @@ class ProductPricelist(models.Model):
         '''
         for record in self.filtered(lambda pl: pl.website_id and pl.company_id):
             if record.website_id.company_id != record.company_id:
-                raise ValidationError(_("Only the company's websites are allowed. \
-                    Leave the Company field empty or select a website from that company."))
+                raise ValidationError(_("""Only the company's websites are allowed.\nLeave the Company field empty or select a website from that company."""))
 
 
 class ProductPublicCategory(models.Model):
@@ -141,15 +136,21 @@ class ProductPublicCategory(models.Model):
     _inherit = ["website.seo.metadata", "website.multi.mixin", 'image.mixin']
     _description = "Website Product Category"
     _parent_store = True
-    _order = "sequence, name"
+    _order = "sequence, name, id"
+
+    def _default_sequence(self):
+        cat = self.search([], limit=1, order="sequence DESC")
+        if cat:
+            return cat.sequence + 5
+        return 10000
 
     name = fields.Char(required=True, translate=True)
-    parent_id = fields.Many2one('product.public.category', string='Parent Category', index=True)
+    parent_id = fields.Many2one('product.public.category', string='Parent Category', index=True, ondelete="cascade")
     parent_path = fields.Char(index=True)
     child_id = fields.One2many('product.public.category', 'parent_id', string='Children Categories')
     parents_and_self = fields.Many2many('product.public.category', compute='_compute_parents_and_self')
-    sequence = fields.Integer(help="Gives the sequence order when displaying a list of product categories.", index=True)
-    website_description = fields.Html('Category Description', sanitize_attributes=False, translate=html_translate)
+    sequence = fields.Integer(help="Gives the sequence order when displaying a list of product categories.", index=True, default=_default_sequence)
+    website_description = fields.Html('Category Description', sanitize_attributes=False, translate=html_translate, sanitize_form=False)
     product_tmpl_ids = fields.Many2many('product.template', relation='product_public_category_product_template_rel')
 
     @api.constrains('parent_id')
@@ -175,22 +176,26 @@ class ProductTemplate(models.Model):
     _inherit = ["product.template", "website.seo.metadata", 'website.published.multi.mixin', 'rating.mixin']
     _name = 'product.template'
     _mail_post_access = 'read'
+    _check_company_auto = True
 
-    website_description = fields.Html('Description for the website', sanitize_attributes=False, translate=html_translate)
-    alternative_product_ids = fields.Many2many('product.template', 'product_alternative_rel', 'src_id', 'dest_id',
-                                               string='Alternative Products', help='Suggest alternatives to your customer'
-                                               '(upsell strategy).Those product show up on the product page.')
-    accessory_product_ids = fields.Many2many('product.product', 'product_accessory_rel', 'src_id', 'dest_id',
-                                             string='Accessory Products', help='Accessories show up when the customer'
-                                             'reviews the cart before payment (cross-sell strategy).')
+    website_description = fields.Html('Description for the website', sanitize_attributes=False, translate=html_translate, sanitize_form=False)
+    alternative_product_ids = fields.Many2many(
+        'product.template', 'product_alternative_rel', 'src_id', 'dest_id', check_company=True,
+        string='Alternative Products', help='Suggest alternatives to your customer (upsell strategy). '
+                                            'Those products show up on the product page.')
+    accessory_product_ids = fields.Many2many(
+        'product.product', 'product_accessory_rel', 'src_id', 'dest_id', string='Accessory Products', check_company=True,
+        help='Accessories show up when the customer reviews the cart before payment (cross-sell strategy).')
     website_size_x = fields.Integer('Size X', default=1)
     website_size_y = fields.Integer('Size Y', default=1)
-    website_style_ids = fields.Many2many('product.style', string='Styles')
+    website_ribbon_id = fields.Many2one('product.ribbon', string='Ribbon')
     website_sequence = fields.Integer('Website Sequence', help="Determine the display order in the Website E-commerce",
-                                      default=lambda self: self._default_website_sequence())
-    public_categ_ids = fields.Many2many('product.public.category', relation='product_public_category_product_template_rel', string='Website Product Category',
-                                        help="The product will be available in each mentioned e-commerce category. Go to"
-                                        "Shop > Customize and enable 'E-commerce categories' to view all e-commerce categories.")
+                                      default=lambda self: self._default_website_sequence(), copy=False)
+    public_categ_ids = fields.Many2many(
+        'product.public.category', relation='product_public_category_product_template_rel',
+        string='Website Product Category',
+        help="The product will be available in each mentioned eCommerce category. Go to Shop > "
+             "Customize and enable 'eCommerce categories' to view all eCommerce categories.")
 
     product_template_image_ids = fields.One2many('product.image', 'product_tmpl_id', string="Extra Product Media", copy=True)
 
@@ -277,8 +282,9 @@ class ProductTemplate(models.Model):
             company_id = current_website.company_id
             product = self.env['product.product'].browse(combination_info['product_id']) or self
 
-            tax_display = self.env.user.has_group('account.group_show_line_subtotals_tax_excluded') and 'total_excluded' or 'total_included'
-            taxes = partner.property_account_position_id.map_tax(product.sudo().taxes_id.filtered(lambda x: x.company_id == company_id), product, partner)
+            tax_display = self.user_has_groups('account.group_show_line_subtotals_tax_excluded') and 'total_excluded' or 'total_included'
+            fpos = self.env['account.fiscal.position'].get_fiscal_position(partner.id)
+            taxes = fpos.map_tax(product.sudo().taxes_id.filtered(lambda x: x.company_id == company_id), product, partner)
 
             # The list_price is always the price of one.
             quantity_1 = 1
@@ -377,7 +383,7 @@ class ProductTemplate(models.Model):
     def _rating_domain(self):
         """ Only take the published rating into account to compute avg and count """
         domain = super(ProductTemplate, self)._rating_domain()
-        return expression.AND([domain, [('website_published', '=', True)]])
+        return expression.AND([domain, [('is_internal', '=', False)]])
 
     def _get_images(self):
         """Return a list of records implementing `image.mixin` to
@@ -402,6 +408,7 @@ class Product(models.Model):
 
     website_url = fields.Char('Website URL', compute='_compute_product_website_url', help='The full URL to access the document through the website.')
 
+    @api.depends_context('lang')
     @api.depends('product_tmpl_id.website_url', 'product_template_attribute_value_ids')
     def _compute_product_website_url(self):
         for product in self:

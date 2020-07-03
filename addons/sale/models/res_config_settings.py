@@ -21,7 +21,7 @@ class ResConfigSettings(models.TransientModel):
         ('order', 'Invoice what is ordered'),
         ('delivery', 'Invoice what is delivered')
         ], 'Invoicing Policy',
-        default='order',
+        default='delivery',
         default_model='product.template')
     deposit_default_product_id = fields.Many2one(
         'product.product',
@@ -35,8 +35,8 @@ class ResConfigSettings(models.TransientModel):
         ('b2c', 'Free sign up'),
     ], string='Customer Account', default='b2b', config_parameter='auth_signup.invitation_scope')
 
-    module_delivery = fields.Boolean("Shipping Costs")
-    module_delivery_dhl = fields.Boolean("DHL Connector")
+    module_delivery = fields.Boolean("Delivery Methods")
+    module_delivery_dhl = fields.Boolean("DHL USA Connector")
     module_delivery_fedex = fields.Boolean("FedEx Connector")
     module_delivery_ups = fields.Boolean("UPS Connector")
     module_delivery_usps = fields.Boolean("USPS Connector")

@@ -4,7 +4,7 @@
 {
     'name': 'Vantiv Payment Services',
     'version': '1.0',
-    'category': 'Sales/Point Of Sale',
+    'category': 'Sales/Point of Sale',
     'sequence': 6,
     'summary': 'Credit card support for Point Of Sale',
     'description': """
@@ -29,13 +29,14 @@ following:
         'views/pos_mercury_views.xml',
         'views/pos_mercury_transaction_templates.xml',
         'views/pos_config_setting_views.xml',
-        'views/pos_config_views.xml',
     ],
     'demo': [
         'data/pos_mercury_demo.xml',
     ],
     'qweb': [
-        'static/src/xml/pos_mercury.xml',
+        'static/src/xml/OrderReceipt.xml',
+        'static/src/xml/PaymentScreenPaymentLines.xml',
+        'static/src/xml/PaymentTransactionPopup.xml',
     ],
     'installable': True,
     'auto_install': False,

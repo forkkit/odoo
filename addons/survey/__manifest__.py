@@ -2,8 +2,8 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 {
     'name': 'Surveys',
-    'version': '3.0',
-    'category': 'Marketing/Survey',
+    'version': '3.2',
+    'category': 'Marketing/Surveys',
     'description': """
 Create beautiful surveys and visualize answers
 ==============================================
@@ -35,6 +35,10 @@ sent mails with personal token for the invitation of the survey.
         'views/survey_user_views.xml',
         'views/survey_question_views.xml',
         'views/survey_templates.xml',
+        'views/survey_templates_management.xml',
+        'views/survey_templates_print.xml',
+        'views/survey_templates_statistics.xml',
+        'views/survey_templates_user_input_session.xml',
         'views/gamification_badge_views.xml',
         'wizard/survey_invite_views.xml',
         'views/res_partner_views.xml',
@@ -43,7 +47,10 @@ sent mails with personal token for the invitation of the survey.
         'data/survey_demo_user.xml',
         'data/survey_demo_feedback.xml',
         'data/survey_demo_certification.xml',
-        'data/survey.user_input_line.csv'
+        'data/survey_demo_quiz.xml',
+        'data/survey_demo_quiz_userinput.xml',
+        'data/survey_demo_conditional.xml',
+        'data/survey.user_input.line.csv'
     ],
     'installable': True,
     'auto_install': False,

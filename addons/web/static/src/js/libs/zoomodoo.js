@@ -29,6 +29,9 @@ var defaults = {
     // event to trigger zoom
     event: 'click', //or mouseenter
 
+    // Timer before trigger zoom
+    timer: 0,
+
     // Prevent clicks on the zoom image link.
     preventClicks: true,
 
@@ -165,8 +168,8 @@ ZoomOdoo.prototype.show = function (e, testMouseOver) {
         this.$flyout.css('transform', 'translate3d(' + left + 'px, ' + top + 'px, 0px)');
     }
 
-    w1 = this.$target.width();
-    h1 = this.$target.height();
+    w1 = this.$target[0].offsetWidth;
+    h1 = this.$target[0].offsetHeight;
 
     w2 = this.$flyout.width();
     h2 = this.$flyout.height();
@@ -197,13 +200,17 @@ ZoomOdoo.prototype.show = function (e, testMouseOver) {
  * @param {Event} e
  */
 ZoomOdoo.prototype._onEnter = function (e) {
+    var self = this;
     var touches = e.originalEvent.touches;
-
+    e.preventDefault();
     this.isMouseOver = true;
-    if (!touches || touches.length === 1) {
-        e.preventDefault();
-        this.show(e, true);
-    }
+
+    setTimeout(function () {
+        if (self.isMouseOver && (!touches || touches.length === 1)) {
+            self.show(e, true);
+        }
+      }, this.opts.timer);
+
 };
 
 /**
@@ -284,7 +291,7 @@ ZoomOdoo.prototype._move = function (e) {
     var xl = Math.ceil(pl * rw);
 
     // Close if outside
-    if (xl < 0 || xt < 0 || xl > dw || xt > dh || lx > (offset.left + this.$target.width())) {
+    if (xl < 0 || xt < 0 || xl > dw || xt > dh || lx > (offset.left + this.$target.outerWidth())) {
         this.hide();
     } else {
         var top = xt * -1;

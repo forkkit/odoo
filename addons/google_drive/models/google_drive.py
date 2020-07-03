@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
+import ast
 import logging
 import json
 import re
@@ -9,7 +10,6 @@ import werkzeug.urls
 
 from odoo import api, fields, models
 from odoo.exceptions import RedirectWarning, UserError
-from odoo.tools.safe_eval import safe_eval
 from odoo.tools.translate import _
 
 from odoo.addons.google_account.models.google_service import GOOGLE_TOKEN_ENDPOINT, TIMEOUT
@@ -165,8 +165,8 @@ class GoogleDrive(models.Model):
                 if config.filter_id.user_id and config.filter_id.user_id.id != self.env.user.id:
                     #Private
                     continue
-                domain = [('id', 'in', [res_id])] + safe_eval(config.filter_id.domain)
-                additionnal_context = safe_eval(config.filter_id.context)
+                domain = [('id', 'in', [res_id])] + ast.literal_eval(config.filter_id.domain)
+                additionnal_context = ast.literal_eval(config.filter_id.context)
                 google_doc_configs = self.env[config.filter_id.model_id].with_context(**additionnal_context).search(domain)
                 if google_doc_configs:
                     config_values.append({'id': config.id, 'name': config.name})
@@ -175,7 +175,7 @@ class GoogleDrive(models.Model):
         return config_values
 
     name = fields.Char('Template Name', required=True)
-    model_id = fields.Many2one('ir.model', 'Model', required=True)
+    model_id = fields.Many2one('ir.model', 'Model', required=True, ondelete='cascade')
     model = fields.Char('Related Model', related='model_id.model', readonly=True)
     filter_id = fields.Many2one('ir.filters', 'Filter', domain="[('model_id', '=', model)]")
     google_drive_template_url = fields.Char('Template URL', required=True)

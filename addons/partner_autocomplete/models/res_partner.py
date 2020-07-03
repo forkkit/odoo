@@ -87,6 +87,8 @@ class ResPartner(models.Model):
             return False, 'Insufficient Credit'
         url = '%s/%s' % (self.get_endpoint(), action)
         account = self.env['iap.account'].get('partner_autocomplete')
+        if not account.account_token:
+            return False, 'No Account Token'
         params.update({
             'db_uuid': self.env['ir.config_parameter'].sudo().get_param('database.uuid'),
             'account_token': account.account_token,
@@ -182,9 +184,11 @@ class ResPartner(models.Model):
         if len(vals_list) == 1:
             partners._update_autocomplete_data(vals_list[0].get('vat', False))
             if partners.additional_info:
+                template_values = json.loads(partners.additional_info)
+                template_values['flavor_text'] = _("Partner created by Odoo Partner Autocomplete Service")
                 partners.message_post_with_view(
-                    'partner_autocomplete.additional_info_template',
-                    values=json.loads(partners.additional_info),
+                    'partner_autocomplete.enrich_service_information',
+                    values=template_values,
                     subtype_id=self.env.ref('mail.mt_note').id,
                 )
                 partners.write({'additional_info': False})

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
+import ast
 import itertools
 import logging
 from datetime import date, timedelta
@@ -8,7 +9,6 @@ from dateutil.relativedelta import relativedelta, MO
 
 from odoo import api, models, fields, _, exceptions
 from odoo.tools import ustr
-from odoo.tools.safe_eval import safe_eval
 
 _logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ class Challenge(models.Model):
     last_report_date = fields.Date("Last Report Date", default=fields.Date.today)
     next_report_date = fields.Date("Next Report Date", compute='_get_next_report_date', store=True)
 
-    category = fields.Selection([
+    challenge_category = fields.Selection([
         ('hr', 'Human Resources / Engagement'),
         ('other', 'Settings / Gamification Tools'),
     ], string="Appears in", required=True, default='hr',
@@ -283,8 +283,7 @@ class Challenge(models.Model):
         return True
 
     def _get_challenger_users(self, domain):
-        # FIXME: literal_eval?
-        user_domain = safe_eval(domain)
+        user_domain = ast.literal_eval(domain)
         return self.env['res.users'].search(user_domain)
 
     def _recompute_challenge_users(self):
@@ -377,11 +376,11 @@ class Challenge(models.Model):
                 if end_date:
                     values['end_date'] = end_date
 
-                    # the goal is initialised over the limit to make sure we will compute it at least once
-                    if line.condition == 'higher':
-                        values['current'] = min(line.target_goal - 1, 0)
-                    else:
-                        values['current'] = max(line.target_goal + 1, 0)
+                # the goal is initialised over the limit to make sure we will compute it at least once
+                if line.condition == 'higher':
+                    values['current'] = min(line.target_goal - 1, 0)
+                else:
+                    values['current'] = max(line.target_goal + 1, 0)
 
                 if challenge.remind_update_delay:
                     values['remind_update_delay'] = challenge.remind_update_delay
@@ -552,23 +551,22 @@ class Challenge(models.Model):
 
         challenge = self
 
-        MailTemplates = self.env['mail.template']
         if challenge.visibility_mode == 'ranking':
             lines_boards = challenge._get_serialized_challenge_lines(restrict_goals=subset_goals)
 
-            body_html = MailTemplates.with_context(challenge_lines=lines_boards)._render_template(challenge.report_template_id.body_html, 'gamification.challenge', challenge.id)
+            body_html = challenge.report_template_id.with_context(challenge_lines=lines_boards)._render_field('body_html', challenge.ids)[challenge.id]
 
             # send to every follower and participant of the challenge
             challenge.message_post(
                 body=body_html,
                 partner_ids=challenge.mapped('user_ids.partner_id.id'),
-                subtype='mail.mt_comment',
+                subtype_xmlid='mail.mt_comment',
                 email_layout_xmlid='mail.mail_notification_light',
                 )
             if challenge.report_message_group_id:
                 challenge.report_message_group_id.message_post(
                     body=body_html,
-                    subtype='mail.mt_comment')
+                    subtype_xmlid='mail.mt_comment')
 
         else:
             # generate individual reports
@@ -577,22 +575,19 @@ class Challenge(models.Model):
                 if not lines:
                     continue
 
-                body_html = MailTemplates.with_user(user).with_context(challenge_lines=lines)._render_template(
-                    challenge.report_template_id.body_html,
-                    'gamification.challenge',
-                    challenge.id)
+                body_html = challenge.report_template_id.with_user(user).with_context(challenge_lines=lines)._render_field('body_html', challenge.ids)[challenge.id]
 
                 # notify message only to users, do not post on the challenge
                 challenge.message_notify(
                     body=body_html,
                     partner_ids=[user.partner_id.id],
-                    subtype='mail.mt_comment',
+                    subtype_xmlid='mail.mt_comment',
                     email_layout_xmlid='mail.mail_notification_light',
                 )
                 if challenge.report_message_group_id:
                     challenge.report_message_group_id.message_post(
                         body=body_html,
-                        subtype='mail.mt_comment',
+                        subtype_xmlid='mail.mt_comment',
                         email_layout_xmlid='mail.mail_notification_light',
                     )
         return challenge.write({'last_report_date': fields.Date.today()})
@@ -601,7 +596,7 @@ class Challenge(models.Model):
     def accept_challenge(self):
         user = self.env.user
         sudoed = self.sudo()
-        sudoed.message_post(body=_("%s has joined the challenge") % user.name)
+        sudoed.message_post(body=_("%s has joined the challenge", user.name))
         sudoed.write({'invited_user_ids': [(3, user.id)], 'user_ids': [(4, user.id)]})
         return sudoed._generate_goals_from_challenge()
 
@@ -609,7 +604,7 @@ class Challenge(models.Model):
         """The user discard the suggested challenge"""
         user = self.env.user
         sudoed = self.sudo()
-        sudoed.message_post(body=_("%s has refused the challenge") % user.name)
+        sudoed.message_post(body=_("%s has refused the challenge", user.name))
         return sudoed.write({'invited_user_ids': (3, user.id)})
 
     def _check_challenge_reward(self, force=False):
@@ -657,11 +652,15 @@ class Challenge(models.Model):
 
             if challenge_ended:
                 # open chatter message
-                message_body = _("The challenge %s is finished.") % challenge.name
+                message_body = _("The challenge %s is finished.", challenge.name)
 
                 if rewarded_users:
                     user_names = rewarded_users.name_get()
-                    message_body += _("<br/>Reward (badge %s) for every succeeding user was sent to %s.") % (challenge.reward_id.name, ", ".join(name for (user_id, name) in user_names))
+                    message_body += _(
+                        "<br/>Reward (badge %(badge_name)s) for every succeeding user was sent to %(users)s.",
+                        badge_name=challenge.reward_id.name,
+                        users=", ".join(name for (user_id, name) in user_names)
+                    )
                 else:
                     message_body += _("<br/>Nobody has succeeded to reach every goal, no badge is rewarded for this challenge.")
 
@@ -791,7 +790,7 @@ class ChallengeLine(models.Model):
     target_goal = fields.Float('Target Value to Reach', required=True)
 
     name = fields.Char("Name", related='definition_id.name', readonly=False)
-    condition = fields.Selection("Condition", related='definition_id.condition', readonly=True)
+    condition = fields.Selection(string="Condition", related='definition_id.condition', readonly=True)
     definition_suffix = fields.Char("Unit", related='definition_id.suffix', readonly=True)
     definition_monetary = fields.Boolean("Monetary", related='definition_id.monetary', readonly=True)
     definition_full_suffix = fields.Char("Suffix", related='definition_id.full_suffix', readonly=True)

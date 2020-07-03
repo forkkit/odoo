@@ -16,20 +16,12 @@
 
         <record id="res_partner_address_fp" model="res.partner">
             <field name="name">Pieter Parter's Farm</field>
-            <field name="parent_id" eval="ref('base.partner_root')"/>
+            <field name="parent_id" ref="base.partner_root"/>
             <field name="street">Chaussée de Namur, 40</field>
             <field name="zip">1367</field>
             <field name="city">Grand-Rosière-Hottomont</field>
             <field name="country_id" ref="base.be"/>
             <field name="type">private</field>
-        </record>
-
-        <record id="hr.employee_admin" model="hr.employee">
-            <field name="address_home_id" ref="res_partner_address_fp"/>
-        </record>
-
-        <record id="hr.employee_qdp" model="hr.employee">
-            <field name="address_home_id" ref="res_partner_address_fp"/>
         </record>
 
         <record id="hr.employee_fme" model="hr.employee">
@@ -175,7 +167,7 @@
             <field name="analytic_account_id" ref="analytic.analytic_our_super_product"/>
             <field name="product_id" ref="car_travel"/>
             <field eval="0.52" name="unit_amount"/>
-            <field name="product_uom_id" ref="uom.product_uom_unit"/>
+            <field name="product_uom_id" ref="uom.product_uom_km"/>
             <field name="date" eval="time.strftime('%Y')+'-01-15'"/>
             <field eval="152.0" name="quantity"/>
             <field name="sheet_id" ref="customer_meeting_sheet"/>

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import api, fields, models, _
+from odoo import _, api, fields, models
+from odoo.addons.base.models.ir_model import MODULE_UNINSTALL_FLAG
 from odoo.exceptions import UserError, ValidationError
 from odoo.osv import expression
 from odoo.tools import float_compare, float_is_zero
@@ -11,6 +12,7 @@ class Inventory(models.Model):
     _name = "stock.inventory"
     _description = "Inventory"
     _order = "date desc, id desc"
+    _inherit = ['mail.thread', 'mail.activity.mixin']
 
     name = fields.Char(
         'Inventory Reference', default="Inventory",
@@ -34,7 +36,7 @@ class Inventory(models.Model):
         ('cancel', 'Cancelled'),
         ('confirm', 'In Progress'),
         ('done', 'Validated')],
-        copy=False, index=True, readonly=True,
+        copy=False, index=True, readonly=True, tracking=True,
         default='draft')
     company_id = fields.Many2one(
         'res.company', 'Company',
@@ -57,6 +59,10 @@ class Inventory(models.Model):
         help="Allows to start with prefill counted quantity for each lines or "
         "with all counted quantity set to zero.", default='counted',
         selection=[('counted', 'Default to stock on hand'), ('zero', 'Default to zero')])
+    exhausted = fields.Boolean(
+        'Include Exhausted Products', readonly=True,
+        states={'draft': [('readonly', False)]},
+        help="Include also products with quantity of 0")
 
     @api.onchange('company_id')
     def _onchange_company_id(self):
@@ -74,7 +80,8 @@ class Inventory(models.Model):
 
     def unlink(self):
         for inventory in self:
-            if inventory.state not in ('draft', 'cancel'):
+            if (inventory.state not in ('draft', 'cancel')
+               and not self.env.context.get(MODULE_UNINSTALL_FLAG, False)):
                 raise UserError(_('You can only delete a draft inventory adjustment. If the inventory adjustment is not done, you can cancel it.'))
         return super(Inventory, self).unlink()
 
@@ -86,8 +93,8 @@ class Inventory(models.Model):
             raise UserError(_("Only a stock manager can validate an inventory adjustment."))
         if self.state != 'confirm':
             raise UserError(_(
-                "You can't validate the inventory '%s', maybe this inventory " +
-                "has been already validated or isn't ready.") % (self.name))
+                "You can't validate the inventory '%s', maybe this inventory "
+                "has been already validated or isn't ready.", self.name))
         inventory_lines = self.line_ids.filtered(lambda l: l.product_id.tracking in ['lot', 'serial'] and not l.prod_lot_id and l.theoretical_qty != l.product_qty)
         lines = self.line_ids.filtered(lambda l: float_compare(l.product_qty, 1, precision_rounding=l.product_uom_id.rounding) > 0 and l.product_id.tracking == 'serial' and l.prod_lot_id)
         if inventory_lines and not lines:
@@ -110,7 +117,11 @@ class Inventory(models.Model):
     def _action_done(self):
         negative = next((line for line in self.mapped('line_ids') if line.product_qty < 0 and line.product_qty != line.theoretical_qty), False)
         if negative:
-            raise UserError(_('You cannot set a negative product quantity in an inventory line:\n\t%s - qty: %s') % (negative.product_id.name, negative.product_qty))
+            raise UserError(_(
+                'You cannot set a negative product quantity in an inventory line:\n\t%s - qty: %s',
+                negative.product_id.display_name,
+                negative.product_qty
+            ))
         self.action_check()
         self.write({'state': 'done'})
         self.post_inventory()
@@ -121,13 +132,14 @@ class Inventory(models.Model):
         # as they will be moved to inventory loss, and other quants will be created to the encoded quant location. This is a normal behavior
         # as quants cannot be reuse from inventory location (users can still manually move the products before/after the inventory if they want).
         self.mapped('move_ids').filtered(lambda move: move.state != 'done')._action_done()
+        return True
 
     def action_check(self):
         """ Checks the inventory and computes the stock move to do """
         # tde todo: clean after _generate_moves
         for inventory in self.filtered(lambda x: x.state not in ('done','cancel')):
             # first remove the existing stock moves linked to this inventory
-            inventory.mapped('move_ids').unlink()
+            inventory.with_context(prefetch_fields=False).mapped('move_ids').unlink()
             inventory.line_ids._generate_moves()
 
     def action_cancel_draft(self):
@@ -161,7 +173,6 @@ class Inventory(models.Model):
         self.ensure_one()
         action = {
             'type': 'ir.actions.act_window',
-            'views': [(self.env.ref('stock.stock_inventory_line_tree2').id, 'tree')],
             'view_mode': 'tree',
             'name': _('Inventory Lines'),
             'res_model': 'stock.inventory.line',
@@ -183,8 +194,13 @@ class Inventory(models.Model):
                     context['readonly_location_id'] = True
 
         if self.product_ids:
+            # no_create on product_id field
+            action['view_id'] = self.env.ref('stock.stock_inventory_line_tree_no_product_create').id
             if len(self.product_ids) == 1:
                 context['default_product_id'] = self.product_ids[0].id
+        else:
+            # no product_ids => we're allowed to create new products in tree
+            action['view_id'] = self.env.ref('stock.stock_inventory_line_tree').id
 
         action['context'] = context
         action['domain'] = domain
@@ -203,51 +219,104 @@ class Inventory(models.Model):
         }
         return action
 
-    def _get_inventory_lines_values(self):
-        # TDE CLEANME: is sql really necessary ? I don't think so
-        locations = self.env['stock.location']
+    def action_print(self):
+        return self.env.ref('stock.action_report_inventory').report_action(self)
+
+    def _get_quantities(self):
+        """Return quantities group by product_id, location_id, lot_id, package_id and owner_id
+
+        :return: a dict with keys as tuple of group by and quantity as value
+        :rtype: dict
+        """
+        self.ensure_one()
         if self.location_ids:
-            locations = self.env['stock.location'].search([('id', 'child_of', self.location_ids.ids)])
+            domain_loc = [('id', 'child_of', self.location_ids.ids)]
         else:
-            locations = self.env['stock.location'].search([('company_id', '=', self.company_id.id), ('usage', 'in', ['internal', 'transit'])])
-        domain = ' location_id in %s AND quantity != 0 AND active = TRUE'
-        args = (tuple(locations.ids),)
+            domain_loc = [('company_id', '=', self.company_id.id), ('usage', 'in', ['internal', 'transit'])]
+        locations_ids = [l['id'] for l in self.env['stock.location'].search_read(domain_loc, ['id'])]
+
+        domain = [('company_id', '=', self.company_id.id),
+                  ('quantity', '!=', '0'),
+                  ('location_id', 'in', locations_ids)]
+        if self.prefill_counted_quantity == 'zero':
+            domain.append(('product_id.active', '=', True))
+
+        if self.product_ids:
+            domain = expression.AND([domain, [('product_id', 'in', self.product_ids.ids)]])
+
+        fields = ['product_id', 'location_id', 'lot_id', 'package_id', 'owner_id', 'quantity:sum']
+        group_by = ['product_id', 'location_id', 'lot_id', 'package_id', 'owner_id']
+
+        quants = self.env['stock.quant'].read_group(domain, fields, group_by, lazy=False)
+        return {(
+            quant['product_id'] and quant['product_id'][0] or False,
+            quant['location_id'] and quant['location_id'][0] or False,
+            quant['lot_id'] and quant['lot_id'][0] or False,
+            quant['package_id'] and quant['package_id'][0] or False,
+            quant['owner_id'] and quant['owner_id'][0] or False):
+            quant['quantity'] for quant in quants
+        }
+
+    def _get_exhausted_inventory_lines_vals(self, non_exhausted_set):
+        """Return the values of the inventory lines to create if the user
+        wants to include exhausted products. Exhausted products are products
+        without quantities or quantity equal to 0.
+
+        :param non_exhausted_set: set of tuple (product_id, location_id) of non exhausted product-location
+        :return: a list containing the `stock.inventory.line` values to create
+        :rtype: list
+        """
+        self.ensure_one()
+        if self.product_ids:
+            product_ids = self.product_ids.ids
+        else:
+            product_ids = self.env['product.product'].search_read([
+                '|', ('company_id', '=', self.company_id.id), ('company_id', '=', False),
+                ('type', '=', 'product'),
+                ('active', '=', True)], ['id'])
+            product_ids = [p['id'] for p in product_ids]
+
+        if self.location_ids:
+            location_ids = self.location_ids.ids
+        else:
+            location_ids = self.env['stock.warehouse'].search([('company_id', '=', self.company_id.id)]).lot_stock_id.ids
 
         vals = []
-        Product = self.env['product.product']
-        # Empty recordset of products available in stock_quants
-        quant_products = self.env['product.product']
+        for product_id in product_ids:
+            for location_id in location_ids:
+                if ((product_id, location_id) not in non_exhausted_set):
+                    vals.append({
+                        'inventory_id': self.id,
+                        'product_id': product_id,
+                        'location_id': location_id,
+                        'theoretical_qty': 0
+                    })
+        return vals
 
-        # If inventory by company
-        if self.company_id:
-            domain += ' AND company_id = %s'
-            args += (self.company_id.id,)
-        if self.product_ids:
-            domain += ' AND product_id in %s'
-            args += (tuple(self.product_ids.ids),)
+    def _get_inventory_lines_values(self):
+        """Return the values of the inventory lines to create for this inventory.
 
-        self.env['stock.quant'].flush(['company_id', 'product_id', 'quantity', 'location_id', 'lot_id', 'package_id', 'owner_id'])
-        self.env['product.product'].flush(['active'])
-        self.env.cr.execute("""SELECT product_id, sum(quantity) as product_qty, location_id, lot_id as prod_lot_id, package_id, owner_id as partner_id
-            FROM stock_quant
-            LEFT JOIN product_product
-            ON product_product.id = stock_quant.product_id
-            WHERE %s
-            GROUP BY product_id, location_id, lot_id, package_id, partner_id """ % domain, args)
-
-        for product_data in self.env.cr.dictfetchall():
-            product_data['company_id'] = self.company_id.id
-            product_data['inventory_id'] = self.id
-            # replace the None the dictionary by False, because falsy values are tested later on
-            for void_field in [item[0] for item in product_data.items() if item[1] is None]:
-                product_data[void_field] = False
-            product_data['theoretical_qty'] = product_data['product_qty']
-            if self.prefill_counted_quantity == 'zero':
-                product_data['product_qty'] = 0
-            if product_data['product_id']:
-                product_data['product_uom_id'] = Product.browse(product_data['product_id']).uom_id.id
-                quant_products |= Product.browse(product_data['product_id'])
-            vals.append(product_data)
+        :return: a list containing the `stock.inventory.line` values to create
+        :rtype: list
+        """
+        self.ensure_one()
+        quants_groups = self._get_quantities()
+        vals = []
+        for (product_id, location_id, lot_id, package_id, owner_id), quantity in quants_groups.items():
+            line_values = {
+                'inventory_id': self.id,
+                'product_qty': 0 if self.prefill_counted_quantity == "zero" else quantity,
+                'theoretical_qty': quantity,
+                'prod_lot_id': lot_id,
+                'partner_id': owner_id,
+                'product_id': product_id,
+                'location_id': location_id,
+                'package_id': package_id
+            }
+            line_values['product_uom_id'] = self.env['product.product'].browse(product_id).uom_id.id
+            vals.append(line_values)
+        if self.exhausted:
+            vals += self._get_exhausted_inventory_lines_vals({(l['product_id'], l['location_id']) for l in vals})
         return vals
 
 
@@ -272,7 +341,7 @@ class InventoryLine(models.Model):
                 return "[('type', '=', 'product'), '|', ('company_id', '=', False), ('company_id', '=', company_id), ('id', 'in', %s)]" % inventory.product_ids.ids
         return "[('type', '=', 'product'), '|', ('company_id', '=', False), ('company_id', '=', company_id)]"
 
-    is_editable = fields.Boolean(help="Technical field to restrict the edition.")
+    is_editable = fields.Boolean(help="Technical field to restrict editing.")
     inventory_id = fields.Many2one(
         'stock.inventory', 'Inventory', check_company=True,
         index=True, ondelete='cascade')
@@ -286,6 +355,7 @@ class InventoryLine(models.Model):
         required=True, readonly=True)
     product_qty = fields.Float(
         'Counted Quantity',
+        readonly=True, states={'confirm': [('readonly', False)]},
         digits='Product Unit of Measure', default=0)
     categ_id = fields.Many2one(related='product_id.categ_id', store=True)
     location_id = fields.Many2one(
@@ -302,7 +372,7 @@ class InventoryLine(models.Model):
     company_id = fields.Many2one(
         'res.company', 'Company', related='inventory_id.company_id',
         index=True, readonly=True, store=True)
-    state = fields.Selection('Status', related='inventory_id.state')
+    state = fields.Selection(string='Status', related='inventory_id.state')
     theoretical_qty = fields.Float(
         'Theoretical Quantity',
         digits='Product Unit of Measure', readonly=True)
@@ -314,7 +384,7 @@ class InventoryLine(models.Model):
         help="Last date at which the On Hand Quantity has been computed.")
     outdated = fields.Boolean(string='Quantity outdated',
         compute='_compute_outdated', search='_search_outdated')
-    product_tracking = fields.Selection('Tracking', related='product_id.tracking', readonly=True)
+    product_tracking = fields.Selection(string='Tracking', related='product_id.tracking', readonly=True)
 
     @api.depends('product_qty', 'theoretical_qty')
     def _compute_difference(self):
@@ -323,19 +393,7 @@ class InventoryLine(models.Model):
 
     @api.depends('inventory_date', 'product_id.stock_move_ids', 'theoretical_qty', 'product_uom_id.rounding')
     def _compute_outdated(self):
-        grouped_quants = self.env['stock.quant'].read_group(
-            [('product_id', 'in', self.product_id.ids), ('location_id', 'in', self.location_id.ids)],
-            ['product_id', 'location_id', 'lot_id', 'package_id', 'owner_id', 'quantity:sum'],
-            ['product_id', 'location_id', 'lot_id', 'package_id', 'owner_id'],
-            lazy=False)
-        quants = {
-            (quant['product_id'][0],
-            quant['location_id'][0],
-            quant['lot_id'] and quant['lot_id'][0],
-            quant['package_id'] and quant['package_id'][0],
-            quant['owner_id'] and quant['owner_id'][0]): quant['quantity']
-            for quant in grouped_quants
-        }
+        quants = self.inventory_id._get_quantities()
         for line in self:
             if line.state == 'done' or not line.id:
                 line.outdated = False
@@ -345,8 +403,7 @@ class InventoryLine(models.Model):
                 line.location_id.id,
                 line.prod_lot_id.id,
                 line.package_id.id,
-                line.partner_id.id,
-                ), 0
+                line.partner_id.id), 0
             )
             if float_compare(qty, line.theoretical_qty, precision_rounding=line.product_uom_id.rounding) != 0:
                 line.outdated = True
@@ -355,7 +412,6 @@ class InventoryLine(models.Model):
 
     @api.onchange('product_id', 'location_id', 'product_uom_id', 'prod_lot_id', 'partner_id', 'package_id')
     def _onchange_quantity_context(self):
-        product_qty = False
         if self.product_id:
             self.product_uom_id = self.product_id.uom_id
         if self.product_id and self.location_id and self.product_id.uom_id.category_id == self.product_uom_id.category_id:  # TDE FIXME: last part added because crash
@@ -470,7 +526,7 @@ class InventoryLine(models.Model):
         }
 
     def _get_virtual_location(self):
-        return self.product_id.with_context(force_company=self.company_id.id).property_stock_inventory
+        return self.product_id.with_company(self.company_id).property_stock_inventory
 
     def _generate_moves(self):
         vals_list = []
@@ -485,9 +541,6 @@ class InventoryLine(models.Model):
                 vals = line._get_move_values(abs(line.difference_qty), line.location_id.id, virtual_location.id, True)
             vals_list.append(vals)
         return self.env['stock.move'].create(vals_list)
-
-    def _refresh_inventory(self):
-        return self[0].inventory_id.action_open_inventory_lines()
 
     def action_refresh_quantity(self):
         filtered_lines = self.filtered(lambda l: l.state != 'done')

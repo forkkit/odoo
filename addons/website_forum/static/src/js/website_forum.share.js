@@ -47,12 +47,17 @@ var ForumShare = publicWidget.registry.socialShare.extend({
      * @private
      */
     _render: function () {
+        var $question = this.$('article.question');
         if (!this.targetType) {
             this._super.apply(this, arguments);
         } else if (this.targetType === 'social-alert') {
-            $('.row .question').before(qweb.render('website.social_alert', {medias: this.socialList}));
+            $question.before(qweb.render('website.social_alert', {medias: this.socialList}));
         } else {
-            $('body').append(qweb.render('website.social_modal', {medias: this.socialList, target_type: this.targetType}));
+            $('body').append(qweb.render('website.social_modal', {
+                medias: this.socialList,
+                target_type: this.targetType,
+                state: $question.data('state'),
+            }));
             $('#oe_social_share_modal').modal('show');
         }
     },
@@ -71,9 +76,6 @@ var ForumShare = publicWidget.registry.socialShare.extend({
 
 publicWidget.registry.websiteForumShare = publicWidget.Widget.extend({
     selector: '.website_forum',
-    events: {
-        'click :not(.karma_required).oe_social_share_call': '_onShareCallClick',
-    },
 
     /**
      * @override
@@ -92,21 +94,6 @@ publicWidget.registry.websiteForumShare = publicWidget.Widget.extend({
         }
 
         return this._super.apply(this, arguments);
-    },
-
-    //--------------------------------------------------------------------------
-    // Handlers
-    //--------------------------------------------------------------------------
-
-    /**
-     * Stores social share data to display modal on next page.
-     *
-     * @private
-     */
-    _onShareCallClick: function (ev) {
-        sessionStorage.setItem('social_share', JSON.stringify({
-            targetType: $(ev.currentTarget).data('social-target-type'),
-        }));
     },
 });
 });

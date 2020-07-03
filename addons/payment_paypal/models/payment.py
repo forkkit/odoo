@@ -19,7 +19,9 @@ _logger = logging.getLogger(__name__)
 class AcquirerPaypal(models.Model):
     _inherit = 'payment.acquirer'
 
-    provider = fields.Selection(selection_add=[('paypal', 'Paypal')])
+    provider = fields.Selection(selection_add=[
+        ('paypal', 'Paypal')
+    ], ondelete={'paypal': 'set default'})
     paypal_email_account = fields.Char('Email', required_if_provider='paypal', groups='base.group_user')
     paypal_seller_account = fields.Char(
         'Merchant Account ID', groups='base.group_user',
@@ -83,7 +85,7 @@ class AcquirerPaypal(models.Model):
         return fees
 
     def paypal_form_generate_values(self, values):
-        base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
+        base_url = self.get_base_url()
 
         paypal_tx_values = dict(values)
         paypal_tx_values.update({
@@ -157,7 +159,7 @@ class TxPaypal(models.Model):
             invalid_parameters.append(('txn_id', data.get('txn_id'), self.acquirer_reference))
         # check what is buyed
         if float_compare(float(data.get('mc_gross', '0.0')), (self.amount + self.fees), 2) != 0:
-            invalid_parameters.append(('mc_gross', data.get('mc_gross'), '%.2f' % self.amount))  # mc_gross is amount + fees
+            invalid_parameters.append(('mc_gross', data.get('mc_gross'), '%.2f' % (self.amount + self.fees)))  # mc_gross is amount + fees
         if data.get('mc_currency') != self.currency_id.name:
             invalid_parameters.append(('mc_currency', data.get('mc_currency'), self.currency_id.name))
         if 'handling_amount' in data and float_compare(float(data.get('handling_amount')), self.fees, 2) != 0:
@@ -184,6 +186,7 @@ class TxPaypal(models.Model):
 
     def _paypal_form_validate(self, data):
         status = data.get('payment_status')
+        former_tx_state = self.state
         res = {
             'acquirer_reference': data.get('txn_id'),
             'paypal_txn_type': data.get('payment_type'),
@@ -191,20 +194,20 @@ class TxPaypal(models.Model):
         if not self.acquirer_id.paypal_pdt_token and not self.acquirer_id.paypal_seller_account and status in ['Completed', 'Processed', 'Pending']:
             template = self.env.ref('payment_paypal.mail_template_paypal_invite_user_to_configure', False)
             if template:
-                render_template = template.render({
+                render_template = template._render({
                     'acquirer': self.acquirer_id,
                 }, engine='ir.qweb')
-                mail_body = self.env['mail.thread']._replace_local_links(render_template)
+                mail_body = self.env['mail.render.mixin']._replace_local_links(render_template)
                 mail_values = {
                     'body_html': mail_body,
                     'subject': _('Add your Paypal account to Odoo'),
                     'email_to': self.acquirer_id.paypal_email_account,
-                    'email_from': self.acquirer_id.create_uid.email
+                    'email_from': self.acquirer_id.create_uid.email_formatted,
+                    'author_id': self.acquirer_id.create_uid.partner_id.id,
                 }
                 self.env['mail.mail'].sudo().create(mail_values).send()
 
         if status in ['Completed', 'Processed']:
-            _logger.info('Validated Paypal payment for tx %s: set as done' % (self.reference))
             try:
                 # dateutil and pytz don't recognize abbreviations PDT/PST
                 tzinfos = {
@@ -216,15 +219,22 @@ class TxPaypal(models.Model):
                 date = fields.Datetime.now()
             res.update(date=date)
             self._set_transaction_done()
-            return self.write(res)
+            if self.state == 'done' and self.state != former_tx_state:
+                _logger.info('Validated Paypal payment for tx %s: set as done' % (self.reference))
+                return self.write(res)
+            return True
         elif status in ['Pending', 'Expired']:
-            _logger.info('Received notification for Paypal payment %s: set as pending' % (self.reference))
             res.update(state_message=data.get('pending_reason', ''))
             self._set_transaction_pending()
-            return self.write(res)
+            if self.state == 'pending' and self.state != former_tx_state:
+                _logger.info('Received notification for Paypal payment %s: set as pending' % (self.reference))
+                return self.write(res)
+            return True
         else:
             error = 'Received unrecognized status for Paypal payment %s: %s, set as error' % (self.reference, status)
-            _logger.info(error)
             res.update(state_message=error)
             self._set_transaction_cancel()
-            return self.write(res)
+            if self.state == 'cancel' and self.state != former_tx_state:
+                _logger.info(error)
+                return self.write(res)
+            return True

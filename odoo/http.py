@@ -5,6 +5,7 @@
 import ast
 import collections
 import contextlib
+import copy
 import datetime
 import functools
 import hashlib
@@ -29,15 +30,17 @@ from datetime import datetime, date
 import passlib.utils
 import psycopg2
 import json
-import werkzeug.contrib.sessions
 import werkzeug.datastructures
 import werkzeug.exceptions
 import werkzeug.local
 import werkzeug.routing
 import werkzeug.wrappers
-import werkzeug.wsgi
 from werkzeug import urls
 from werkzeug.wsgi import wrap_file
+try:
+    from werkzeug.middleware.shared_data import SharedDataMiddleware
+except ImportError:
+    from werkzeug.wsgi import SharedDataMiddleware
 
 try:
     import psutil
@@ -48,10 +51,11 @@ import odoo
 from odoo import fields
 from .service.server import memory_info
 from .service import security, model as service_model
+from .sql_db import flush_env
 from .tools.func import lazy_property
 from .tools import ustr, consteq, frozendict, pycompat, unique, date_utils
 from .tools.mimetypes import guess_mimetype
-
+from .tools._vendor import sessions
 from .modules.module import module_manifest
 
 _logger = logging.getLogger(__name__)
@@ -104,9 +108,8 @@ def replace_request_password(args):
 # don't trigger debugger for those exceptions, they carry user-facing warnings
 # and indications, they're not necessarily indicative of anything being
 # *broken*
-NO_POSTMORTEM = (odoo.exceptions.except_orm,
-                 odoo.exceptions.AccessDenied,
-                 odoo.exceptions.Warning,
+NO_POSTMORTEM = (odoo.exceptions.AccessDenied,
+                 odoo.exceptions.UserError,
                  odoo.exceptions.RedirectWarning)
 
 
@@ -151,10 +154,6 @@ def dispatch_rpc(service_name, method, params):
         return result
     except NO_POSTMORTEM:
         raise
-    except odoo.exceptions.DeferredException as e:
-        _logger.exception(odoo.tools.exception_to_unicode(e))
-        odoo.tools.debugger.post_mortem(odoo.tools.config, e.traceback)
-        raise
     except Exception as e:
         _logger.exception(odoo.tools.exception_to_unicode(e))
         odoo.tools.debugger.post_mortem(odoo.tools.config, sys.exc_info())
@@ -166,7 +165,7 @@ def local_redirect(path, query=None, keep_hash=False, code=303):
     if not query:
         query = {}
     if query:
-        url += '?' + werkzeug.url_encode(query)
+        url += '?' + urls.url_encode(query)
     return werkzeug.utils.redirect(url, code)
 
 def redirect_with_hash(url, code=303):
@@ -305,8 +304,15 @@ class WebRequest(object):
                 and not isinstance(exception, werkzeug.exceptions.HTTPException):
             odoo.tools.debugger.post_mortem(
                 odoo.tools.config, sys.exc_info())
-        # otherwise "no active exception to reraise"
-        raise pycompat.reraise(type(exception), exception, sys.exc_info()[2])
+
+        # WARNING: do not inline or it breaks: raise...from evaluates strictly
+        # LTR so would first remove traceback then copy lack of traceback
+        new_cause = Exception().with_traceback(exception.__traceback__)
+        # tries to provide good chained tracebacks, just re-raising exception
+        # generates a weird message as stacks just get concatenated, exceptions
+        # not guaranteed to copy.copy cleanly & we want `exception` as leaf (for
+        # callers to check & look at)
+        raise exception.with_traceback(None) from new_cause
 
     def _call_function(self, *args, **kwargs):
         request = self
@@ -339,6 +345,11 @@ class WebRequest(object):
             if isinstance(result, Response) and result.is_qweb:
                 # Early rendering of lazy responses to benefit from @service_model.check protection
                 result.flatten()
+            if self._cr is not None:
+                # flush here to avoid triggering a serialization error outside
+                # of this context, which would not retry the call
+                flush_env(self._cr)
+                self._cr.precommit()
             return result
 
         if self.db:
@@ -598,7 +609,6 @@ class JsonRequest(WebRequest):
         self.context = self.params.pop('context', dict(self.session.context))
 
     def _json_response(self, result=None, error=None):
-
         response = {
             'jsonrpc': '2.0',
             'id': self.jsonrequest.get('id')
@@ -626,8 +636,8 @@ class JsonRequest(WebRequest):
             if not isinstance(exception, SessionExpiredException):
                 if exception.args and exception.args[0] == "bus.Bus not available in test mode":
                     _logger.info(exception)
-                elif isinstance(exception, (odoo.exceptions.Warning, odoo.exceptions.except_orm,
-                                          werkzeug.exceptions.NotFound)):
+                elif isinstance(exception, (odoo.exceptions.UserError,
+                                            werkzeug.exceptions.NotFound)):
                     _logger.warning(exception)
                 else:
                     _logger.exception("Exception during JSON request handling.")
@@ -649,67 +659,47 @@ class JsonRequest(WebRequest):
             return self._json_response(error=error)
 
     def dispatch(self):
-        try:
-            rpc_request_flag = rpc_request.isEnabledFor(logging.DEBUG)
-            rpc_response_flag = rpc_response.isEnabledFor(logging.DEBUG)
-            if rpc_request_flag or rpc_response_flag:
-                endpoint = self.endpoint.method.__name__
-                model = self.params.get('model')
-                method = self.params.get('method')
-                args = self.params.get('args', [])
+        rpc_request_flag = rpc_request.isEnabledFor(logging.DEBUG)
+        rpc_response_flag = rpc_response.isEnabledFor(logging.DEBUG)
+        if rpc_request_flag or rpc_response_flag:
+            endpoint = self.endpoint.method.__name__
+            model = self.params.get('model')
+            method = self.params.get('method')
+            args = self.params.get('args', [])
 
-                start_time = time.time()
-                start_memory = 0
-                if psutil:
-                    start_memory = memory_info(psutil.Process(os.getpid()))
-                if rpc_request and rpc_response_flag:
-                    rpc_request.debug('%s: %s %s, %s',
-                        endpoint, model, method, pprint.pformat(args))
+            start_time = time.time()
+            start_memory = 0
+            if psutil:
+                start_memory = memory_info(psutil.Process(os.getpid()))
+            if rpc_request and rpc_response_flag:
+                rpc_request.debug('%s: %s %s, %s',
+                    endpoint, model, method, pprint.pformat(args))
 
-            result = self._call_function(**self.params)
+        result = self._call_function(**self.params)
 
-            if rpc_request_flag or rpc_response_flag:
-                end_time = time.time()
-                end_memory = 0
-                if psutil:
-                    end_memory = memory_info(psutil.Process(os.getpid()))
-                logline = '%s: %s %s: time:%.3fs mem: %sk -> %sk (diff: %sk)' % (
-                    endpoint, model, method, end_time - start_time, start_memory / 1024, end_memory / 1024, (end_memory - start_memory)/1024)
-                if rpc_response_flag:
-                    rpc_response.debug('%s, %s', logline, pprint.pformat(result))
-                else:
-                    rpc_request.debug(logline)
+        if rpc_request_flag or rpc_response_flag:
+            end_time = time.time()
+            end_memory = 0
+            if psutil:
+                end_memory = memory_info(psutil.Process(os.getpid()))
+            logline = '%s: %s %s: time:%.3fs mem: %sk -> %sk (diff: %sk)' % (
+                endpoint, model, method, end_time - start_time, start_memory / 1024, end_memory / 1024, (end_memory - start_memory)/1024)
+            if rpc_response_flag:
+                rpc_response.debug('%s, %s', logline, pprint.pformat(result))
+            else:
+                rpc_request.debug(logline)
 
-            return self._json_response(result)
-        except Exception as e:
-            return self._handle_exception(e)
+        return self._json_response(result)
 
 
 def serialize_exception(e):
-    tmp = {
+    return {
         "name": type(e).__module__ + "." + type(e).__name__ if type(e).__module__ else type(e).__name__,
         "debug": traceback.format_exc(),
         "message": ustr(e),
         "arguments": e.args,
-        "exception_type": "internal_error"
+        "context": getattr(e, 'context', {}),
     }
-    if isinstance(e, odoo.exceptions.UserError):
-        tmp["exception_type"] = "user_error"
-    elif isinstance(e, odoo.exceptions.Warning):
-        tmp["exception_type"] = "warning"
-    elif isinstance(e, odoo.exceptions.RedirectWarning):
-        tmp["exception_type"] = "warning"
-    elif isinstance(e, odoo.exceptions.AccessError):
-        tmp["exception_type"] = "access_error"
-    elif isinstance(e, odoo.exceptions.MissingError):
-        tmp["exception_type"] = "missing_error"
-    elif isinstance(e, odoo.exceptions.AccessDenied):
-        tmp["exception_type"] = "access_denied"
-    elif isinstance(e, odoo.exceptions.ValidationError):
-        tmp["exception_type"] = "validation_error"
-    elif isinstance(e, odoo.exceptions.except_orm):
-        tmp["exception_type"] = "except_orm"
-    return tmp
 
 
 class HttpRequest(WebRequest):
@@ -965,7 +955,7 @@ class AuthenticationError(Exception):
 class SessionExpiredException(Exception):
     pass
 
-class OpenERPSession(werkzeug.contrib.sessions.Session):
+class OpenERPSession(sessions.Session):
     def __init__(self, *args, **kwargs):
         self.inited = False
         self.modified = False
@@ -1054,7 +1044,7 @@ class OpenERPSession(werkzeug.contrib.sessions.Session):
         :returns: the new context
         """
         assert self.uid, "The user needs to be logged-in to initialize his context"
-        self.context = request.env['res.users'].context_get() or {}
+        self.context = dict(request.env['res.users'].context_get() or {})
         self.context['uid'] = self.uid
         self._fix_lang(self.context)
         return self.context
@@ -1225,7 +1215,7 @@ class Response(werkzeug.wrappers.Response):
         """
         env = request.env(user=self.uid or request.uid or odoo.SUPERUSER_ID)
         self.qcontext['request'] = request
-        return env["ir.ui.view"].render_template(self.template, self.qcontext)
+        return env["ir.ui.view"]._render_template(self.template, self.qcontext)
 
     def flatten(self):
         """ Forces the rendering of the response's template, sets the result
@@ -1243,7 +1233,7 @@ class DisableCacheMiddleware(object):
         def start_wrapped(status, headers):
             req = werkzeug.wrappers.Request(environ)
             root.setup_session(req)
-            if req.session and req.session.debug:
+            if req.session and req.session.debug and not 'wkhtmltopdf' in req.headers.get('User-Agent'):
                 new_headers = [('Cache-Control', 'no-cache')]
 
                 for k, v in headers:
@@ -1266,7 +1256,7 @@ class Root(object):
         # Setup http sessions
         path = odoo.tools.config.session_dir
         _logger.debug('HTTP sessions stored in: %s', path)
-        return werkzeug.contrib.sessions.FilesystemSessionStore(
+        return sessions.FilesystemSessionStore(
             path, session_class=OpenERPSession, renew_missing=True)
 
     @lazy_property
@@ -1274,7 +1264,9 @@ class Root(object):
         _logger.info("Generating nondb routing")
         routing_map = werkzeug.routing.Map(strict_slashes=False, converters=None)
         for url, endpoint, routing in odoo.http._generate_routing_rules([''] + odoo.conf.server_wide_modules, True):
-            routing_map.add(werkzeug.routing.Rule(url, endpoint=endpoint, methods=routing['methods']))
+            rule = werkzeug.routing.Rule(url, endpoint=endpoint, methods=routing['methods'])
+            rule.merge_slashes = False
+            routing_map.add(rule)
         return routing_map
 
     def __call__(self, environ, start_response):
@@ -1309,7 +1301,7 @@ class Root(object):
 
         if statics:
             _logger.info("HTTP Configuring static files")
-        app = werkzeug.wsgi.SharedDataMiddleware(self.dispatch, statics, cache_timeout=STATIC_CACHE)
+        app = SharedDataMiddleware(self.dispatch, statics, cache_timeout=STATIC_CACHE)
         self.dispatch = DisableCacheMiddleware(app)
 
     def setup_session(self, httprequest):
@@ -1446,10 +1438,11 @@ class Root(object):
                         # - the database version doesnt match the server version
                         # Log the user out and fall back to nodb
                         request.session.logout()
-                        # If requesting /web this will loop
                         if request.httprequest.path == '/web':
-                            result = werkzeug.utils.redirect('/web/database/selector')
+                            # Internal Server Error
+                            raise
                         else:
+                            # If requesting /web this will loop
                             result = _dispatch_nodb()
                     else:
                         result = ir_http._dispatch()

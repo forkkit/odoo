@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from datetime import datetime, timedelta
-from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
+from datetime import date, datetime, timedelta
+
 from odoo.addons.product.tests import common
+from odoo.tests import Form
+from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
 
 
 class TestCreatePicking(common.TestProductCommon):
 
     def setUp(self):
         super(TestCreatePicking, self).setUp()
-        self.partner_id = self.env.ref('base.res_partner_1')
-        self.product_id_1 = self.env.ref('product.product_product_8')
-        self.product_id_2 = self.env.ref('product.product_product_11')
+        self.partner_id = self.env['res.partner'].create({'name': 'Wood Corner Partner'})
+        self.product_id_1 = self.env['product.product'].create({'name': 'Large Desk'})
+        self.product_id_2 = self.env['product.product'].create({'name': 'Conference Chair'})
         res_users_purchase_user = self.env.ref('purchase.group_purchase_user')
 
         Users = self.env['res.users'].with_context({'no_reset_password': True, 'mail_create_nosubscribe': True})
@@ -55,7 +57,7 @@ class TestCreatePicking(common.TestProductCommon):
         self.picking = self.po.picking_ids[0]
         for ml in self.picking.move_line_ids:
             ml.qty_done = ml.product_uom_qty
-        self.picking.action_done()
+        self.picking._action_done()
         self.assertEqual(self.po.order_line.mapped('qty_received'), [7.0], 'Purchase: all products should be received')
 
 
@@ -468,3 +470,80 @@ class TestCreatePicking(common.TestProductCommon):
         # Now check scheduled date of delivery order is changed or not.
         self.assertNotEqual(purchase_order_line.date_planned, delivery_order.scheduled_date,
             'Delivery order schedule date should not changed.')
+
+    def test_07_differed_schedule_date(self):
+        warehouse = self.env['stock.warehouse'].search([], limit=1)
+
+        # mark all rules as propagate_date so that push rules will use it
+        self.env['stock.rule'].search([]).write({
+            'propagate_date': True,
+            'propagate_date_minimum_delta': 5,
+        })
+
+        with Form(warehouse) as w:
+            w.reception_steps = 'three_steps'
+        po_form = Form(self.env['purchase.order'])
+        po_form.partner_id = self.partner_id
+        with po_form.order_line.new() as line:
+            line.product_id = self.product_id_1
+            line.date_planned = datetime.today()
+            line.product_qty = 1.0
+        with po_form.order_line.new() as line:
+            line.product_id = self.product_id_1
+            line.date_planned = datetime.today() + timedelta(days=7)
+            line.product_qty = 1.0
+        po = po_form.save()
+
+        # mark the po line as propagate_date so that the created moves will use it
+        po.order_line.write({
+            'propagate_date': True,
+            'propagate_date_minimum_delta': 5,
+        })
+
+        po.button_approve()
+
+        po.picking_ids.move_line_ids.write({
+            'qty_done': 1.0
+        })
+        po.picking_ids.button_validate()
+
+        pickings = self.env['stock.picking'].search([('group_id', '=', po.group_id.id)])
+        for picking in pickings:
+            self.assertEqual(picking.scheduled_date.date(), date.today())
+
+    def test_update_quantity_and_return(self):
+        po = self.env['purchase.order'].create(self.po_vals)
+
+        po.order_line.product_qty = 10
+        po.button_confirm()
+
+        first_picking = po.picking_ids
+        first_picking.move_lines.quantity_done = 5
+        # create the backorder
+        backorder_wizard_dict = first_picking.button_validate()
+        backorder_wizard = Form(self.env[backorder_wizard_dict['res_model']].with_context(backorder_wizard_dict['context'])).save()
+        backorder_wizard.process()
+
+        self.assertEqual(len(po.picking_ids), 2)
+
+        # Create a partial return
+        stock_return_picking_form = Form(
+            self.env['stock.return.picking'].with_context(
+                active_ids=first_picking.ids,
+                active_id=first_picking.ids[0],
+                active_model='stock.picking'
+            )
+        )
+        stock_return_picking = stock_return_picking_form.save()
+        stock_return_picking.product_return_moves.quantity = 2.0
+        stock_return_picking_action = stock_return_picking.create_returns()
+        return_pick = self.env['stock.picking'].browse(stock_return_picking_action['res_id'])
+        return_pick.action_assign()
+        return_pick.move_lines.quantity_done = 2
+        return_pick._action_done()
+
+        self.assertEqual(po.order_line.qty_received, 3)
+
+        po.order_line.product_qty += 2
+        backorder = po.picking_ids.filtered(lambda picking: picking.state == 'assigned')
+        self.assertEqual(backorder.move_lines.product_uom_qty, 9)

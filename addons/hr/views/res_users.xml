@@ -14,14 +14,7 @@
             <field name="arch" type="xml">
                 <footer position="replace"/>
                 <h1 position="replace"/>
-                <widget name="notification_alert" position="replace"/>
                 <xpath expr="//field[@name='image_1920']" position="replace"/>
-                <field name="signature" position="replace" />
-                <xpath expr="//group[@name='preference_contact']" position="before">
-                    <group>
-                        <field name="signature" />
-                    </group>
-                </xpath>
                 <xpath expr="//field[@name='company_id']" position="attributes">
                     <attribute name="invisible">1</attribute>
                 </xpath>
@@ -44,16 +37,12 @@
             <field name="model">res.users</field>
             <field name="inherit_id" ref="res_users_view_form_simple_modif"/>
             <field name="arch" type="xml">
-                <xpath expr="//field[@name='odoobot_state']" position="attributes">
-                    <attribute name="attrs">{'readonly': [('can_edit', '=', False)]}</attribute>
-                </xpath>
                 <form position="replace">
                 <form create="false" js_class="hr_employee_profile_form">
                     <field name="hr_presence_state" invisible="1"/>
                     <header>
                         <button name="preference_change_password" type="object" string="Change password" class="btn btn-secondary"/>
                     </header>
-                    <widget name="notification_alert" class="mb-0"/>
                     <sheet>
                         <div class="oe_button_box" name="button_box">
                             <button
@@ -61,7 +50,7 @@
                                 class="oe_stat_button"
                                 disabled="1"
                                 invisible="context.get('from_my_profile', False)"
-                                attrs="{'invisible': ['|', ('hr_presence_state', '=', 'absent')]}">
+                                attrs="{'invisible': [('hr_presence_state', '=', 'absent')]}">
                                 <div role="img" class="fa fa-fw fa-circle text-success o_button_icon" attrs="{'invisible': [('hr_presence_state', '!=', 'present')]}" aria-label="Available" title="Available"/>
                                 <div role="img" class="fa fa-fw fa-circle text-warning o_button_icon" attrs="{'invisible': [('hr_presence_state', '!=', 'to_define')]}" aria-label="Away" title="Away"/>
                                 <div role="img" class="fa fa-fw fa-circle text-danger o_button_icon" attrs="{'invisible': [('hr_presence_state', '!=', 'absent')]}" aria-label="Not available" title="Not available"/>
@@ -96,8 +85,8 @@
                         <group>
                             <group>
                                 <field name="can_edit" invisible="1"/>
-                                <field name="mobile_phone" widget="phone" attrs="{'readonly': [('can_edit', '=', False)]}"/>
-                                <field name="work_phone" widget="phone" attrs="{'readonly': [('can_edit', '=', False)]}"/>
+                                <field name="mobile_phone" widget="phone" attrs="{'readonly': [('can_edit', '=', False)]}" options="{'enable_sms': false}"/>
+                                <field name="work_phone" widget="phone" attrs="{'readonly': [('can_edit', '=', False)]}" options="{'enable_sms': false}"/>
                             </group>
                             <group>
                                 <field name="work_email" widget="email" attrs="{'readonly': [('can_edit', '=', False)]}"/>
@@ -139,7 +128,7 @@
                                             options='{"always_reload": True, "highlight_first_line": True}'
                                             attrs="{'readonly': [('can_edit', '=', False)]}"/>
                                         <field name="private_email" string="Email" attrs="{'readonly': [('can_edit', '=', False)]}"/>
-                                        <field name="employee_phone" string="Phone" attrs="{'readonly': [('can_edit', '=', False)]}"/>
+                                        <field name="employee_phone" string="Phone" class="o_force_ltr" attrs="{'readonly': [('can_edit', '=', False)]}" options="{'enable_sms': false}"/>
                                         <field name="employee_bank_account_id" attrs="{'readonly': [('can_edit', '=', False)]}"/>
                                         <field name="km_home_work" attrs="{'readonly': [('can_edit', '=', False)]}"/>
                                     </group>
@@ -167,7 +156,7 @@
                                     </group>
                                     <group string="Emergency">
                                         <field name="emergency_contact" attrs="{'readonly': [('can_edit', '=', False)]}"/>
-                                        <field name="emergency_phone" attrs="{'readonly': [('can_edit', '=', False)]}"/>
+                                        <field name="emergency_phone" widget="phone" attrs="{'readonly': [('can_edit', '=', False)]}" options="{'enable_sms': false}"/>
                                     </group>
                                     <group string="Work Permit" name="work_permit">
                                         <field name="visa_no" attrs="{'readonly': [('can_edit', '=', False)]}"/>
@@ -216,9 +205,10 @@
                 <xpath expr="//header" position="inside">
                     <field name="share" invisible="1"/>
                     <field name="employee_ids" invisible="1"/>
+                    <field name="employee_id" invisible="1"/>
                     <button string="Create employee"
                             type="object" name="action_create_employee"
-                            attrs="{'invisible': ['|', '|', ('id', '=', False), ('share', '=', True), ('employee_count', '>', 0)]}"/>
+                            attrs="{'invisible': ['|', '|', ('id', '=', False), ('share', '=', True), ('employee_id', '!=', False)]}"/>
                             <!-- share is not correctly recomputed because it depends on fields of reified view => invisible before saving (id=False) -->
                 </xpath>
                 <xpath expr="//div[@name='button_box']" position="inside">

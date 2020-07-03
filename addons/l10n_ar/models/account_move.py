@@ -1,6 +1,6 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 from odoo import models, fields, api, _
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, RedirectWarning, ValidationError
 from dateutil.relativedelta import relativedelta
 from lxml import etree
 import logging
@@ -11,8 +11,8 @@ class AccountMove(models.Model):
 
     _inherit = 'account.move'
 
-    @staticmethod
-    def _l10n_ar_get_document_number_parts(document_number, document_type_code):
+    @api.model
+    def _l10n_ar_get_document_number_parts(self, document_number, document_type_code):
         # import shipments
         if document_type_code in ['66', '67']:
             pos = invoice_number = '0'
@@ -34,6 +34,13 @@ class AccountMove(models.Model):
         " different type if required.")
     l10n_ar_afip_service_start = fields.Date(string='AFIP Service Start Date', readonly=True, states={'draft': [('readonly', False)]})
     l10n_ar_afip_service_end = fields.Date(string='AFIP Service End Date', readonly=True, states={'draft': [('readonly', False)]})
+
+    @api.constrains('type', 'journal_id', 'l10n_latam_use_documents')
+    def _check_moves_use_documents(self):
+        """ Do not let to create not invoices entries in journals that use documents """
+        not_invoices = self.filtered(lambda x: x.company_id.country_id == self.env.ref('base.ar') and x.journal_id.type in ['sale', 'purchase'] and x.l10n_latam_use_documents and not x.is_invoice())
+        if not_invoices:
+            raise ValidationError(_("The selected Journal can't be used in this transaction, please select one that doesn't use documents as these are just for Invoices."))
 
     def _get_afip_invoice_concepts(self):
         """ Return the list of values of the selection field. """
@@ -76,6 +83,8 @@ class AccountMove(models.Model):
             codes = self.journal_id._get_journal_codes()
             if codes:
                 domain.append(('code', 'in', codes))
+            if self.move_type == 'in_refund':
+                domain = ['|', ('code', 'in', ['99'])] + domain
         return domain
 
     def _check_argentinian_invoice_taxes(self):
@@ -84,12 +93,12 @@ class AccountMove(models.Model):
         for inv in self.filtered(lambda x: x.company_id.l10n_ar_company_requires_vat):
             purchase_aliquots = 'not_zero'
             # we require a single vat on each invoice line except from some purchase documents
-            if inv.type in ['in_invoice', 'in_refund'] and inv.l10n_latam_document_type_id.purchase_aliquots == 'zero':
+            if inv.move_type in ['in_invoice', 'in_refund'] and inv.l10n_latam_document_type_id.purchase_aliquots == 'zero':
                 purchase_aliquots = 'zero'
             for line in inv.mapped('invoice_line_ids').filtered(lambda x: x.display_type not in ('line_section', 'line_note')):
                 vat_taxes = line.tax_ids.filtered(lambda x: x.tax_group_id.l10n_ar_vat_afip_code)
                 if len(vat_taxes) != 1:
-                    raise UserError(_('There must be one and only one VAT tax per line. Check line "%s"') % line.name)
+                    raise UserError(_('There must be one and only one VAT tax per line. Check line "%s"', line.name))
                 elif purchase_aliquots == 'zero' and vat_taxes.tax_group_id.l10n_ar_vat_afip_code != '0':
                     raise UserError(_('On invoice id "%s" you must use VAT Not Applicable on every line.')  % inv.id)
                 elif purchase_aliquots == 'not_zero' and vat_taxes.tax_group_id.l10n_ar_vat_afip_code == '0':
@@ -111,18 +120,6 @@ class AccountMove(models.Model):
                 'message': _('Please configure the AFIP Responsibility for "%s" in order to continue') % (
                     self.partner_id.name)}}
 
-    def _get_document_type_sequence(self):
-        """ Return the match sequences for the given journal and invoice """
-        self.ensure_one()
-        if self.journal_id.l10n_latam_use_documents and self.l10n_latam_country_code == 'AR':
-            if self.journal_id.l10n_ar_share_sequences:
-                return self.journal_id.l10n_ar_sequence_ids.filtered(
-                    lambda x: x.l10n_ar_letter == self.l10n_latam_document_type_id.l10n_ar_letter)
-            res = self.journal_id.l10n_ar_sequence_ids.filtered(
-                lambda x: x.l10n_latam_document_type_id == self.l10n_latam_document_type_id)
-            return res
-        return super()._get_document_type_sequence()
-
     @api.onchange('partner_id')
     def _onchange_partner_journal(self):
         """ This method is used when the invoice is created from the sale or subscription """
@@ -132,14 +129,21 @@ class AccountMove(models.Model):
             res_code = rec.partner_id.l10n_ar_afip_responsibility_type_id.code
             domain = [('company_id', '=', rec.company_id.id), ('l10n_latam_use_documents', '=', True), ('type', '=', 'sale')]
             journal = self.env['account.journal']
-            if res_code in ['8', '9', '10'] and rec.journal_id.l10n_ar_afip_pos_system not in expo_journals:
+            msg = False
+            if res_code in ['9', '10'] and rec.journal_id.l10n_ar_afip_pos_system not in expo_journals:
                 # if partner is foregin and journal is not of expo, we try to change to expo journal
                 journal = journal.search(domain + [('l10n_ar_afip_pos_system', 'in', expo_journals)], limit=1)
-            elif res_code not in ['8', '9', '10'] and rec.journal_id.l10n_ar_afip_pos_system in expo_journals:
+                msg = _('You are trying to create an invoice for foreign partner but you don\'t have an exportation journal')
+            elif res_code not in ['9', '10'] and rec.journal_id.l10n_ar_afip_pos_system in expo_journals:
                 # if partner is NOT foregin and journal is for expo, we try to change to local journal
                 journal = journal.search(domain + [('l10n_ar_afip_pos_system', 'not in', expo_journals)], limit=1)
+                msg = _('You are trying to create an invoice for domestic partner but you don\'t have an domestic market journal')
             if journal:
                 rec.journal_id = journal.id
+            elif msg:
+                # Throw an error to user in order to proper configure the journal for the type of operation
+                action = self.env.ref('account.action_account_journal_form')
+                raise RedirectWarning(msg, action.id, _('Go to Journals'))
 
     def post(self):
         ar_invoices = self.filtered(lambda x: x.company_id.country_id == self.env.ref('base.ar') and x.l10n_latam_use_documents)
@@ -168,3 +172,43 @@ class AccountMove(models.Model):
                 'l10n_ar_afip_service_end': move.l10n_ar_afip_service_end,
             })
         return super()._reverse_moves(default_values_list=default_values_list, cancel=cancel)
+
+    @api.onchange('l10n_latam_document_type_id', 'l10n_latam_document_number')
+    def _inverse_l10n_latam_document_number(self):
+        super()._inverse_l10n_latam_document_number()
+
+        # Avoid that user change the POS number (x.l10n_latam_document_number), Rhe POS number configure in journal it
+        # will always be used
+        to_review = self.filtered(
+            lambda x: x.journal_id.type == 'sale' and x.l10n_latam_document_type_id and x.l10n_latam_document_number and
+            (x.l10n_latam_manual_document_number or not x.highest_name))
+        for rec in to_review:
+            number = rec.l10n_latam_document_type_id._format_document_number(rec.l10n_latam_document_number)
+            current_pos = int(number.split("-")[0])
+            if current_pos != rec.journal_id.l10n_ar_afip_pos_number:
+                raise UserError(_('Can not change the POS number, you can only change the first number for document'
+                                  ' type that you are creating in odoo'))
+
+    def _get_formatted_sequence(self, number=0):
+        return "%s %05d-%08d" % (self.l10n_latam_document_type_id.doc_code_prefix,
+                                 self.journal_id.l10n_ar_afip_pos_number, number)
+
+    def _get_starting_sequence(self):
+        """ If use documents then will create a new starting sequence using the document type code prefix and the
+        journal document number with a 8 padding number """
+        if self.journal_id.l10n_latam_use_documents and self.env.company.country_id == self.env.ref('base.ar'):
+            if self.l10n_latam_document_type_id:
+                return self._get_formatted_sequence()
+        return super()._get_starting_sequence()
+
+    def _get_last_sequence_domain(self, relaxed=False):
+        where_string, param = super(AccountMove, self)._get_last_sequence_domain(relaxed)
+        if self.company_id.country_id == self.env.ref('base.ar') and self.l10n_latam_use_documents:
+            if not self.journal_id.l10n_ar_share_sequences:
+                where_string += " AND l10n_latam_document_type_id = %(l10n_latam_document_type_id)s"
+                param['l10n_latam_document_type_id'] = self.l10n_latam_document_type_id.id or 0
+            elif self.journal_id.l10n_ar_share_sequences:
+                where_string += " AND l10n_latam_document_type_id in %(l10n_latam_document_type_ids)s"
+                param['l10n_latam_document_type_ids'] = tuple(self.l10n_latam_document_type_id.search(
+                    [('l10n_ar_letter', '=', self.l10n_latam_document_type_id.l10n_ar_letter)]).ids)
+        return where_string, param

@@ -264,10 +264,12 @@ class Import(models.TransientModel):
     def _read_xls(self, options):
         """ Read file content, using xlrd lib """
         book = xlrd.open_workbook(file_contents=self.file or b'')
-        return self._read_xls_book(book)
+        sheets = options['sheets'] = book.sheet_names()
+        sheet = options['sheet'] = options.get('sheet') or sheets[0]
+        return self._read_xls_book(book, sheet)
 
-    def _read_xls_book(self, book):
-        sheet = book.sheet_by_index(0)
+    def _read_xls_book(self, book, sheet_name):
+        sheet = book.sheet_by_name(sheet_name)
         # emulate Sheet.get_rows for pre-0.9.4
         for rowx, row in enumerate(map(sheet.row, range(sheet.nrows)), 1):
             values = []
@@ -295,7 +297,7 @@ class Import(models.TransientModel):
                         _("Invalid cell value at row %(row)s, column %(col)s: %(cell_value)s") % {
                             'row': rowx,
                             'col': colx,
-                            'cell_value': xlrd.error_text_from_code.get(cell.value, _("unknown error code %s") % cell.value)
+                            'cell_value': xlrd.error_text_from_code.get(cell.value, _("unknown error code %s", cell.value))
                         }
                     )
                 else:
@@ -309,10 +311,12 @@ class Import(models.TransientModel):
     def _read_ods(self, options):
         """ Read file content using ODSReader custom lib """
         doc = odf_ods_reader.ODSReader(file=io.BytesIO(self.file or b''))
+        sheets = options['sheets'] = list(doc.SHEETS.keys())
+        sheet = options['sheet'] = options.get('sheet') or sheets[0]
 
         return (
             row
-            for row in doc.getFirstSheet()
+            for row in doc.getSheet(sheet)
             if any(x for x in row if x.strip())
         )
 
@@ -719,11 +723,21 @@ class Import(models.TransientModel):
             if not line[index]:
                 continue
             thousand_separator, decimal_separator = self._infer_separators(line[index], options)
+
+            if 'E' in line[index] or 'e' in line[index]:
+                tmp_value = line[index].replace(thousand_separator, '.')
+                try:
+                    tmp_value = '{:f}'.format(float(tmp_value))
+                    line[index] = tmp_value
+                    thousand_separator = ' '
+                except Exception:
+                    pass
+
             line[index] = line[index].replace(thousand_separator, '').replace(decimal_separator, '.')
             old_value = line[index]
             line[index] = self._remove_currency_symbol(line[index])
             if line[index] is False:
-                raise ValueError(_("Column %s contains incorrect values (value: %s)" % (name, old_value)))
+                raise ValueError(_("Column %s contains incorrect values (value: %s)", name, old_value))
 
     def _infer_separators(self, value, options):
         """ Try to infer the shape of the separators: if there are two
@@ -836,18 +850,19 @@ class Import(models.TransientModel):
         :rtype: bytes
         """
         maxsize = int(config.get("import_image_maxbytes", DEFAULT_IMAGE_MAXBYTES))
+        _logger.debug("Trying to import image from URL: %s into field %s, at line %s" % (url, field, line_number))
         try:
             response = session.get(url, timeout=int(config.get("import_image_timeout", DEFAULT_IMAGE_TIMEOUT)))
             response.raise_for_status()
 
             if response.headers.get('Content-Length') and int(response.headers['Content-Length']) > maxsize:
-                raise ValueError(_("File size exceeds configured maximum (%s bytes)") % maxsize)
+                raise ValueError(_("File size exceeds configured maximum (%s bytes)", maxsize))
 
             content = bytearray()
             for chunk in response.iter_content(DEFAULT_IMAGE_CHUNK_SIZE):
                 content += chunk
                 if len(content) > maxsize:
-                    raise ValueError(_("File size exceeds configured maximum (%s bytes)") % maxsize)
+                    raise ValueError(_("File size exceeds configured maximum (%s bytes)", maxsize))
 
             image = Image.open(io.BytesIO(content))
             w, h = image.size
@@ -858,6 +873,7 @@ class Import(models.TransientModel):
 
             return base64.b64encode(content)
         except Exception as e:
+            _logger.exception(e)
             raise ValueError(_("Could not retrieve URL: %(url)s [%(field_name)s: L%(line_number)d]: %(error)s") % {
                 'url': url,
                 'field_name': field,

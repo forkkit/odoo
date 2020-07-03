@@ -5,12 +5,12 @@ from datetime import datetime
 
 import time
 
-from odoo.addons.stock_account.tests.test_anglo_saxon_valuation_reconciliation_common import ValuationReconciliationTestCase
+from odoo.addons.stock_account.tests.test_anglo_saxon_valuation_reconciliation_common import ValuationReconciliationTestCommon
 from odoo.tests.common import Form, tagged
 
 
 @tagged('post_install', '-at_install')
-class TestValuationReconciliation(ValuationReconciliationTestCase):
+class TestValuationReconciliation(ValuationReconciliationTestCommon):
 
     def setUp(self):
         super(TestValuationReconciliation, self).setUp()
@@ -44,7 +44,7 @@ class TestValuationReconciliation(ValuationReconciliationTestCase):
         return rslt
 
     def _create_invoice_for_po(self, purchase_order, date):
-        move_form = Form(self.env['account.move'].with_context(default_type='in_invoice'))
+        move_form = Form(self.env['account.move'].with_context(default_move_type='in_invoice'))
         move_form.invoice_date = date
         move_form.partner_id = self.test_partner
         move_form.currency_id = self.currency_two
@@ -118,7 +118,7 @@ class TestValuationReconciliation(ValuationReconciliationTestCase):
         return_pick = self.env['stock.picking'].browse(stock_return_picking_action['res_id'])
         return_pick.action_assign()
         return_pick.move_lines.quantity_done = 1
-        return_pick.action_done()
+        return_pick._action_done()
         self._change_pickings_date(return_pick, '2018-01-13')
 
         # The currency rate changes again
@@ -130,7 +130,7 @@ class TestValuationReconciliation(ValuationReconciliationTestCase):
         })
 
         # Refund the invoice
-        refund_invoice_wiz = self.env['account.move.reversal'].with_context(active_ids=[invoice.id]).create({
+        refund_invoice_wiz = self.env['account.move.reversal'].with_context(active_model="account.move", active_ids=[invoice.id]).create({
             'reason': 'test_invoice_shipment_refund',
             'refund_method': 'cancel',
             'date': '2018-03-15',
@@ -138,7 +138,8 @@ class TestValuationReconciliation(ValuationReconciliationTestCase):
         refund_invoice = self.env['account.move'].browse(refund_invoice_wiz.reverse_moves()['res_id'])
 
         # Check the result
-        self.assertTrue(invoice.invoice_payment_state == refund_invoice.invoice_payment_state == 'paid'), "Invoice and refund should both be in 'Paid' state"
+        self.assertEqual(invoice.payment_state, 'reversed', "Invoice should be in 'reversed' state")
+        self.assertEqual(refund_invoice.payment_state, 'paid', "Refund should be in 'paid' state")
         self.check_reconciliation(refund_invoice, return_pick)
 
     def test_multiple_shipments_invoices(self):

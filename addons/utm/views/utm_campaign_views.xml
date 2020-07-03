@@ -30,8 +30,8 @@
                     <div class="oe_button_box d-flex justify-content-end" name="button_box">
                     </div>
                     <group id="top-group">
-                        <field name="name" string="Campaign Name"/>
-                        <field name="user_id"/>
+                        <field name="name" string="Campaign Name" placeholder="e.g. Black Friday"/>
+                        <field name="user_id" domain="[('share', '=', False)]"/>
                         <field name="tag_ids" widget="many2many_tags" options="{'color_field': 'color', 'no_create_edit': True}"/>
                     </group>
                     <notebook>
@@ -45,12 +45,27 @@
         <field name="name">utm.campaign.view.tree</field>
         <field name="model">utm.campaign</field>
         <field name="arch" type="xml">
-            <tree string="UTM Campaigns">
-                <field name="name"/>
+            <tree string="UTM Campaigns" multi_edit="1" sample="1">
+                <field name="name" readonly="1"/>
                 <field name="user_id"/>
                 <field name="stage_id"/>
-                <field name="tag_ids" widget="many2many_tags"/>
+                <field name="tag_ids" widget="many2many_tags" options="{'color_field': 'color'}"/>
             </tree>
+        </field>
+    </record>
+
+    <record id="utm_campaign_view_form_quick_create" model="ir.ui.view">
+        <field name="name">utm.campaign.view.form.quick.create</field>
+        <field name="model">utm.campaign</field>
+        <field name="priority">1000</field>
+        <field name="arch" type="xml">
+            <form>
+                <group>
+                    <field name="name" string="Campaign Name" placeholder="e.g. Black Friday"/>
+                    <field name="user_id" domain="[('share', '=', False)]"/>
+                    <field name="tag_ids" widget="many2many_tags" options="{'color_field': 'color', 'no_create_edit': True}"/>
+                </group>
+            </form>
         </field>
     </record>
 
@@ -58,7 +73,7 @@
         <field name="name">utm.campaign.view.kanban</field>
         <field name="model">utm.campaign</field>
         <field name="arch" type="xml">
-            <kanban default_group_by='stage_id' class="o_utm_kanban">
+            <kanban default_group_by='stage_id' class="o_utm_kanban" on_create="quick_create" quick_create_view="utm.utm_campaign_view_form_quick_create" examples="utm_campaign" sample="1">
                 <field name='color'/>
                 <field name='user_id'/>
                 <field name="stage_id"/>
@@ -77,7 +92,6 @@
                                         <a role="menuitem" type="delete" class="dropdown-item">Delete</a>
                                     </t>
                                     <div role="separator" class="dropdown-divider"/>
-                                    <div role="separator" class="dropdown-header">Colour</div>
                                     <ul class="oe_kanban_colorpicker" data-field="color"/>
                                 </div>
                             </div>
@@ -94,7 +108,7 @@
                                 <div class="o_kanban_record_bottom h5 mt-2 mb-0">
                                     <div id="utm_statistics" class="d-flex flex-grow-1 text-600 mt-1"/>
                                     <div class="oe_kanban_bottom_right">
-                                        <img t-att-src="kanban_image('res.users', 'image_128', record.user_id.raw_value)" t-att-data-member_id="record.user_id.raw_value" t-att-alt="record.user_id.raw_value" width="32" height="32" class="oe_kanban_avatar"/>
+                                         <field name="user_id" widget="many2one_avatar_user"/>
                                     </div>
                                 </div>
                             </div>

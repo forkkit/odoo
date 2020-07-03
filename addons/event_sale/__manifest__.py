@@ -2,7 +2,7 @@
 
 {
     'name': 'Events Sales',
-    'version': '1.1',
+    'version': '1.2',
     'category': 'Marketing/Events',
     'website': 'https://www.odoo.com/page/events',
     'description': """
@@ -21,10 +21,13 @@ this event.
     'depends': ['event', 'sale_management'],
     'data': [
         'views/assets.xml',
+        'views/event_ticket_views.xml',
+        'views/event_registration_views.xml',
         'views/event_views.xml',
         'views/product_views.xml',
         'views/sale_order_views.xml',
         'data/event_sale_data.xml',
+        'data/mail_data.xml',
         'report/event_event_templates.xml',
         'security/ir.model.access.csv',
         'security/event_security.xml',

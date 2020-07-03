@@ -175,7 +175,7 @@ class TestMultistepManufacturingWarehouse(TestMrpCommon):
 
         picking_stock_preprod.action_assign()
         picking_stock_preprod.move_line_ids.qty_done = 4
-        picking_stock_preprod.action_done()
+        picking_stock_preprod._action_done()
 
         self.assertFalse(sum(self.env['stock.quant']._gather(self.raw_product, self.warehouse.lot_stock_id).mapped('quantity')))
         self.assertTrue(self.env['stock.quant']._gather(self.raw_product, self.warehouse.pbm_loc_id))
@@ -184,13 +184,9 @@ class TestMultistepManufacturingWarehouse(TestMrpCommon):
         self.assertEqual(production_order.reservation_state, 'assigned')
         self.assertEqual(picking_stock_postprod.state, 'waiting')
 
-        produce_form = Form(self.env['mrp.product.produce'].with_context({
-            'active_id': production_order.id,
-            'active_ids': [production_order.id],
-        }))
+        produce_form = Form(production_order)
         produce_form.qty_producing = production_order.product_qty
-        product_produce = produce_form.save()
-        product_produce.do_produce()
+        production_order = produce_form.save()
         production_order.button_mark_done()
 
         self.assertFalse(sum(self.env['stock.quant']._gather(self.raw_product, self.warehouse.pbm_loc_id).mapped('quantity')))
@@ -255,3 +251,54 @@ class TestMultistepManufacturingWarehouse(TestMrpCommon):
         self.assertEqual(production_order.state, 'confirmed')
         production_order.action_cancel()
         self.assertTrue(move_stock_postprod.state, 'cancel')
+
+    def test_no_initial_demand(self):
+        """ Test MO/picking before manufacturing/picking after manufacturing
+        components and move_orig/move_dest. Ensure that everything is created
+        correctly.
+        """
+        with Form(self.warehouse) as warehouse:
+            warehouse.manufacture_steps = 'pbm_sam'
+        production_form = Form(self.env['mrp.production'])
+        production_form.product_id = self.finished_product
+        production_form.picking_type_id = self.warehouse.manu_type_id
+        production = production_form.save()
+        production.move_raw_ids.product_uom_qty = 0
+        production.action_confirm()
+        production.action_assign()
+        self.assertFalse(production.move_raw_ids.move_orig_ids)
+        self.assertEqual(production.state, 'confirmed')
+        self.assertEqual(production.reservation_state, 'assigned')
+
+    def test_manufacturing_3_steps_flexible(self):
+        """ Test MO/picking before manufacturing/picking after manufacturing
+        components and move_orig/move_dest. Ensure that additional moves are put
+        in picking before manufacturing too.
+        """
+        with Form(self.warehouse) as warehouse:
+            warehouse.manufacture_steps = 'pbm_sam'
+        bom = self.env['mrp.bom'].search([
+            ('product_id', '=', self.finished_product.id)
+        ])
+        new_product = self.env['product.product'].create({
+            'name': 'New product',
+            'type': 'product',
+        })
+        bom.consumption = 'flexible'
+        production_form = Form(self.env['mrp.production'])
+        production_form.product_id = self.finished_product
+        production_form.picking_type_id = self.warehouse.manu_type_id
+        production = production_form.save()
+
+        production.action_confirm()
+
+        production_form = Form(production)
+        with production_form.move_raw_ids.new() as move:
+            move.product_id = new_product
+            move.product_uom_qty = 2
+        production = production_form.save()
+        move_raw_ids = production.move_raw_ids
+        self.assertEqual(len(move_raw_ids), 2)
+        pbm_move = move_raw_ids.move_orig_ids
+        self.assertEqual(len(pbm_move), 2)
+        self.assertTrue(new_product in pbm_move.product_id)

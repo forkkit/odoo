@@ -6,7 +6,7 @@ var tour = require('web_tour.tour');
 tour.register('sale_product_configurator_single_custom_attribute_tour', {
     url: "/web",
     test: true,
-}, [tour.STEPS.SHOW_APPS_MENU_ITEM, {
+}, [tour.stepUtils.showAppsMenuItem(), {
     trigger: '.o_app[data-menu-xmlid="sale.sale_menu_root"]',
     edition: 'community'
 }, {
@@ -29,7 +29,7 @@ tour.register('sale_product_configurator_single_custom_attribute_tour', {
         $input.trigger(keyDownEvent);
     }
 }, {
-    trigger: 'ul.ui-autocomplete a:contains("Customizable Desk")',
+    trigger: 'ul.ui-autocomplete a:contains("Customizable Desk (TEST)")',
     run: 'click'
 }, {
     trigger: '.configurator_container span:contains("Aluminium")',

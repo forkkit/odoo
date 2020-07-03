@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import api, fields, models, _
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 from odoo.tools import float_compare
 
@@ -36,7 +36,7 @@ class StockScrap(models.Model):
         'uom.uom', 'Unit of Measure',
         required=True, states={'done': [('readonly', True)]}, domain="[('category_id', '=', product_uom_category_id)]")
     product_uom_category_id = fields.Many2one(related='product_id.uom_id.category_id')
-    tracking = fields.Selection('Product Tracking', readonly=True, related="product_id.tracking")
+    tracking = fields.Selection(string='Product Tracking', readonly=True, related="product_id.tracking")
     lot_id = fields.Many2one(
         'stock.production.lot', 'Lot/Serial',
         states={'done': [('readonly', True)]}, domain="[('product_id', '=', product_id), ('company_id', '=', company_id)]", check_company=True)
@@ -83,11 +83,15 @@ class StockScrap(models.Model):
     def _onchange_company_id(self):
         if self.company_id:
             warehouse = self.env['stock.warehouse'].search([('company_id', '=', self.company_id.id)], limit=1)
-            self.location_id = warehouse.lot_stock_id
-            self.scrap_location_id = self.env['stock.location'].search([
-                ('scrap_location', '=', True),
-                ('company_id', 'in', [self.company_id.id, False]),
-            ], limit=1)
+            # Change the locations only if their company doesn't match the company set, otherwise
+            # user defaults are overridden.
+            if self.location_id.company_id != self.company_id:
+                self.location_id = warehouse.lot_stock_id
+            if self.scrap_location_id.company_id != self.company_id:
+                self.scrap_location_id = self.env['stock.location'].search([
+                    ('scrap_location', '=', True),
+                    ('company_id', 'in', [self.company_id.id, False]),
+                ], limit=1)
         else:
             self.location_id = False
             self.scrap_location_id = False
@@ -96,9 +100,6 @@ class StockScrap(models.Model):
         if 'done' in self.mapped('state'):
             raise UserError(_('You cannot delete a scrap which is done.'))
         return super(StockScrap, self).unlink()
-
-    def _get_origin_moves(self):
-        return self.picking_id and self.picking_id.move_lines.filtered(lambda x: x.product_id == self.product_id)
 
     def _prepare_move_values(self):
         self.ensure_one()
@@ -171,10 +172,12 @@ class StockScrap(models.Model):
             ctx.update({
                 'default_product_id': self.product_id.id,
                 'default_location_id': self.location_id.id,
-                'default_scrap_id': self.id
+                'default_scrap_id': self.id,
+                'default_quantity': scrap_qty,
+                'default_product_uom_name': self.product_id.uom_name
             })
             return {
-                'name': _('Insufficient Quantity'),
+                'name': self.product_id.display_name + _(': Insufficient Quantity To Scrap'),
                 'view_mode': 'form',
                 'res_model': 'stock.warn.insufficient.qty.scrap',
                 'view_id': self.env.ref('stock.stock_warn_insufficient_qty_scrap_form_view').id,

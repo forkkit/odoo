@@ -15,10 +15,13 @@
                 <group expand='0' string='Filters'>
                     <filter name='internal_loc' string="Internal Locations" domain="[('location_id.usage','=', 'internal')]"/>
                     <filter name='transit_loc' string="Transit Locations" domain="[('location_id.usage' ,'=', 'transit')]"/>
+                    <filter name="on_hand" string="On Hand" domain="[('on_hand', '=', True)]"/>
                     <separator/>
                     <filter name="negative" string="Negative Stock" domain="[('quantity', '&lt;', 0.0)]"/>
                     <filter name="positive" string="Positive Stock" domain="[('quantity', '&gt;', 0.0)]"/>
                     <filter name="reserved" string="Reservations" domain="[('reserved_quantity', '&gt;', 0.0)]"/>
+                    <separator/>
+                    <filter name="filter_in_date" date="in_date"/>
                 </group>
                 <group expand='0' string='Group by...'>
                     <filter string='Product' name="productgroup" context="{'group_by': 'product_id'}"/>
@@ -74,8 +77,9 @@
         <field name="model">stock.quant</field>
         <field eval="10" name="priority"/>
         <field name="arch" type="xml">
-            <tree decoration-danger="inventory_quantity &lt; 0" editable="top"
-                  create="1" edit="1" js_class="singleton_list">
+            <tree editable="bottom"
+                  create="1" edit="1" import="0" js_class="singleton_list"
+                  sample="1">
                 <field name="id" invisible="1"/>
                 <field name="tracking" invisible="1"/>
                 <field name="product_id" attrs="{'readonly': [('id', '!=', False)]}"
@@ -99,9 +103,9 @@
                        options="{'no_create': True}"/>
                 <field name="quantity" string="On Hand Quantity"
                        invisible="1"/>
-                <field name="inventory_quantity" string="On Hand Quantity"
+                <field name="inventory_quantity" string="On Hand Quantity" decoration-danger="inventory_quantity &lt; 0"
                        readonly="0"/>
-                <field name="reserved_quantity" optional="hide"/>
+                <field name="available_quantity" optional="show"/>
                 <field name="product_uom_id" groups="uom.group_uom"/>
                 <field name='company_id' groups="base.group_multi_company" optional="show"/>
             </tree>
@@ -114,14 +118,14 @@
         <field eval="10" name="priority"/>
         <field name="arch" type="xml">
             <tree string="Inventory Valuation" js_class="inventory_report_list"
-                  create="0" delete="0" decoration-danger="quantity &lt; 0">
+                  create="0" delete="0">
                 <field name="product_id" invisible="context.get('single_product', False)"/>
                 <field name="location_id" invisible="context.get('hide_location', False)"/>
                 <field name="lot_id" groups="stock.group_production_lot"
                        invisible="context.get('hide_lot', False)"/>
                 <field name="package_id" groups="stock.group_tracking_lot"/>
                 <field name="owner_id" groups="stock.group_tracking_owner"/>
-                <field name="reserved_quantity" string="Reserved"/>
+                <field name="available_quantity"/>
                 <field name="quantity"/>
                 <field name="product_uom_id" groups="uom.group_uom"/>
                 <field name='company_id' groups="base.group_multi_company"/>
@@ -165,12 +169,6 @@
         </field>
     </record>
 
-    <record model="ir.actions.act_window" id="product_template_open_quants"> <!-- Not used -->
-        <field name="name">Stock On Hand</field>
-        <field name="context">{'search_default_internal_loc': 1, 'search_default_productgroup':1, 'search_default_locationgroup':1}</field>
-        <field name="domain">[('product_id.product_tmpl_id', '=', active_id)]</field>
-        <field name="res_model">stock.quant</field>
-    </record>
     <record model="ir.actions.act_window" id="location_open_quants"> <!-- Used in location -->
         <field name="context">{'search_default_productgroup': 1}</field>
         <field name="domain">[('location_id', 'child_of', active_ids)]</field>

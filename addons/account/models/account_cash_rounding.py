@@ -2,6 +2,7 @@
 
 from odoo import models, fields, api, _
 from odoo.tools import float_round
+from odoo.exceptions import ValidationError
 
 
 class AccountCashRounding(models.Model):
@@ -20,10 +21,18 @@ class AccountCashRounding(models.Model):
     strategy = fields.Selection([('biggest_tax', 'Modify tax amount'), ('add_invoice_line', 'Add a rounding line')],
         string='Rounding Strategy', default='add_invoice_line', required=True,
         help='Specify which way will be used to round the invoice amount to the rounding precision')
-    account_id = fields.Many2one('account.account', string='Account')
+    profit_account_id = fields.Many2one('account.account', string='Profit Account', company_dependent=True, domain="[('deprecated', '=', False), ('company_id', '=', current_company_id)]")
+    loss_account_id = fields.Many2one('account.account', string='Loss Account', company_dependent=True, domain="[('deprecated', '=', False), ('company_id', '=', current_company_id)]")
     rounding_method = fields.Selection(string='Rounding Method', required=True,
         selection=[('UP', 'UP'), ('DOWN', 'DOWN'), ('HALF-UP', 'HALF-UP')],
         default='HALF-UP', help='The tie-breaking rule used for float rounding operations')
+    company_id = fields.Many2one('res.company', related='profit_account_id.company_id')
+
+    @api.constrains('rounding')
+    def validate_rounding(self):
+        for record in self:
+            if record.rounding < 0:
+                raise ValidationError(_("Please set a positive rounding value."))
 
     def round(self, amount):
         """Compute the rounding on the amount passed as parameter.

@@ -23,10 +23,12 @@ class ProjectCreateSalesOrder(models.TransientModel):
             if project.billable_type != 'no':
                 raise UserError(_("The project is already billable."))
             result['project_id'] = active_id
-            result['partner_id'] = project.partner_id.id
+            if not result.get('partner_id', False):
+                result['partner_id'] = project.partner_id.id
         return result
 
     project_id = fields.Many2one('project.project', "Project", domain=[('sale_line_id', '=', False)], help="Project for which we are creating a sales order", required=True)
+    company_id = fields.Many2one(related='project_id.company_id')
     partner_id = fields.Many2one('res.partner', string="Customer", required=True, help="Customer of the sales order")
     product_id = fields.Many2one('product.product', domain=[('type', '=', 'service'), ('invoice_policy', '=', 'delivery'), ('service_type', '=', 'timesheet')], string="Service", help="Product of the sales order item. Must be a service invoiced based on timesheets on tasks.")
     price_unit = fields.Float("Unit Price", help="Unit price of the sales order item.")
@@ -93,6 +95,9 @@ class ProjectCreateSalesOrder(models.TransientModel):
         })
         sale_order.onchange_partner_id()
         sale_order.onchange_partner_shipping_id()
+        # rewrite the user as the onchange_partner_id erases it
+        sale_order.write({'user_id': self.project_id.user_id.id})
+        sale_order.onchange_user_id()
 
         # create the sale lines, the map (optional), and assign existing timesheet to sale lines
         self._make_billable(sale_order)

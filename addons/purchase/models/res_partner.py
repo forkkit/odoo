@@ -35,7 +35,7 @@ class res_partner(models.Model):
 
         supplier_invoice_groups = self.env['account.move'].read_group(
             domain=[('partner_id', 'in', all_partners.ids),
-                    ('type', 'in', ('in_invoice', 'in_refund'))],
+                    ('move_type', 'in', ('in_invoice', 'in_refund'))],
             fields=['partner_id'], groupby=['partner_id']
         )
         partners = self.browse()
@@ -59,3 +59,8 @@ class res_partner(models.Model):
     supplier_invoice_count = fields.Integer(compute='_compute_supplier_invoice_count', string='# Vendor Bills')
     purchase_warn = fields.Selection(WARNING_MESSAGE, 'Purchase Order', help=WARNING_HELP, default="no-message")
     purchase_warn_msg = fields.Text('Message for Purchase Order')
+
+    receipt_reminder_email = fields.Boolean('Receipt Reminder', default=False, company_dependent=True,
+        help="Automatically send a confirmation email to the vendor X days before the expected receipt date, asking him to confirm the exact date.")
+    reminder_date_before_receipt = fields.Integer('Days Before Receipt', default=1, company_dependent=True,
+        help="Number of days to send reminder email before the promised receipt date")

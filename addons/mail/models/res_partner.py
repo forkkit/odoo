@@ -3,7 +3,7 @@
 
 import logging
 
-from odoo import _, api, fields, models
+from odoo import _, api, fields, models, tools
 from odoo.addons.bus.models.bus_presence import AWAY_TIMER
 from odoo.addons.bus.models.bus_presence import DISCONNECTION_TIMER
 from odoo.osv import expression
@@ -17,6 +17,9 @@ class Partner(models.Model):
     _name = "res.partner"
     _inherit = ['res.partner', 'mail.activity.mixin', 'mail.thread.blacklist']
     _mail_flat_thread = False
+
+    email = fields.Char(tracking=1)
+    phone = fields.Char(tracking=2)
 
     channel_ids = fields.Many2many('mail.channel', 'mail_channel_partner', 'partner_id', 'channel_id', string='Channels', copy=False)
     # override the field to track the visibility of user
@@ -34,6 +37,30 @@ class Partner(models.Model):
             'email_to': False,
             'email_cc': False}
             for r in self}
+
+    @api.model
+    def find_or_create(self, email, assert_valid_email=False):
+        """ Override to use the email_normalized field. """
+        if not email:
+            raise ValueError(_('An email is required for find_or_create to work'))
+
+        parsed_name, parsed_email = self._parse_partner_name(email)
+        if parsed_email:
+            email_normalized = tools.email_normalize(parsed_email)
+            if email_normalized:
+                partners = self.search([('email_normalized', '=', email_normalized)], limit=1)
+                if partners:
+                    return partners
+
+        return super(Partner, self).find_or_create(email, assert_valid_email=assert_valid_email)
+
+    def mail_partner_format(self):
+        self.ensure_one()
+        return {
+            "id": self.name_get()[0][0],
+            "display_name": self.name_get()[0][1],
+            "active": self.active,
+        }
 
     @api.model
     def get_needaction_count(self):
@@ -71,10 +98,11 @@ class Partner(models.Model):
         """ Return 'limit'-first partners' id, name and email such that the name or email matches a
             'search' string. Prioritize users, and then extend the research to all partners. """
         search_dom = expression.OR([[('name', 'ilike', search)], [('email', 'ilike', search)]])
+        search_dom = expression.AND([[('active', '=', True)], search_dom])
         fields = ['id', 'name', 'email']
 
         # Search users
-        domain = expression.AND([[('user_ids.id', '!=', False)], search_dom])
+        domain = expression.AND([[('user_ids.id', '!=', False), ('user_ids.active', '=', True)], search_dom])
         users = self.search_read(domain, fields, limit=limit)
 
         # Search partners if less than 'limit' users found

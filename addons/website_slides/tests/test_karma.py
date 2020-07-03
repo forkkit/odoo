@@ -13,7 +13,7 @@ class TestKarmaGain(common.SlidesCase):
     def setUp(self):
         super(TestKarmaGain, self).setUp()
 
-        self.channel_2 = self.env['slide.channel'].with_user(self.user_publisher).create({
+        self.channel_2 = self.env['slide.channel'].with_user(self.user_officer).create({
             'name': 'Test Channel 2',
             'channel_type': 'training',
             'promote_strategy': 'most_voted',
@@ -25,14 +25,14 @@ class TestKarmaGain(common.SlidesCase):
             'karma_gen_channel_rank': 10,
         })
 
-        self.slide_2_0 = self.env['slide.slide'].with_user(self.user_publisher).create({
+        self.slide_2_0 = self.env['slide.slide'].with_user(self.user_officer).create({
             'name': 'How to travel through space and time',
             'channel_id': self.channel_2.id,
             'slide_type': 'presentation',
             'is_published': True,
             'completion_time': 2.0,
         })
-        self.slide_2_1 = self.env['slide.slide'].with_user(self.user_publisher).create({
+        self.slide_2_1 = self.env['slide.slide'].with_user(self.user_officer).create({
             'name': 'How to duplicate yourself',
             'channel_id': self.channel_2.id,
             'slide_type': 'presentation',
@@ -41,7 +41,7 @@ class TestKarmaGain(common.SlidesCase):
         })
 
     @mute_logger('odoo.models')
-    @users('user_emp', 'user_portal', 'user_publisher')
+    @users('user_emp', 'user_portal', 'user_officer')
     def test_karma_gain(self):
         user = self.env.user
         user.write({'karma': 0})
@@ -54,9 +54,16 @@ class TestKarmaGain(common.SlidesCase):
         # Finish the Course
         self.slide.with_user(user).action_set_completed()
         self.assertFalse(self.channel.with_user(user).completed)
-        (self.slide_2 | self.slide_3).with_user(user).action_set_completed()
-        self.assertTrue(self.channel.with_user(user).completed)
+        self.slide_2.with_user(user).action_set_completed()
+
+        # answer a quizz question
+        self.slide_3.with_user(user).action_set_viewed(quiz_attempts_inc=True)
+        self.slide_3.with_user(user)._action_set_quiz_done()
+        self.slide_3.with_user(user).action_set_completed()
+        computed_karma += self.slide_3.quiz_first_attempt_reward
         computed_karma += self.channel.karma_gen_channel_finish
+
+        self.assertTrue(self.channel.with_user(user).completed)
         self.assertEqual(user.karma, computed_karma)
 
         # Begin then finish the second Course
@@ -85,8 +92,14 @@ class TestKarmaGain(common.SlidesCase):
         slide_user.action_dislike()  # dislike again something already disliked should not remove karma again
         self.assertEqual(user.karma, computed_karma)
 
+        # Leave the finished course
+        self.channel._remove_membership(user.partner_id.ids)
+        computed_karma -= self.channel.karma_gen_channel_finish
+        computed_karma -= self.slide_3.quiz_first_attempt_reward
+        self.assertEqual(user.karma, computed_karma)
+
     @mute_logger('odoo.models')
-    @users('user_emp', 'user_portal', 'user_publisher')
+    @users('user_emp', 'user_portal', 'user_officer')
     def test_karma_gain_multiple_course(self):
         user = self.env.user
         user.write({'karma': 0})

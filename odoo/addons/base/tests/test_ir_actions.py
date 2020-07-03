@@ -252,7 +252,39 @@ class TestServerActions(TestServerActionsBase):
         self.action.with_context(self.context).run()
         self.assertEqual(self.test_country.vat_label, 'VatFromTest', 'vat label should be changed to VatFromTest')
 
+    def test_60_sort(self):
+        """ check the actions sorted by sequence """
+        Actions = self.env['ir.actions.actions']
 
+        # Do: update model
+        self.action.write({
+            'model_id': self.res_country_model.id,
+            'binding_model_id': self.res_country_model.id,
+        })
+        self.action2 = self.action.copy({'name': 'TestAction2', 'sequence': 1})
+
+        # Test: action returned by sequence
+        bindings = Actions.get_bindings('res.country')
+        self.assertEqual([vals.get('name') for vals in bindings['action']], ['TestAction2', 'TestAction'])
+        self.assertEqual([vals.get('sequence') for vals in bindings['action']], [1, 5])
+
+    def test_copy_action(self):
+        # first check that the base case (reset state) works normally
+        r = self.env['ir.actions.todo'].create({
+            'action_id': self.action.id,
+            'state': 'done',
+        })
+        self.assertEqual(r.state, 'done')
+        self.assertEqual(
+            r.copy().state, 'open',
+            "by default state should be reset by copy"
+        )
+
+        # then check that on server action we've changed that
+        self.assertEqual(
+            self.action.copy().state, 'code',
+            "copying a server action should not reset the state"
+        )
 
 
 class TestCustomFields(common.TransactionCase):

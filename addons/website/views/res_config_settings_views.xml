@@ -40,6 +40,7 @@
                         <div class="row mt16 o_settings_container" id="website_settings" attrs="{'invisible': [('website_id', '=', False)]}">
                             <div class="col-12 o_setting_box" id="website_action_setting" style="margin-left: 30px; margin-bottom: 16px;">
                                 <button name="website_go_to" type="object" string="Go to Website" class="btn btn-primary" icon="fa-globe"/>
+                                <button name="install_theme_on_current_website" type="object" string="Choose a theme" class="ml-2 btn btn-primary" icon="fa-paint-brush"/>
                                 <button name="%(website.action_website_add_features)d" type="action" string="Add features" class="ml-2 btn btn-secondary" icon="fa-plus"/>
                             </div>
                             <div class="col-12 col-lg-6 o_setting_box" id="domain_setting">
@@ -68,7 +69,7 @@
                                     <div class="text-muted">
                                         The company this website belongs to
                                     </div>
-                                    <field name="website_company_id"/>
+                                    <field name="website_company_id" attrs="{'required': [('website_id', '!=', False)]}" />
                                 </div>
                             </div>
                             <div class="col-12 col-lg-6 o_setting_box" id="languages_setting">
@@ -104,98 +105,17 @@
                                     <div class="mt8">
                                         <field name="website_domain" placeholder="www.odoo.com"/>
                                     </div>
-                                    <div class="mt8 text-muted" title="You can have 2 websites with same domain AND a condition on country group to select wich website use.">
-                                        Once the selection of available websites by domain is done, you can filter by country group.
-                                    </div>
-                                    <div class="mt8">
-                                        <field name="website_country_group_ids" widget="many2many_tags"/>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-12 col-lg-6 o_setting_box" id="auth_signup_uninvited_setting"
-                                title=" To send invitations in B2B mode, open a contact or select several ones in list view and click on 'Portal Access Management' option in the dropdown menu *Action*.">
-                                <div class="o_setting_left_pane">
-                                </div>
-                                <div class="o_setting_right_pane">
-                                    <label for="auth_signup_uninvited"/>
-                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
-                                    <div class="text-muted">
-                                        Let your customers log in to see their documents
-                                    </div>
-                                    <div class="mt8">
-                                        <field name="auth_signup_uninvited" class="o_light_label" widget="radio" required="True"/>
-                                    </div>
-                                    <div class="mt8 content-group">
-                                        <button type="object" name="open_template_user" string="Default Access Rights" icon="fa-arrow-right" class="btn-link"/>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-12 col-lg-6 o_setting_box" id="website_logo_setting">
-                                <div class="o_setting_right_pane">
-                                    <label for="website_logo"/>
-                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
-                                    <div class="text-muted">
-                                        Display this logo on the website.
-                                    </div>
-                                    <field name="website_logo" widget="image" class="w-25 mt-2"/>
-                                </div>
-                            </div>
-                            <div class="col-12 col-lg-offset-6 col-lg-6 o_setting_box" id="google_analytics_setting">
-                                <div class="o_setting_left_pane">
-                                    <field name="has_google_analytics"/>
-                                </div>
-                                <div class="o_setting_right_pane">
-                                    <label for="has_google_analytics"/>
-                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
-                                    <div class="text-muted">
-                                        Track visits in Google Analytics
-                                    </div>
-                                    <div class="content-group" attrs="{'invisible': [('has_google_analytics', '=', False)]}">
-                                        <div class="row mt16">
-                                            <label class="col-lg-3 o_light_label" string="Tracking ID" for="google_analytics_key"/>
-                                            <field name="google_analytics_key" placeholder="UA-XXXXXXXX-Y"
-                                                attrs="{'required': [('has_google_analytics', '=', True)]}"/>
+                                    <div groups="base.group_no_one">
+                                        <div class="mt8 text-muted" title="You can have 2 websites with same domain AND a condition on country group to select wich website use.">
+                                            Once the selection of available websites by domain is done, you can filter by country group.
+                                        </div>
+                                        <div class="mt8">
+                                            <field name="website_country_group_ids" widget="many2many_tags"/>
                                         </div>
                                     </div>
-                                    <div attrs="{'invisible': [('has_google_analytics', '=', False)]}">
-                                        <a href="https://www.odoo.com/documentation/user/13.0/website/optimize/google_analytics.html"
-                                                class="oe_link" target="_blank">
-                                            <i class="fa fa-arrow-right"/>
-                                            How to get my Tracking ID
-                                        </a>
-                                    </div>
                                 </div>
                             </div>
-                            <div class="col-12 col-lg-6 o_setting_box" id="google_analytics_dashboard_setting" attrs="{'invisible': [('has_google_analytics', '=', False)]}">
-                                <div class="o_setting_left_pane">
-                                    <field name="has_google_analytics_dashboard"/>
-                                </div>
-                                <div class="o_setting_right_pane">
-                                    <label for="has_google_analytics_dashboard"/>
-                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
-                                    <div class="text-muted">
-                                        Follow your website traffic in Odoo.
-                                    </div>
-                                    <div class="content-group" attrs="{'invisible': [('has_google_analytics_dashboard', '=', False)]}">
-                                        <div class="row mt16">
-                                            <label class="col-lg-3 o_light_label" string="Client ID" for="google_management_client_id"/>
-                                            <field name="google_management_client_id" attrs="{'required': [('has_google_analytics_dashboard', '=', True)]}"/>
-                                        </div>
-                                        <div class="row">
-                                            <label class="col-lg-3 o_light_label" string="Client Secret" for="google_management_client_secret"/>
-                                            <field name="google_management_client_secret" attrs="{'required': [('has_google_analytics_dashboard', '=', True)]}"/>
-                                        </div>
-                                    </div>
-                                    <div attrs="{'invisible': [('has_google_analytics_dashboard', '=', False)]}">
-                                        <a href="https://www.odoo.com/documentation/user/online/website/optimize/google_analytics_dashboard.html"
-                                            class="oe_link" target="_blank">
-                                            <i class="fa fa-arrow-right"/>
-                                            How to get my Client ID
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-12 col-lg-6 o_setting_box" groups="website.group_multi_website">
+                            <div class="col-12 col-lg-6 o_setting_box" id="specific_user_account_setting" groups="website.group_multi_website">
                                 <div class="o_setting_left_pane">
                                     <field name="specific_user_account"/>
                                 </div>
@@ -207,7 +127,18 @@
                                     </div>
                                 </div>
                             </div>
-
+                            <div class="col-12 col-lg-6 o_setting_box" id="website_cookies_bar_setting">
+                                <div class="o_setting_left_pane">
+                                    <field name="website_cookies_bar" widget="website_cookiesbar_field"/>
+                                </div>
+                                <div class="o_setting_right_pane">
+                                    <label for="website_cookies_bar"/>
+                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
+                                    <div class="text-muted">
+                                        Display a customizable cookies bar on your website.
+                                    </div>
+                                </div>
+                            </div>
                             <div class="col-12 col-lg-6 o_setting_box" id="cdn_setting" title="A CDN helps you serve your website’s content with high availability and high performance to any visitor wherever they are located." groups="base.group_no_one">
                                 <div class="o_setting_left_pane">
                                     <field name="cdn_activated"/>
@@ -234,7 +165,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-12 col-lg-6 o_setting_box">
+                            <div class="col-12 col-lg-6 o_setting_box" id="social_media_settings">
                                 <div class="o_setting_left_pane">
                                     <field name="has_social_network"/>
                                 </div>
@@ -273,30 +204,22 @@
                                 </div>
                             </div>
                             <div class="col-12 col-lg-6 o_setting_box" id="social_default_image_setting">
+                                <div class="o_setting_left_pane">
+                                    <field name="has_default_share_image"/>
+                                </div>
                                 <div class="o_setting_right_pane">
-                                    <label string="Default Social Share Image" for="social_default_image"/>
+                                    <label string="Default Social Share Image" for="has_default_share_image"/>
                                     <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
-                                    <div class="text-muted">
-                                        If set, replaces the company logo as the default social share image.
+                                    <div class="text-muted" attrs="{'invisible': [('has_default_share_image', '=', False)]}">
+                                        If set, replaces the website logo as the default social share image.
                                     </div>
-                                    <field name="social_default_image" widget="image" class="w-25 mt-2"/>
+                                    <field name="social_default_image" widget="image" class="w-25 mt-2" attrs="{'invisible': [('has_default_share_image', '=', False)]}"/>
                                 </div>
                             </div>
 
                         </div>
                         <h2>Features</h2>
                         <div class="row mt16 o_settings_container" id="webmaster_settings">
-                            <div id="multi_website" class="col-12 col-md-6 o_setting_box">
-                                <div class="o_setting_left_pane">
-                                    <field name="group_multi_website"/>
-                                </div>
-                                <div class="o_setting_right_pane">
-                                    <label string="Multi-Website" for="group_multi_website"/>
-                                    <div class="text-muted">
-                                        Manage multiple websites
-                                    </div>
-                                </div>
-                            </div>
                             <div class="col-12 col-lg-6 o_setting_box" id="google_maps_setting">
                                 <div class="o_setting_left_pane">
                                     <field name="has_google_maps"/>
@@ -319,18 +242,138 @@
                                             <i class="fa fa-arrow-right"/>
                                             Create a Google Project and Get a Key
                                         </a>
+                                        <a role="button" class="btn-link" target="_blank"
+                                           href="https://cloud.google.com/maps-platform/pricing">
+                                            <i class="fa fa-arrow-right"/>
+                                            Enable billing on your Google Project
+                                        </a>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-12 col-lg-6 o_setting_box" id="utm_tracker_settings" title="Analyze the efficiency of your marketing campaigns by using trackable UTM trackers (campaigns, medium, sources). Create trackers and follow clicks from the Promote menu of your website. Those trackers can be used in Google Analytics or in Odoo reports where you can see the opportunities and sales revenue generated thanks to your links.">
+                            <div class="col-12 col-lg-6 o_setting_box" id="auth_signup_uninvited_setting"
+                            title=" To send invitations in B2B mode, open a contact or select several ones in list view and click on 'Portal Access Management' option in the dropdown menu *Action*.">
                                 <div class="o_setting_left_pane">
-                                    <field name="module_website_links"/>
                                 </div>
                                 <div class="o_setting_right_pane">
-                                    <label for="module_website_links"/>
+                                    <label for="auth_signup_uninvited"/>
+                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
                                     <div class="text-muted">
-                                        Track clicks on UTM links
+                                        Let your customers log in to see their documents
                                     </div>
+                                    <div class="mt8">
+                                        <field name="auth_signup_uninvited" class="o_light_label" widget="radio" required="True"/>
+                                    </div>
+                                    <div class="mt8 content-group">
+                                        <button type="object" name="open_template_user" string="Default Access Rights" icon="fa-arrow-right" class="btn-link"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h2>SEO</h2>
+                        <div class="row mt16 o_settings_container" id="seo_settings">
+                            <div class="col-12 col-lg-offset-6 col-lg-6 o_setting_box" id="google_analytics_setting">
+                                <div class="o_setting_left_pane">
+                                    <field name="has_google_analytics"/>
+                                </div>
+                                <div class="o_setting_right_pane">
+                                    <label for="has_google_analytics"/>
+                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
+                                    <div class="text-muted">
+                                        Track visits in Google Analytics
+                                    </div>
+                                    <div class="content-group" attrs="{'invisible': [('has_google_analytics', '=', False)]}">
+                                        <div class="row mt16">
+                                            <label class="col-lg-3 o_light_label" string="Tracking ID" for="google_analytics_key"/>
+                                            <field name="google_analytics_key" placeholder="UA-XXXXXXXX-Y"
+                                                attrs="{'required': [('has_google_analytics', '=', True)]}"/>
+                                        </div>
+                                    </div>
+                                    <div attrs="{'invisible': [('has_google_analytics', '=', False)]}">
+                                        <a href="https://www.odoo.com/documentation/user/13.0/website/optimize/google_analytics.html"
+                                                class="oe_link" target="_blank">
+                                            <i class="fa fa-arrow-right"/>
+                                            How to get my Tracking ID
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-lg-offset-6 col-lg-6 o_setting_box" id="google_console_setting">
+                                <div class="o_setting_left_pane">
+                                    <field name="has_google_search_console"/>
+                                </div>
+                                <div class="o_setting_right_pane">
+                                    <label for="has_google_search_console"/>
+                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
+                                    <div class="text-muted">
+                                        Monitor Google Search results data
+                                    </div>
+                                    <div class="content-group" attrs="{'invisible': [('has_google_search_console', '=', False)]}">
+                                        <div class="row mt16">
+                                            <label class="col-lg-3 o_light_label" string="Code" for="google_search_console"/>
+                                            <field name="google_search_console" placeholder="google1234567890123456.html"
+                                                attrs="{'required': [('has_google_search_console', '=', True)]}"/>
+                                        </div>
+                                    </div>
+                                    <div attrs="{'invisible': [('has_google_search_console', '=', False)]}">
+                                        <small class='text-muted'>
+                                            <i class="fa fa-info"/>: type some of the first chars after 'google' is enough, we'll guess the rest.
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-lg-6 o_setting_box" id="google_analytics_dashboard_setting" attrs="{'invisible': [('has_google_analytics', '=', False)]}">
+                                <div class="o_setting_left_pane">
+                                    <field name="has_google_analytics_dashboard"/>
+                                </div>
+                                <div class="o_setting_right_pane">
+                                    <label for="has_google_analytics_dashboard"/>
+                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
+                                    <div class="text-muted">
+                                        Follow your website traffic in Odoo.
+                                    </div>
+                                    <div class="content-group" attrs="{'invisible': [('has_google_analytics_dashboard', '=', False)]}">
+                                        <div class="row mt16">
+                                            <label class="col-lg-3 o_light_label" string="Client ID" for="google_management_client_id"/>
+                                            <field name="google_management_client_id" attrs="{'required': [('has_google_analytics_dashboard', '=', True)]}"/>
+                                        </div>
+                                        <div class="row">
+                                            <label class="col-lg-3 o_light_label" string="Client Secret" for="google_management_client_secret"/>
+                                            <field name="google_management_client_secret" attrs="{'required': [('has_google_analytics_dashboard', '=', True)]}"/>
+                                        </div>
+                                    </div>
+                                    <div attrs="{'invisible': [('has_google_analytics_dashboard', '=', False)]}">
+                                        <a href="https://www.odoo.com/documentation/user/online/website/optimize/google_analytics_dashboard.html"
+                                            class="oe_link" target="_blank">
+                                            <i class="fa fa-arrow-right"/>
+                                            How to get my Client ID
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-lg-6 o_setting_box" id="robots_setting">
+                                <div class="o_setting_right_pane">
+                                    <span class="o_form_label">Robots.txt</span>
+                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
+                                    <div class="text-muted">
+                                        Robots.txt: This file tells to search engine crawlers which pages or files they can or can't request from your site.<br/>
+                                    </div>
+                                    <div class="mt4">
+                                        <button type="object" name="action_open_robots" string="Edit robots.txt" class="btn-link" icon="fa-android"/>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-lg-6 o_setting_box" id="robots_setting">
+                                <div class="o_setting_right_pane">
+                                    <span class="o_form_label">Sitemap</span>
+                                    <span class="fa fa-lg fa-globe" title="Values set here are website-specific." groups="website.group_multi_website"/>
+                                    <div class="text-muted mt8">
+                                        Sitemap.xml: Help search engine crawlers to find out what pages are present and which have recently changed, and to crawl your site accordingly. This file is automatically generated by Odoo.
+                                    </div>
+                                    <div class="mt4">
+                                        <button type="object" name="action_ping_sitemap" string="Submit sitemap to Google" class='btn-link' icon="fa-google"/>
+                                    </div>
+
                                 </div>
                             </div>
                         </div>

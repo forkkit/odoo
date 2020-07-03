@@ -4,14 +4,11 @@ from __future__ import print_function
 import os.path
 import posixpath
 import re
-try:
-    from urllib.request import url2pathname  # pylint: disable=deprecated-module
-except ImportError:
-    from urllib import url2pathname  # pylint: disable=deprecated-module
 
 from docutils import nodes
 from sphinx import addnodes, util, builders
 from sphinx.locale import admonitionlabels
+from urllib.request import url2pathname
 
 
 def _parents(node):
@@ -35,11 +32,6 @@ class BootstrapTranslator(nodes.NodeVisitor, object):
     html_title = 'html_title'
     html_subtitle = 'html_subtitle'
 
-    # <meta> tags
-    meta = [
-        '<meta http-equiv="X-UA-Compatible" content="IE=edge">',
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
-    ]
 
     def __init__(self, document, builder):
         # order of parameter swapped between Sphinx 1.x and 2.x, check if
@@ -49,6 +41,13 @@ class BootstrapTranslator(nodes.NodeVisitor, object):
 
         super(BootstrapTranslator, self).__init__(document)
         self.builder = builder
+        self.meta = [
+            # HTMLWriter strips out the first two items from Translator.meta
+            # with no explanation
+            '', '',
+        ]
+        self.add_meta('<meta http-equiv="X-UA-Compatible" content="IE=edge">')
+        self.add_meta('<meta name="viewport" content="width=device-width, initial-scale=1">')
         self.body = []
         self.fragment = self.body
         self.html_body = self.body
@@ -60,6 +59,7 @@ class BootstrapTranslator(nodes.NodeVisitor, object):
         self.context = []
         self.section_level = 0
 
+        self.config = self.builder.config
         self.highlightlang = self.highlightlang_base = self.builder.config.highlight_language
         self.highlightopts = getattr(builder.config, 'highlight_options', {})
 
@@ -76,6 +76,9 @@ class BootstrapTranslator(nodes.NodeVisitor, object):
             ord('>'): u'&gt;',
             0xa0: u'&nbsp;'
         })
+
+    def add_meta(self, meta):
+        self.meta.append('\n    ' + meta)
 
     def starttag(self, node, tagname, **attributes):
         tagname = str(tagname).lower()
@@ -131,6 +134,15 @@ class BootstrapTranslator(nodes.NodeVisitor, object):
     def visit_document(self, node):
         self.first_title = True
     def depart_document(self, node):
+        pass
+
+    def visit_meta(self, node):
+        if node.hasattr('lang'):
+            node['xml:lang'] = node['lang']
+            # del(node['lang'])
+        meta = self.starttag(node, 'meta', **node.non_default_attributes())
+        self.add_meta(meta)
+    def depart_meta(self, node):
         pass
 
     def visit_section(self, node):

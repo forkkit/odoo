@@ -3,9 +3,11 @@ from lxml import etree
 from lxml.builder import E
 import copy
 import itertools
+import logging
 
 from odoo.tools.translate import _
 from odoo.tools import SKIPPED_ELEMENT_TYPES
+_logger = logging.getLogger(__name__)
 
 
 def add_text_before(node, text):
@@ -51,7 +53,13 @@ def locate_node(arch, spec):
     :return: a node in the source matching the spec
     """
     if spec.tag == 'xpath':
-        nodes = etree.ETXPath(spec.get('expr'))(arch)
+        expr = spec.get('expr')
+        try:
+            xPath = etree.ETXPath(expr)
+        except etree.XPathSyntaxError:
+            _logger.error("XPathSyntaxError while parsing xpath %r", expr)
+            raise
+        nodes = xPath(arch)
         return nodes[0] if nodes else None
     elif spec.tag == 'field':
         # Only compare the field name: a field can be only once in a given view
@@ -129,7 +137,24 @@ def apply_inheritance_specs(source, specs_tree, inherit_branding=False, pre_loca
                     loc.text = ''
                     loc.append(copy.deepcopy(node))
                 if node.getparent() is None:
-                    source = copy.deepcopy(spec[0])
+                    spec_content = None
+                    comment = None
+                    for content in spec:
+                        if content.tag is not etree.Comment:
+                            spec_content = content
+                            break
+                        else:
+                            comment = content
+                    source = copy.deepcopy(spec_content)
+                    # only keep the t-name of a template root node
+                    t_name = node.get('t-name')
+                    if t_name:
+                        source.set('t-name', t_name)
+                    if comment is not None:
+                        text = source.text
+                        source.text = None
+                        comment.tail = text
+                        source.insert(0, comment)
                 else:
                     replaced_node_tag = None
                     for child in spec:
@@ -206,7 +231,7 @@ def apply_inheritance_specs(source, specs_tree, inherit_branding=False, pre_loca
             ])
             tag = "<%s%s>" % (spec.tag, attrs)
             raise ValueError(
-                _("Element '%s' cannot be located in parent view") % tag
+                _("Element '%s' cannot be located in parent view", tag)
             )
 
     return source

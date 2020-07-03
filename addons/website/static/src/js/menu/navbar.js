@@ -1,6 +1,7 @@
 odoo.define('website.navbar', function (require) {
 'use strict';
 
+var core = require('web.core');
 var dom = require('web.dom');
 var publicWidget = require('web.public.widget');
 var concurrency = require('web.concurrency');
@@ -10,10 +11,13 @@ var websiteRootData = require('website.root');
 var websiteNavbarRegistry = new publicWidget.RootWidgetRegistry();
 
 var WebsiteNavbar = publicWidget.RootWidget.extend({
+    xmlDependencies: ['/website/static/src/xml/website.xml'],
     events: _.extend({}, publicWidget.RootWidget.prototype.events || {}, {
         'click [data-action]': '_onActionMenuClick',
         'mouseover > ul > li.dropdown:not(.show)': '_onMenuHovered',
         'click .o_mobile_menu_toggle': '_onMobileMenuToggleClick',
+        'mouseenter #oe_applications:not(:has(.dropdown-item))': '_onOeApplicationsHovered',
+        'show.bs.dropdown #oe_applications:not(:has(.dropdown-item))': '_onOeApplicationsShow',
     }),
     custom_events: _.extend({}, publicWidget.RootWidget.prototype.custom_events || {}, {
         'action_demand': '_onActionDemand',
@@ -110,8 +114,32 @@ var WebsiteNavbar = publicWidget.RootWidget.extend({
                     return self._handleAction(actionName, params, (_i || 0) + 1);
                 });
             }
-            return Promise.all(defs);
+            return Promise.all(defs).then(function (values) {
+                if (values.length === 1) {
+                    return values[0];
+                }
+                return values;
+            });
         });
+    },
+    /**
+     * @private
+     * @returns {Promise}
+     */
+    async _loadAppMenus() {
+        if (!this._loadAppMenusProm) {
+            this._loadAppMenusProm = this._rpc({
+                model: 'ir.ui.menu',
+                method: 'load_menus_root',
+                args: [],
+            });
+            const result = await this._loadAppMenusProm;
+            const menus = core.qweb.render('website.oe_applications_menu', {
+                'menu_data': result,
+            });
+            this.$('#oe_applications .dropdown-menu').html(menus);
+        }
+        return this._loadAppMenusProm;
     },
     /**
      * @private
@@ -124,6 +152,26 @@ var WebsiteNavbar = publicWidget.RootWidget.extend({
     // Handlers
     //--------------------------------------------------------------------------
 
+    /**
+     * Called when the backend applications menu is hovered -> fetch the
+     * available menus and insert it in DOM.
+     *
+     * @private
+     */
+    _onOeApplicationsHovered: function () {
+        this._loadAppMenus();
+    },
+    /**
+     * Called when the backend applications menu is opening -> fetch the
+     * available menus and insert it in DOM. Needed on top of hovering as the
+     * dropdown could be opened via keyboard (or the user could just already
+     * be over the dropdown when the JS is fully loaded).
+     *
+     * @private
+     */
+    _onOeApplicationsShow: function () {
+        this._loadAppMenus();
+    },
     /**
      * Called when an action menu is clicked -> searches for the automatic
      * widget {@see RootWidget} which can handle that action.
